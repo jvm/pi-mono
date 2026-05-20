@@ -1,0 +1,91 @@
+name: Publish package to npm
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Package workspace name to publish
+        required: true
+        type: choice
+        options:
+          - pi-codex-image-gen
+          - pi-skillful
+          - pi-web-kit
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: publish-${{ github.event.release.tag_name || inputs.package }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve package from release tag or input
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            package_name="${{ inputs.package }}"
+          else
+            tag_name="${{ github.event.release.tag_name }}"
+            case "$tag_name" in
+              pi-codex-image-gen@*) package_name="pi-codex-image-gen" ;;
+              pi-skillful@*) package_name="pi-skillful" ;;
+              pi-web-kit@*) package_name="pi-web-kit" ;;
+              *)
+                echo "Release tag must be '<package>@<version>', for example 'pi-web-kit@0.1.5'. Got: $tag_name" >&2
+                exit 1
+                ;;
+            esac
+          fi
+
+          package_dir="packages/$package_name"
+          if [ ! -f "$package_dir/package.json" ]; then
+            echo "Package directory not found: $package_dir" >&2
+            exit 1
+          fi
+
+          version="$(node -p "require('./$package_dir/package.json').version")"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            expected_tag="$package_name@$version"
+            if [ "${{ github.event.release.tag_name }}" != "$expected_tag" ]; then
+              echo "Release tag must match package.json version: $expected_tag" >&2
+              exit 1
+            fi
+          fi
+
+          echo "name=$package_name" >> "$GITHUB_OUTPUT"
+          echo "dir=$package_dir" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check package
+        run: npm run check --workspace ${{ steps.package.outputs.dir }}
+
+      - name: Test package
+        run: npm test --workspace ${{ steps.package.outputs.dir }} --if-present
+
+      - name: Verify package contents
+        run: npm run pack:dry-run --workspace ${{ steps.package.outputs.dir }}
+
+      - name: Publish package
+        run: npm publish --workspace ${{ steps.package.outputs.dir }} --provenance --access public

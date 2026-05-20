@@ -1,0 +1,27 @@
+{
+  "name": "pi-mono",
+  "private": true,
+  "description": "Monorepo for Pi-related projects.",
+  "license": "MIT",
+  "author": "jvm",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "check": "npm run check --workspaces --if-present",
+    "test": "npm test --workspaces --if-present",
+    "pack:dry-run": "npm run pack:dry-run --workspaces --if-present"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jvm/pi-mono.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jvm/pi-mono/issues"
+  },
+  "homepage": "https://github.com/jvm/pi-mono#readme",
+  "engines": {
+    "node": ">=20.6.0"
+  }
+}

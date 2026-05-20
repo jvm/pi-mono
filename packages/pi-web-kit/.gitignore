@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tgz
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*
+!.env.example
+.pi-web-kit.json
+npm-debug.log*

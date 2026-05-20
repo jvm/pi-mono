@@ -1,0 +1,62 @@
+# pi-mono
+
+Monorepo for Pi-related projects: installable Pi packages, skills, prompt templates, extensions, themes, and supporting artifacts.
+
+## Packages
+
+| Package | Description |
+| --- | --- |
+| [pi-codex-image-gen](./packages/pi-codex-image-gen) | Image generation for Pi using the ChatGPT Images 2.0 model. |
+| [pi-skillful](./packages/pi-skillful) | Pi package with skill invocation and visibility improvements. |
+| [pi-web-kit](./packages/pi-web-kit) | Context-efficient web search and fetch tools for Pi. |
+
+## Development
+
+This repo uses npm workspaces. Run commands from the repository root unless package-specific docs say otherwise.
+
+```bash
+npm install
+npm run check
+npm test
+npm run pack:dry-run
+```
+
+Package-specific validation and Pi smoke-test instructions live in each package's README and AGENTS.md.
+
+## Publishing
+
+Each package is published independently to npm from its workspace package root.
+
+```bash
+npm publish --workspace packages/pi-web-kit
+```
+
+Before publishing a package, run its package-level validation and verify the package contents:
+
+```bash
+npm run pack:dry-run --workspace packages/pi-web-kit
+```
+
+The monorepo root is private and is not intended to be published.
+
+GitHub release publishing uses package-specific tags in the form `<package>@<version>`:
+
+```bash
+git tag pi-web-kit@0.1.5
+git push origin main pi-web-kit@0.1.5
+gh release create pi-web-kit@0.1.5 --title "pi-web-kit@0.1.5" --notes "..."
+```
+
+The publish workflow validates that the tag version matches the selected package's `package.json` version, then runs `npm publish --workspace packages/<package> --provenance --access public`.
+
+When working in Pi, the project-local `/release-package` command performs the validation, prints the exact commands it will run, asks for confirmation, then tags, pushes, and creates the GitHub release without invoking the agent:
+
+```text
+/release-package pi-web-kit 0.1.5
+```
+
+## License
+
+Unless otherwise noted, this repository is licensed under the MIT License. See [LICENSE](./LICENSE).
+
+Individual packages may declare different licenses in their own `package.json` and `LICENSE` files. In particular, [pi-codex-image-gen](./packages/pi-codex-image-gen) is distributed under Apache-2.0 because it contains Apache-2.0-licensed material derived from OpenAI Codex.

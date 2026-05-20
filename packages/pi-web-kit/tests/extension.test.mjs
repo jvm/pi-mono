@@ -1,0 +1,151 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import extension, { buildCacheKey, buildFetchSchema, buildSearchSchema, fetchWithCache, pageSlice } from "../extensions/index.ts";
+
+const propNames = (schema) => Object.keys(schema.properties ?? {}).sort();
+
+test("active search schemas are provider-tailored", () => {
+  assert.deepEqual(propNames(buildSearchSchema("exa_mcp")), ["numResults", "queries", "query"]);
+  assert(propNames(buildSearchSchema("firecrawl")).includes("scrape"));
+  assert(propNames(buildSearchSchema("firecrawl")).includes("scrapeOptions"));
+  assert(propNames(buildSearchSchema("firecrawl")).includes("includeDomains"));
+});
+
+test("active fetch schemas are provider-tailored", () => {
+  assert(propNames(buildFetchSchema("tinyfish")).includes("format"));
+  assert(propNames(buildFetchSchema("tinyfish")).includes("links"));
+  assert(propNames(buildFetchSchema("tinyfish")).includes("imageLinks"));
+  assert(propNames(buildFetchSchema("markdown_new")).includes("method"));
+  assert(propNames(buildFetchSchema("markdown_new")).includes("retainImages"));
+  assert.deepEqual(propNames(buildFetchSchema("exa_mcp")), ["limit", "offset", "refresh", "url", "urls"]);
+});
+
+test("CLI fetch provider override controls startup schema", () => {
+  const oldTelemetry = process.env.PI_TELEMETRY;
+  process.env.PI_TELEMETRY = "0";
+  try {
+    const tools = [];
+    const pi = {
+      registerFlag() {},
+      getFlag(name) { return name === "web-provider-fetch" ? "markdown_new" : undefined; },
+      registerTool(tool) { tools.push(tool); },
+    };
+    extension(pi);
+    const fetchTool = tools.find((t) => t.name === "web_fetch");
+    assert(fetchTool);
+    assert(propNames(fetchTool.parameters).includes("method"));
+    assert(propNames(fetchTool.parameters).includes("retainImages"));
+  } finally {
+    if (oldTelemetry === undefined) delete process.env.PI_TELEMETRY;
+    else process.env.PI_TELEMETRY = oldTelemetry;
+  }
+});
+
+test("cache keys include canonical URL and config-derived fetch defaults", () => {
+  const a = buildCacheKey("markdown_new", "https://example.com/page#frag", {}, { markdownNew: { method: "auto", retainImages: false } });
+  const b = buildCacheKey("markdown_new", "https://example.com/page", {}, { markdownNew: { method: "browser", retainImages: false } });
+  assert.notEqual(a, b);
+  assert(a.endsWith("https://example.com/page"));
+  assert.notEqual(buildCacheKey("firecrawl", "https://e.test", {}, {}), buildCacheKey("firecrawl", "https://e.test", { onlyMainContent: false }, {}));
+});
+
+test("range metadata includes previous/next and offset truncation", () => {
+  const result = pageSlice({ provider: "exa_mcp", cacheKey: "k", url: "u", content: "abcdef", format: "markdown", fetchedAt: 1 }, 2, 2, true, false);
+  assert.equal(result.content, "cd");
+  assert.deepEqual(result.range, { offset: 2, limit: 2, returned: 2, total: 6, truncated: true, hasPrevious: true, hasNext: true });
+});
+
+test("search schema rejects unknown properties in principle", () => {
+  assert.equal(buildSearchSchema("exa_mcp").additionalProperties, false);
+  assert.equal(buildFetchSchema("firecrawl").additionalProperties, false);
+  assert.equal(buildFetchSchema("firecrawl").properties.waitFor.minimum, 0);
+});
+
+test("web_search returns grouped multi-query output with bounded details", async () => {
+  const tools = registerWithFlags({});
+  const searchTool = tools.find((t) => t.name === "web_search");
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === "initialize") return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {} }), { status: 200, headers: { "content-type": "application/json", "mcp-session-id": "s" } });
+    if (body.method === "notifications/initialized") return new Response("", { status: 202 });
+    if (body.method === "tools/call") return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { structuredContent: { results: [{ title: body.params.arguments.query, url: `https://example.com/${body.params.arguments.query}` }] } } }), { status: 200, headers: { "content-type": "application/json" } });
+    throw new Error(`unexpected ${body.method}`);
+  };
+  try {
+    const out = await searchTool.execute("id", { queries: ["one", "two"] }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")) });
+    const parsed = JSON.parse(out.content[0].text);
+    assert.deepEqual(parsed.queries.map((q) => q.query), ["one", "two"]);
+    assert.equal(out.details.queries[0].results[0].snippet, undefined);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("web_search rejects query and numResults limits", async () => {
+  const searchTool = registerWithFlags({}).find((t) => t.name === "web_search");
+  const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
+  await assert.rejects(() => searchTool.execute("id", { queries: ["a", "b", "c", "d", "e", "f"] }, undefined, undefined, { cwd }), /Too many queries/);
+  await assert.rejects(() => searchTool.execute("id", { query: "a", numResults: 21 }, undefined, undefined, { cwd }), /numResults/);
+});
+
+test("web_fetch rejects offset with multiple URLs", async () => {
+  const fetchTool = registerWithFlags({}).find((t) => t.name === "web_fetch");
+  await assert.rejects(() => fetchTool.execute("id", { urls: ["https://a.test", "https://b.test"], offset: 1 }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")) }), /offset range reads require a single url/);
+});
+
+test("web_fetch allows limit with multiple URLs", async () => {
+  const fetchTool = registerWithFlags({ "web-provider-fetch": "markdown_new" }).find((t) => t.name === "web_fetch");
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    return new Response(`content for ${body.url}`, { status: 200, headers: { "content-type": "text/markdown" } });
+  };
+  try {
+    const out = await fetchTool.execute("id", { urls: ["https://limit-a.test", "https://limit-b.test"], limit: 7 }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")) });
+    const parsed = JSON.parse(out.content[0].text);
+    assert.equal(parsed.results.length, 2);
+    assert.deepEqual(parsed.results.map((r) => r.content), ["content", "content"]);
+    assert.deepEqual(parsed.results.map((r) => r.range.limit), [7, 7]);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("web_fetch rejects invalid range params", async () => {
+  const fetchTool = registerWithFlags({ "web-provider-fetch": "markdown_new" }).find((t) => t.name === "web_fetch");
+  await assert.rejects(() => fetchTool.execute("id", { url: "https://a.test", offset: 1.5 }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")) }), /offset/);
+});
+
+test("single-URL cache hit avoids provider refetch", async () => {
+  const config = { provider_search: "exa_mcp", provider_fetch: "markdown_new", apiKeys: {}, markdownNew: { method: "auto", retainImages: false } };
+  let calls = 0;
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return new Response(`content-${calls}`, { status: 200, headers: { "content-type": "text/markdown" } });
+  };
+  try {
+    const first = await fetchWithCache("markdown_new", { url: "https://cache.test" }, ["https://cache.test"], undefined, config);
+    const second = await fetchWithCache("markdown_new", { url: "https://cache.test" }, ["https://cache.test"], undefined, config);
+    assert.equal(calls, 1);
+    assert.equal(first.results[0].cached, false);
+    assert.equal(second.results[0].cached, true);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+function registerWithFlags(flags) {
+  const tools = [];
+  const pi = {
+    registerFlag() {},
+    getFlag(name) { return flags[name]; },
+    registerTool(tool) { tools.push(tool); },
+  };
+  extension(pi);
+  return tools;
+}

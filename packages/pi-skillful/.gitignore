@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.tgz
+PLAN.md
+.DS_Store
+.env
+.env.*
+!.env.example
