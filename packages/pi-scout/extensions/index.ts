@@ -23,12 +23,12 @@ export default function piScout(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "scout_register_repo",
-    label: "Scout Register Repo",
+    name: "scout_add",
+    label: "Scout Add",
     description: "Clone a Git repository into Pi Scout's local temporary cache and register it as a reference codebase.",
     promptSnippet: "Register reference repositories for local codebase exploration.",
     promptGuidelines: [
-      "Use scout_register_repo when the user asks to register or scout an external Git repository for local codebase exploration.",
+      "Use scout_add when the user asks to register or scout an external Git repository for local codebase exploration.",
     ],
     parameters: RegisterRepoParams,
     async execute(_toolCallId, rawParams, signal) {
@@ -42,12 +42,12 @@ export default function piScout(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "scout_list_repos",
-    label: "Scout List Repos",
+    name: "scout_ls",
+    label: "Scout List",
     description: "List Pi Scout registered reference repositories that still exist in the local temporary cache.",
     promptSnippet: "List registered Pi Scout reference repositories.",
     promptGuidelines: [
-      "Use scout_list_repos before exploring registered reference repositories if you need their current local paths.",
+      "Use scout_ls before exploring registered reference repositories if you need their current local paths.",
     ],
     parameters: Type.Object({}),
     async execute() {
@@ -60,12 +60,12 @@ export default function piScout(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "scout_remove_repo",
-    label: "Scout Remove Repo",
+    name: "scout_rm",
+    label: "Scout Remove",
     description: "Remove a repository from Pi Scout records. This does not delete the cloned directory.",
     promptSnippet: "Remove registered Pi Scout reference repositories from records.",
     promptGuidelines: [
-      "Use scout_remove_repo only when the user asks to unregister or remove a Pi Scout repository record.",
+      "Use scout_rm only when the user asks to unregister or remove a Pi Scout repository record.",
     ],
     parameters: RemoveRepoParams,
     async execute(_toolCallId, rawParams) {
