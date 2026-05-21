@@ -14,11 +14,49 @@ const RemoveRepoParams = Type.Object({
   deleteClone: Type.Optional(Type.Boolean({ description: "Delete temp clone too." })),
 });
 
-export default function piScout(pi: ExtensionAPI) {
+export default async function piScout(pi: ExtensionAPI) {
+  let scoutRmRegistered = false;
+
+  function setToolActive(name: string, active: boolean): void {
+    const activeTools = pi.getActiveTools();
+    const hasTool = activeTools.includes(name);
+    if (active && !hasTool) pi.setActiveTools([...activeTools, name]);
+    if (!active && hasTool) pi.setActiveTools(activeTools.filter((tool) => tool !== name));
+  }
+
+  async function syncScoutRmTool(): Promise<void> {
+    const hasRepos = (await loadPrunedState()).repos.length > 0;
+    if (hasRepos && !scoutRmRegistered) {
+      pi.registerTool({
+        name: "scout_rm",
+        label: "Scout Remove",
+        description: "Remove a Scout repo record.",
+        promptSnippet: "Remove Scout repo records.",
+        promptGuidelines: [
+          "Use scout_rm only when asked to unregister a Scout repo.",
+        ],
+        parameters: RemoveRepoParams,
+        async execute(_toolCallId, rawParams) {
+          const params = rawParams as { idOrName: string; deleteClone?: boolean };
+          const removed = await removeRepo(params.idOrName, { deleteClone: params.deleteClone });
+          await syncScoutRmTool();
+          const text = removed
+            ? `Removed Pi Scout repository from records:\n${formatRepo(removed)}\n\nLocal clone ${params.deleteClone ? "deleted" : "was not deleted"}.`
+            : `No Pi Scout repository matched "${params.idOrName}".`;
+          return { content: [{ type: "text", text }], details: { removed, deletedClone: Boolean(params.deleteClone && removed) } };
+        },
+      });
+      scoutRmRegistered = true;
+    }
+    if (scoutRmRegistered) setToolActive("scout_rm", hasRepos);
+  }
+
+  await syncScoutRmTool();
+
   pi.registerCommand("scout", {
     description: "Manage Scout reference repos",
     handler: async (args, ctx) => {
-      await handleScoutCommand(pi, args, ctx);
+      await handleScoutCommand(pi, args, ctx, syncScoutRmTool);
     },
   });
 
@@ -34,6 +72,7 @@ export default function piScout(pi: ExtensionAPI) {
     async execute(_toolCallId, rawParams, signal) {
       const params = rawParams as { source: string; name?: string; branch?: string; depth?: number };
       const repo = await registerRepo(pi, { ...params, signal });
+      await syncScoutRmTool();
       return {
         content: [{ type: "text", text: `Registered Pi Scout repository:\n${formatRepo(repo)}` }],
         details: { repo },
@@ -41,44 +80,9 @@ export default function piScout(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerTool({
-    name: "scout_ls",
-    label: "Scout List",
-    description: "List registered Scout repos.",
-    promptSnippet: "List Scout repo paths.",
-    promptGuidelines: [
-      "Use scout_ls to get registered repo paths.",
-    ],
-    parameters: Type.Object({}),
-    async execute() {
-      const state = await loadPrunedState();
-      const text = state.repos.length === 0
-        ? "No Pi Scout repositories are currently registered."
-        : `Registered Pi Scout repositories:\n\n${state.repos.map(formatRepo).join("\n\n")}`;
-      return { content: [{ type: "text", text }], details: { repos: state.repos } };
-    },
-  });
-
-  pi.registerTool({
-    name: "scout_rm",
-    label: "Scout Remove",
-    description: "Remove a Scout repo record.",
-    promptSnippet: "Remove Scout repo records.",
-    promptGuidelines: [
-      "Use scout_rm only when asked to unregister a Scout repo.",
-    ],
-    parameters: RemoveRepoParams,
-    async execute(_toolCallId, rawParams) {
-      const params = rawParams as { idOrName: string; deleteClone?: boolean };
-      const removed = await removeRepo(params.idOrName, { deleteClone: params.deleteClone });
-      const text = removed
-        ? `Removed Pi Scout repository from records:\n${formatRepo(removed)}\n\nLocal clone ${params.deleteClone ? "deleted" : "was not deleted"}.`
-        : `No Pi Scout repository matched "${params.idOrName}".`;
-      return { content: [{ type: "text", text }], details: { removed, deletedClone: Boolean(params.deleteClone && removed) } };
-    },
-  });
 
   pi.on("before_agent_start", async (event) => {
+    await syncScoutRmTool();
     const state = await loadPrunedState();
     const scoutPrompt = buildScoutPrompt(state.repos);
     if (!scoutPrompt) return;
@@ -86,10 +90,16 @@ export default function piScout(pi: ExtensionAPI) {
   });
 }
 
-async function handleScoutCommand(pi: ExtensionAPI, args: string, ctx: ExtensionCommandContext): Promise<void> {
+async function handleScoutCommand(
+  pi: ExtensionAPI,
+  args: string,
+  ctx: ExtensionCommandContext,
+  syncScoutRmTool: () => Promise<void>,
+): Promise<void> {
   const trimmed = args.trim();
   if (trimmed) {
     const repo = await registerRepo(pi, { source: trimmed });
+    await syncScoutRmTool();
     ctx.ui.notify(`Pi Scout registered ${repo.name}`, "info");
     return;
   }
@@ -105,6 +115,7 @@ async function handleScoutCommand(pi: ExtensionAPI, args: string, ctx: Extension
     if (!source?.trim()) return;
     const name = await ctx.ui.input("Optional friendly name", "");
     const repo = await registerRepo(pi, { source, name: name?.trim() || undefined });
+    await syncScoutRmTool();
     ctx.ui.notify(`Pi Scout registered ${repo.name}`, "info");
     return;
   }
@@ -131,6 +142,7 @@ async function handleScoutCommand(pi: ExtensionAPI, args: string, ctx: Extension
     if (!id) return;
     const deleteClone = await ctx.ui.confirm("Delete local clone?", "Also delete the cloned temporary directory?");
     const removed = await removeRepo(id, { deleteClone });
+    await syncScoutRmTool();
     if (removed) ctx.ui.notify(`Removed ${removed.name}${deleteClone ? " and deleted its clone" : " from Pi Scout records"}`, "info");
   }
 }

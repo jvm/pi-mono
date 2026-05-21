@@ -9,7 +9,7 @@ A source-distributed [Pi](https://pi.dev) package for registering local referenc
 
 - `/scout` slash command with a simple TUI flow for registering, listing, and removing reference repositories.
 - `scout_add` tool for cloning a Git repository into a local temporary cache.
-- `scout_ls` and `scout_rm` tools for agent-driven management.
+- `scout_rm` tool for agent-driven removal once repositories exist.
 - Per-turn system prompt guidance that tells the agent which registered codebases are available and where their local clone paths are.
 - Automatic pruning: if the OS cleans a temporary clone, Pi Scout removes that stale entry before adding prompt context.
 
@@ -71,8 +71,7 @@ After a repository is registered, the agent sees its local path in the system pr
 | Tool | Purpose |
 |---|---|
 | `scout_add` | Clone and register a Git repository as a local reference codebase. Accepts Git URLs, local paths, and GitHub `owner/repo` shorthand. |
-| `scout_ls` | List registered repositories and prune missing temp clones. |
-| `scout_rm` | Remove a repository from Pi Scout records, optionally deleting the temporary clone. |
+| `scout_rm` | Remove a repository from Pi Scout records, optionally deleting the temporary clone. Available to the model only while repos are registered. |
 
 ## Notes
 
