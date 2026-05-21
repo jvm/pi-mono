@@ -11,7 +11,9 @@
   "scripts": {
     "check": "npm run check --workspaces --if-present",
     "test": "npm test --workspaces --if-present",
-    "pack:dry-run": "npm run pack:dry-run --workspaces --if-present"
+    "pack:dry-run": "npm run pack:dry-run --workspaces --if-present",
+    "security:audit": "npm audit --omit=dev",
+    "validate": "npm run check && npm test && npm run security:audit && npm run pack:dry-run"
   },
   "repository": {
     "type": "git",

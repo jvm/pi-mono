@@ -19,9 +19,22 @@ npm install
 npm run check
 npm test
 npm run pack:dry-run
+npm run validate
 ```
 
 Package-specific validation and Pi smoke-test instructions live in each package's README and AGENTS.md.
+
+## Security
+
+Security policy and vulnerability reporting instructions are in [SECURITY.md](./SECURITY.md). GitHub security automation includes TruffleHog, Semgrep, CodeQL, zizmor, OpenSSF Scorecard, pinned action SHAs, Dependabot, and production dependency auditing.
+
+For the full local validation loop, run:
+
+```bash
+npm run validate
+```
+
+Never commit API keys, tokens, auth headers, local Pi settings, provider configuration containing secrets, or machine-specific paths.
 
 ## Publishing
 

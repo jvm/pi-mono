@@ -38,6 +38,7 @@ npm install
 npm run check
 npm test
 npm run pack:dry-run
+npm run validate
 ```
 
 From an individual package, follow that package's `AGENTS.md` and README. Package-specific instructions override root instructions for that package.
@@ -56,6 +57,16 @@ GitHub release publishing is monorepo-aware. Use release tags in the form `<pack
 
 When working in Pi, prefer the project-local `/release-package <package-name> <version>` command. It validates the release, prints the exact commands it will run, asks for confirmation, then tags, pushes, and creates the GitHub release without invoking the agent.
 
+## Security
+
+Do not commit generated build artifacts, `node_modules/`, local Pi settings, API keys, tokens, auth headers, provider configuration containing secrets, or machine-specific config. Keep changes scoped to the package or shared file relevant to the task.
+
+Security hardening is enforced in GitHub Actions with TruffleHog secret scanning, Semgrep SAST, CodeQL, zizmor workflow auditing, OpenSSF Scorecard, pinned action SHAs, Dependabot, and `npm audit --omit=dev`. Before merging security-sensitive changes, run the full local validation when possible:
+
+```bash
+npm run validate
+```
+
 ## Git
 
-Do not commit generated build artifacts, `node_modules/`, local Pi settings, API keys, tokens, or machine-specific config. Keep changes scoped to the package or shared file relevant to the task.
+Keep commits focused and avoid unrelated file churn.
