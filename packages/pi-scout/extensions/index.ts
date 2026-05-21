@@ -4,9 +4,6 @@ import { buildScoutPrompt, formatRepo, loadPrunedState, registerRepo, removeRepo
 
 const RegisterRepoParams = Type.Object({
   source: Type.String({ description: "Git URL/path or owner/repo." }),
-  name: Type.Optional(Type.String({ description: "Short display name." })),
-  branch: Type.Optional(Type.String({ description: "Branch, tag, or ref." })),
-  depth: Type.Optional(Type.Integer({ minimum: 1, description: "Shallow clone depth." })),
 });
 
 const RemoveRepoParams = Type.Object({
@@ -70,8 +67,8 @@ export default async function piScout(pi: ExtensionAPI) {
     ],
     parameters: RegisterRepoParams,
     async execute(_toolCallId, rawParams, signal) {
-      const params = rawParams as { source: string; name?: string; branch?: string; depth?: number };
-      const repo = await registerRepo(pi, { ...params, signal });
+      const params = rawParams as { source: string };
+      const repo = await registerRepo(pi, { source: params.source, signal });
       await syncScoutRmTool();
       return {
         content: [{ type: "text", text: `Registered Pi Scout repository:\n${formatRepo(repo)}` }],

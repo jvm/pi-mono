@@ -70,7 +70,7 @@ After a repository is registered, the agent sees its local path in the system pr
 
 | Tool | Purpose |
 |---|---|
-| `scout_add` | Clone and register a Git repository as a local reference codebase. Accepts Git URLs, local paths, and GitHub `owner/repo` shorthand. |
+| `scout_add` | Clone and register a Git repository as a local reference codebase. Takes only `source`: Git URL, local path, or GitHub `owner/repo` shorthand. |
 | `scout_rm` | Remove a repository from Pi Scout records, optionally deleting the temporary clone. Available to the model only while repos are registered. |
 
 ## Notes
