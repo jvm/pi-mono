@@ -20,7 +20,8 @@ pi -e /path/to/pi-mono/packages/pi-scout --print "list your tools"
 
 `pi-scout` is a source-distributed Pi package. Pi loads TypeScript directly; there is no `dist/`.
 
-- `extensions/index.ts`: Pi extension entry point.
+- `index.ts`: package-level Pi extension entry point for clean startup display names.
+- `extensions/index.ts`: extension wiring.
 - `src/index.ts`: public package surface.
 
 The package is currently scaffolded and intentionally behavior-light until its product scope is defined.
@@ -28,5 +29,5 @@ The package is currently scaffolded and intentionally behavior-light until its p
 ## Coding conventions
 
 - ESM TypeScript, 2-space indentation, explicit `.js` import specifiers for local TypeScript modules.
-- New reusable logic belongs in `src/`; Pi wiring belongs in `extensions/index.ts`.
+- New reusable logic belongs in `src/`; Pi wiring belongs in `extensions/index.ts`; root `index.ts` should stay a thin re-export.
 - When adding tools or commands, update README usage docs and add validation/tests where appropriate.

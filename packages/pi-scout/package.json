@@ -27,10 +27,11 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/index.ts"
+      "./index.ts"
     ]
   },
   "files": [
+    "index.ts",
     "extensions",
     "src",
     "README.md",

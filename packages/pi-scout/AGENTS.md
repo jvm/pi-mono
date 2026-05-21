@@ -4,7 +4,8 @@
 
 `pi-scout` is a source-distributed TypeScript Pi package. Pi loads TypeScript files directly, so there is no `dist/` build output.
 
-- `extensions/index.ts` is the Pi extension entry point and should stay focused on extension wiring.
+- `index.ts` is the package-level Pi extension entry point for clean startup display names.
+- `extensions/index.ts` contains extension wiring.
 - `src/index.ts` exports the public package surface.
 - Add reusable implementation details under `src/` as the package scope is defined.
 - User-facing docs are `README.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `SECURITY.md`, and `CODE_OF_CONDUCT.md`.
@@ -28,7 +29,7 @@ pi -e /path/to/pi-mono/packages/pi-scout --print "list your tools"
 
 Follow `.editorconfig`: UTF-8, LF line endings, final newline, two-space indentation, and trimmed trailing whitespace except in Markdown. Use ESM TypeScript with explicit `.js` import specifiers for local TypeScript modules. Use `camelCase` for functions and variables, `PascalCase` for types/interfaces, and kebab-case for feature files.
 
-Prefer Pi's documented extension APIs over private internals. Move reusable logic into `src/`; keep Pi registration in `extensions/index.ts`.
+Prefer Pi's documented extension APIs over private internals. Move reusable logic into `src/`; keep Pi registration in `extensions/index.ts`, with root `index.ts` only re-exporting the extension.
 
 ## Testing Guidelines
 

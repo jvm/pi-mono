@@ -18,4 +18,5 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - `scout_add` tool schema minimized to a single `source` parameter.
 - Repository registration now defaults to shallow clones with depth `1`.
 - Unix-like systems now use `/tmp/pi-scout` for shorter registered paths.
+- Package-level extension entry point so Pi displays the extension as `pi-scout` instead of `extensions`/`extension`.
 - Optional temporary clone deletion when removing repository records.
