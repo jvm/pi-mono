@@ -11,7 +11,7 @@ const RemoveRepoParams = Type.Object({
   deleteClone: Type.Optional(Type.Boolean({ description: "Delete temp clone too." })),
 });
 
-export default async function piScout(pi: ExtensionAPI) {
+export default function piScout(pi: ExtensionAPI) {
   let scoutRmRegistered = false;
 
   function setToolActive(name: string, active: boolean): void {
@@ -48,7 +48,9 @@ export default async function piScout(pi: ExtensionAPI) {
     if (scoutRmRegistered) setToolActive("scout_rm", hasRepos);
   }
 
-  await syncScoutRmTool();
+  pi.on("session_start", async () => {
+    await syncScoutRmTool();
+  });
 
   pi.registerCommand("scout", {
     description: "Manage Scout reference repos",
