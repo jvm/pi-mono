@@ -1,0 +1,64 @@
+{
+  "name": "pi-scout",
+  "version": "0.1.0",
+  "description": "Register local reference codebases for Pi agent exploration.",
+  "type": "module",
+  "license": "MIT",
+  "author": "jvm",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jvm/pi-mono.git",
+    "directory": "packages/pi-scout"
+  },
+  "bugs": {
+    "url": "https://github.com/jvm/pi-mono/issues"
+  },
+  "homepage": "https://github.com/jvm/pi-mono/tree/main/packages/pi-scout#readme",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "scout",
+    "codebase-exploration",
+    "reference-repos"
+  ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ]
+  },
+  "files": [
+    "extensions",
+    "src",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "pack:dry-run": "npm pack --dry-run"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "@types/node": "^25.6.2",
+    "typebox": "^1.1.33",
+    "typescript": "^6.0.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  }
+}
