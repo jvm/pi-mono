@@ -11,6 +11,7 @@ on:
         type: choice
         options:
           - pi-codex-image-gen
+          - pi-scout
           - pi-skillful
           - pi-web-kit
 
@@ -45,6 +46,7 @@ jobs:
             tag_name="${{ github.event.release.tag_name }}"
             case "$tag_name" in
               pi-codex-image-gen@*) package_name="pi-codex-image-gen" ;;
+              pi-scout@*) package_name="pi-scout" ;;
               pi-skillful@*) package_name="pi-skillful" ;;
               pi-web-kit@*) package_name="pi-web-kit" ;;
               *)

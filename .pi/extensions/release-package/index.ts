@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const PACKAGES = ["pi-codex-image-gen", "pi-skillful", "pi-web-kit"] as const;
+const PACKAGES = ["pi-codex-image-gen", "pi-scout", "pi-skillful", "pi-web-kit"] as const;
 type PackageName = (typeof PACKAGES)[number];
 
 interface CommandResult {
