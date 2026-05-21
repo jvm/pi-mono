@@ -16,4 +16,5 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - Compact system prompt injection for registered local repository paths with stale-temp pruning.
 - GitHub `owner/repo` shorthand for repository registration.
 - `scout_add` tool schema minimized to a single `source` parameter.
+- Repository registration now defaults to shallow clones with depth `1`.
 - Optional temporary clone deletion when removing repository records.

@@ -25,7 +25,8 @@ export async function registerRepo(pi: ExtensionAPI, options: RegisterRepoOption
 
   const args = ["clone"];
   if (options.branch?.trim()) args.push("--branch", options.branch.trim());
-  if (options.depth && Number.isInteger(options.depth) && options.depth > 0) args.push("--depth", String(options.depth));
+  const depth = options.depth && Number.isInteger(options.depth) && options.depth > 0 ? options.depth : 1;
+  args.push("--depth", String(depth));
   args.push(source, destination);
 
   const result = await pi.exec("git", args, { signal: options.signal, timeout: 120_000 });
