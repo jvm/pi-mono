@@ -14,3 +14,5 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - `/scout` command for registering, listing, and removing reference repositories.
 - `scout_register_repo`, `scout_list_repos`, and `scout_remove_repo` tools.
 - System prompt injection for registered local repository paths with stale-temp pruning.
+- GitHub `owner/repo` shorthand for repository registration.
+- Optional temporary clone deletion when removing repository records.

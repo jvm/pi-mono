@@ -51,10 +51,11 @@ Open the Pi Scout menu:
 /scout
 ```
 
-Register a repository directly:
+Register a repository directly with a Git URL/path or GitHub shorthand:
 
 ```text
 /scout https://github.com/owner/repo.git
+/scout owner/repo
 ```
 
 Ask the agent to register one:
@@ -69,15 +70,16 @@ After a repository is registered, the agent sees its local path in the system pr
 
 | Tool | Purpose |
 |---|---|
-| `scout_register_repo` | Clone and register a Git repository as a local reference codebase. |
+| `scout_register_repo` | Clone and register a Git repository as a local reference codebase. Accepts Git URLs, local paths, and GitHub `owner/repo` shorthand. |
 | `scout_list_repos` | List registered repositories and prune missing temp clones. |
-| `scout_remove_repo` | Remove a repository from Pi Scout records without deleting the clone. |
+| `scout_remove_repo` | Remove a repository from Pi Scout records, optionally deleting the temporary clone. |
 
 ## Notes
 
 - Pi Scout uses local file access for exploration. It does not provide web search or remote content-fetching tools.
 - Registering a Git URL still uses `git clone`, so Git may contact the configured remote.
 - Registered repositories are intended as read-only references unless the user explicitly asks otherwise.
+- The system prompt includes only registered repo names and local paths, not origin URLs or branch metadata.
 
 ## Development
 

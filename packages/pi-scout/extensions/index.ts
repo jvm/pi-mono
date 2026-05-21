@@ -3,7 +3,7 @@ import { Type } from "typebox";
 import { buildScoutPrompt, formatRepo, loadPrunedState, registerRepo, removeRepo } from "../src/index.js";
 
 const RegisterRepoParams = Type.Object({
-  source: Type.String({ description: "Git repository URL or local path to clone into Pi Scout's temporary cache." }),
+  source: Type.String({ description: "Git repository URL, local path, or GitHub shorthand like owner/repo to clone into Pi Scout's temporary cache." }),
   name: Type.Optional(Type.String({ description: "Optional friendly name for the registered repository." })),
   branch: Type.Optional(Type.String({ description: "Optional branch, tag, or ref to clone." })),
   depth: Type.Optional(Type.Integer({ minimum: 1, description: "Optional shallow clone depth." })),
@@ -11,6 +11,7 @@ const RegisterRepoParams = Type.Object({
 
 const RemoveRepoParams = Type.Object({
   idOrName: Type.String({ description: "Registered repository id or name to remove from Pi Scout records." }),
+  deleteClone: Type.Optional(Type.Boolean({ description: "Also delete the cloned temporary directory." })),
 });
 
 export default function piScout(pi: ExtensionAPI) {
@@ -68,12 +69,12 @@ export default function piScout(pi: ExtensionAPI) {
     ],
     parameters: RemoveRepoParams,
     async execute(_toolCallId, rawParams) {
-      const params = rawParams as { idOrName: string };
-      const removed = await removeRepo(params.idOrName);
+      const params = rawParams as { idOrName: string; deleteClone?: boolean };
+      const removed = await removeRepo(params.idOrName, { deleteClone: params.deleteClone });
       const text = removed
-        ? `Removed Pi Scout repository from records:\n${formatRepo(removed)}\n\nThe local clone was not deleted.`
+        ? `Removed Pi Scout repository from records:\n${formatRepo(removed)}\n\nLocal clone ${params.deleteClone ? "deleted" : "was not deleted"}.`
         : `No Pi Scout repository matched "${params.idOrName}".`;
-      return { content: [{ type: "text", text }], details: { removed } };
+      return { content: [{ type: "text", text }], details: { removed, deletedClone: Boolean(params.deleteClone && removed) } };
     },
   });
 
@@ -128,7 +129,8 @@ async function handleScoutCommand(pi: ExtensionAPI, args: string, ctx: Extension
     if (!selected) return;
     const id = selected.match(/\(([^)]+)\)$/)?.[1];
     if (!id) return;
-    const removed = await removeRepo(id);
-    if (removed) ctx.ui.notify(`Removed ${removed.name} from Pi Scout records`, "info");
+    const deleteClone = await ctx.ui.confirm("Delete local clone?", "Also delete the cloned temporary directory?");
+    const removed = await removeRepo(id, { deleteClone });
+    if (removed) ctx.ui.notify(`Removed ${removed.name}${deleteClone ? " and deleted its clone" : " from Pi Scout records"}`, "info");
   }
 }

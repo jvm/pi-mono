@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -14,7 +14,7 @@ export interface RegisterRepoOptions {
 }
 
 export async function registerRepo(pi: ExtensionAPI, options: RegisterRepoOptions): Promise<ScoutRepo> {
-  const source = options.source.trim();
+  const source = normalizeSource(options.source.trim());
   if (!source) throw new Error("Repository source is required.");
 
   const id = randomUUID().slice(0, 12);
@@ -51,7 +51,7 @@ export async function registerRepo(pi: ExtensionAPI, options: RegisterRepoOption
   return repo;
 }
 
-export async function removeRepo(idOrName: string): Promise<ScoutRepo | undefined> {
+export async function removeRepo(idOrName: string, options: { deleteClone?: boolean } = {}): Promise<ScoutRepo | undefined> {
   const needle = idOrName.trim();
   if (!needle) return undefined;
 
@@ -61,6 +61,11 @@ export async function removeRepo(idOrName: string): Promise<ScoutRepo | undefine
 
   const [removed] = state.repos.splice(index, 1);
   await saveState(state);
+
+  if (options.deleteClone && removed) {
+    await rm(removed.path, { recursive: true, force: true });
+  }
+
   return removed;
 }
 
@@ -70,9 +75,24 @@ export function formatRepo(repo: ScoutRepo): string {
 }
 
 function inferName(source: string): string {
+  const shorthand = parseGitHubShorthand(source);
+  if (shorthand) return shorthand.repo;
+
   const withoutTrailingSlash = source.replace(/[\\/]+$/, "");
   const last = basename(withoutTrailingSlash).replace(/\.git$/i, "");
   return last || "repo";
+}
+
+function normalizeSource(source: string): string {
+  const shorthand = parseGitHubShorthand(source);
+  if (!shorthand) return source;
+  return `https://github.com/${shorthand.owner}/${shorthand.repo}.git`;
+}
+
+function parseGitHubShorthand(source: string): { owner: string; repo: string } | undefined {
+  const match = source.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/);
+  if (!match) return undefined;
+  return { owner: match[1]!, repo: match[2]!.replace(/\.git$/i, "") };
 }
 
 function sanitizeName(name: string): string {
