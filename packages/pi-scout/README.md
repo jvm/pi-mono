@@ -13,7 +13,7 @@ A source-distributed [Pi](https://pi.dev) package for registering local referenc
 - Compact per-turn system prompt guidance with registered repo names and local clone paths.
 - Automatic pruning: if the OS cleans a temporary clone, Pi Scout removes that stale entry before adding prompt context.
 
-Registered repositories are cloned under the OS temp directory, currently `<tmp>/pi-scout/<name>-<id>`. Pi Scout uses shallow clones with depth `1` by default because it is for code exploration, not history exploration. Pi Scout keeps records in Pi's agent directory and reuses them across sessions while the cloned directories still exist.
+Registered repositories are cloned under `/tmp/pi-scout/<name>-<id>` on Unix-like systems, or the OS temp directory on Windows. Set `PI_SCOUT_TMPDIR` to override the parent temp directory. Pi Scout uses shallow clones with depth `1` by default because it is for code exploration, not history exploration. Pi Scout keeps records in Pi's agent directory and reuses them across sessions while the cloned directories still exist.
 
 ## Installation
 

@@ -1,6 +1,6 @@
 import { mkdir, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { tmpdir } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadPrunedState, saveState, type ScoutRepo } from "./state.js";
@@ -19,7 +19,7 @@ export async function registerRepo(pi: ExtensionAPI, options: RegisterRepoOption
 
   const id = randomUUID().slice(0, 12);
   const name = sanitizeName(options.name?.trim() || inferName(source) || `repo-${id}`);
-  const root = join(tmpdir(), "pi-scout");
+  const root = getScoutCloneRoot();
   const destination = join(root, `${name}-${id}`);
   await mkdir(root, { recursive: true });
 
@@ -73,6 +73,12 @@ export async function removeRepo(idOrName: string, options: { deleteClone?: bool
 export function formatRepo(repo: ScoutRepo): string {
   const branch = repo.branch ? ` (${repo.branch})` : "";
   return `${repo.name}${branch}\n  id: ${repo.id}\n  source: ${repo.source}\n  path: ${repo.path}`;
+}
+
+function getScoutCloneRoot(): string {
+  if (process.env.PI_SCOUT_TMPDIR) return join(process.env.PI_SCOUT_TMPDIR, "pi-scout");
+  if (platform() !== "win32") return "/tmp/pi-scout";
+  return join(tmpdir(), "pi-scout");
 }
 
 function inferName(source: string): string {
