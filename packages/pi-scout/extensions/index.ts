@@ -3,20 +3,20 @@ import { Type } from "typebox";
 import { buildScoutPrompt, formatRepo, loadPrunedState, registerRepo, removeRepo } from "../src/index.js";
 
 const RegisterRepoParams = Type.Object({
-  source: Type.String({ description: "Git repository URL, local path, or GitHub shorthand like owner/repo to clone into Pi Scout's temporary cache." }),
-  name: Type.Optional(Type.String({ description: "Optional friendly name for the registered repository." })),
-  branch: Type.Optional(Type.String({ description: "Optional branch, tag, or ref to clone." })),
-  depth: Type.Optional(Type.Integer({ minimum: 1, description: "Optional shallow clone depth." })),
+  source: Type.String({ description: "Git URL/path or owner/repo." }),
+  name: Type.Optional(Type.String({ description: "Short display name." })),
+  branch: Type.Optional(Type.String({ description: "Branch, tag, or ref." })),
+  depth: Type.Optional(Type.Integer({ minimum: 1, description: "Shallow clone depth." })),
 });
 
 const RemoveRepoParams = Type.Object({
-  idOrName: Type.String({ description: "Registered repository id or name to remove from Pi Scout records." }),
-  deleteClone: Type.Optional(Type.Boolean({ description: "Also delete the cloned temporary directory." })),
+  idOrName: Type.String({ description: "Repo id or name." }),
+  deleteClone: Type.Optional(Type.Boolean({ description: "Delete temp clone too." })),
 });
 
 export default function piScout(pi: ExtensionAPI) {
   pi.registerCommand("scout", {
-    description: "Register and manage local reference repositories for codebase exploration",
+    description: "Manage Scout reference repos",
     handler: async (args, ctx) => {
       await handleScoutCommand(pi, args, ctx);
     },
@@ -25,10 +25,10 @@ export default function piScout(pi: ExtensionAPI) {
   pi.registerTool({
     name: "scout_add",
     label: "Scout Add",
-    description: "Clone a Git repository into Pi Scout's local temporary cache and register it as a reference codebase.",
-    promptSnippet: "Register reference repositories for local codebase exploration.",
+    description: "Clone/register a reference repo.",
+    promptSnippet: "Add Scout reference repos.",
     promptGuidelines: [
-      "Use scout_add when the user asks to register or scout an external Git repository for local codebase exploration.",
+      "Use scout_add to register a Git repo for code exploration.",
     ],
     parameters: RegisterRepoParams,
     async execute(_toolCallId, rawParams, signal) {
@@ -44,10 +44,10 @@ export default function piScout(pi: ExtensionAPI) {
   pi.registerTool({
     name: "scout_ls",
     label: "Scout List",
-    description: "List Pi Scout registered reference repositories that still exist in the local temporary cache.",
-    promptSnippet: "List registered Pi Scout reference repositories.",
+    description: "List registered Scout repos.",
+    promptSnippet: "List Scout repo paths.",
     promptGuidelines: [
-      "Use scout_ls before exploring registered reference repositories if you need their current local paths.",
+      "Use scout_ls to get registered repo paths.",
     ],
     parameters: Type.Object({}),
     async execute() {
@@ -62,10 +62,10 @@ export default function piScout(pi: ExtensionAPI) {
   pi.registerTool({
     name: "scout_rm",
     label: "Scout Remove",
-    description: "Remove a repository from Pi Scout records. This does not delete the cloned directory.",
-    promptSnippet: "Remove registered Pi Scout reference repositories from records.",
+    description: "Remove a Scout repo record.",
+    promptSnippet: "Remove Scout repo records.",
     promptGuidelines: [
-      "Use scout_rm only when the user asks to unregister or remove a Pi Scout repository record.",
+      "Use scout_rm only when asked to unregister a Scout repo.",
     ],
     parameters: RemoveRepoParams,
     async execute(_toolCallId, rawParams) {
