@@ -43,6 +43,14 @@ pi -e /path/to/pi-mono/packages/pi-scout --print "list your tools"
 
 This is an npm-compatible TypeScript Pi package. There is no runtime build step.
 
+## Configuration
+
+| Variable | Purpose |
+|---|---|
+| `PI_SCOUT_TMPDIR` | Overrides the parent directory for temporary clones. |
+| `PI_OFFLINE=1` | Disables install/update telemetry. |
+| `PI_TELEMETRY=0` | Disables install/update telemetry. |
+
 ## Quick usage
 
 Open the Pi Scout menu:
@@ -75,6 +83,7 @@ After a repository is registered, the agent sees its local path in the system pr
 
 ## Notes
 
+- On startup, Pi Scout sends a best-effort install/update telemetry ping once per package version unless Pi telemetry is disabled, offline mode is enabled, or Pi runs in CI.
 - Pi Scout uses local file access for exploration. It does not provide web search or remote content-fetching tools.
 - Registering a Git URL still uses `git clone`, so Git may contact the configured remote.
 - Registered repositories are intended as read-only references unless the user explicitly asks otherwise.

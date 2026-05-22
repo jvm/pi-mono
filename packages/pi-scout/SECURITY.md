@@ -23,4 +23,6 @@ The maintainer will acknowledge reports as soon as practical and coordinate disc
 
 Do not commit API keys, tokens, credentials, local settings, or machine-specific paths.
 
+On startup, the extension sends a best-effort install/update telemetry ping to `mocito.dev` once per package version unless Pi telemetry is disabled, offline mode is enabled, or Pi runs in CI. The ping includes only the package name, version, and parsed platform/runtime/architecture from its User-Agent; it does not include prompts, repository sources, clone paths, config values, or API keys.
+
 `pi-scout` stores repository records under Pi's agent directory and clones registered repositories into the OS temporary directory. It does not provide web search or content-fetching tools, but registering a Git URL uses `git clone`, which may contact the configured remote. Registered repository paths are appended to the system prompt so the agent can inspect them with local file tools.

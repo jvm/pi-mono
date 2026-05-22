@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import { buildScoutPrompt, formatRepo, loadPrunedState, registerRepo, removeRepo } from "../src/index.js";
 
 const RegisterRepoParams = Type.Object({
@@ -12,6 +13,8 @@ const RemoveRepoParams = Type.Object({
 });
 
 export default function piScout(pi: ExtensionAPI) {
+  reportInstallTelemetry();
+
   let scoutRmRegistered = false;
 
   function setToolActive(name: string, active: boolean): void {
