@@ -55,7 +55,7 @@ Before publishing, run the package's validation commands and `npm run pack:dry-r
 
 GitHub release publishing is monorepo-aware. Use release tags in the form `<package-name>@<version>`, for example `pi-web-kit@0.1.5`. The publish workflow validates that the tag version matches `packages/<package-name>/package.json`, then publishes that workspace with provenance.
 
-When working in Pi, prefer the project-local `/release-package <package-name> <version>` command. It validates the release, prints the exact commands it will run, asks for confirmation, then tags, pushes, and creates the GitHub release without invoking the agent.
+When working in Pi, prefer the project-local `/release-package <package-name> <version>` command. It discovers publishable workspaces from `packages/*/package.json`, validates the release, prints the exact commands it will run, asks for confirmation, then tags, pushes, and creates the GitHub release without invoking the agent.
 
 ## Security
 

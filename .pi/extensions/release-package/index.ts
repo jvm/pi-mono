@@ -1,11 +1,16 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const PACKAGES = ["pi-codex-image-gen", "pi-scout", "pi-skillful", "pi-web-kit"] as const;
-type PackageName = (typeof PACKAGES)[number];
+type PackageName = string;
+
+interface PackageInfo {
+  name: PackageName;
+  dir: string;
+  version?: string;
+}
 
 interface CommandResult {
   stdout: string;
@@ -25,6 +30,32 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
+function discoverPackages(cwd: string): PackageInfo[] {
+  const packagesDir = join(cwd, "packages");
+  if (!existsSync(packagesDir)) return [];
+
+  return readdirSync(packagesDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .flatMap((entry): PackageInfo[] => {
+      const dir = `packages/${entry.name}`;
+      const packageJsonPath = join(cwd, dir, "package.json");
+      if (!existsSync(packageJsonPath)) return [];
+
+      try {
+        const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+          name?: string;
+          private?: boolean;
+          version?: string;
+        };
+        if (!packageJson.name || packageJson.private) return [];
+        return [{ name: packageJson.name, dir, version: packageJson.version }];
+      } catch {
+        return [];
+      }
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function parseArgs(args: string): { packageName: PackageName; version: string } {
   const parts = args.trim().split(/\s+/).filter(Boolean);
   if (parts.length !== 2) {
@@ -32,14 +63,14 @@ function parseArgs(args: string): { packageName: PackageName; version: string } 
   }
 
   const [packageName, version] = parts;
-  if (!PACKAGES.includes(packageName as PackageName)) {
-    throw new Error(`Unknown package: ${packageName}. Expected one of: ${PACKAGES.join(", ")}`);
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(packageName)) {
+    throw new Error(`Invalid package name: ${packageName}`);
   }
   if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
     throw new Error(`Invalid semver version: ${version}`);
   }
 
-  return { packageName: packageName as PackageName, version };
+  return { packageName, version };
 }
 
 async function run(command: string, cwd: string): Promise<CommandResult> {
@@ -123,18 +154,24 @@ function ensureCleanEnoughForPackage(statusPaths: string[], packageDir: string):
 }
 
 async function buildPlan(cwd: string, packageName: PackageName, version: string): Promise<ReleasePlan> {
-  const packageDir = `packages/${packageName}`;
+  const packages = discoverPackages(cwd);
+  const packageInfo = packages.find((pkg) => pkg.name === packageName);
+  if (!packageInfo) {
+    const expected = packages.map((pkg) => pkg.name).join(", ") || "no publishable packages found";
+    throw new Error(`Unknown package: ${packageName}. Expected one of: ${expected}`);
+  }
+
+  const packageDir = packageInfo.dir;
   const packageJsonPath = join(cwd, packageDir, "package.json");
   const changelogPath = join(cwd, packageDir, "CHANGELOG.md");
   const tag = `${packageName}@${version}`;
 
-  if (!existsSync(packageJsonPath)) {
-    throw new Error(`Missing package.json: ${packageJsonPath}`);
-  }
-
-  const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { name?: string; version?: string };
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { name?: string; private?: boolean; version?: string };
   if (packageJson.name !== packageName) {
     throw new Error(`Package name mismatch in ${packageJsonPath}: expected ${packageName}, got ${packageJson.name}`);
+  }
+  if (packageJson.private) {
+    throw new Error(`Cannot release private package: ${packageName}`);
   }
   if (packageJson.version !== version) {
     throw new Error(`Version mismatch: ${packageDir}/package.json is ${packageJson.version}, requested ${version}`);
@@ -230,24 +267,19 @@ export default function releaseExtension(pi: ExtensionAPI) {
   pi.registerCommand("release-package", {
     description: "Validate, tag, push, and create a GitHub release for a pi-mono package",
     getArgumentCompletions: (prefix: string): AutocompleteItem[] | null => {
+      const packages = discoverPackages(process.cwd());
       const [first = "", second = ""] = prefix.split(/\s+/, 2);
       if (prefix.includes(" ")) {
-        const packageName = first as PackageName;
-        if (!PACKAGES.includes(packageName)) return null;
-        try {
-          const packageJson = JSON.parse(
-            readFileSync(join(process.cwd(), "packages", packageName, "package.json"), "utf8"),
-          ) as { version?: string };
-          if (packageJson.version?.startsWith(second)) {
-            return [{ value: `${packageName} ${packageJson.version}`, label: packageJson.version }];
-          }
-        } catch {
-          return null;
+        const packageInfo = packages.find((pkg) => pkg.name === first);
+        if (packageInfo?.version?.startsWith(second)) {
+          return [{ value: `${packageInfo.name} ${packageInfo.version}`, label: packageInfo.version }];
         }
         return null;
       }
 
-      const items = PACKAGES.filter((name) => name.startsWith(first)).map((name) => ({ value: name, label: name }));
+      const items = packages
+        .filter((pkg) => pkg.name.startsWith(first))
+        .map((pkg) => ({ value: pkg.name, label: pkg.name }));
       return items.length > 0 ? items : null;
     },
     handler: async (args, ctx) => {

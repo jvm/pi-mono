@@ -60,9 +60,9 @@ git push origin main pi-web-kit@0.1.5
 gh release create pi-web-kit@0.1.5 --title "pi-web-kit@0.1.5" --notes "..."
 ```
 
-The publish workflow validates that the tag version matches the selected package's `package.json` version, then runs `npm publish --workspace packages/<package> --provenance --access public`.
+The publish workflow dynamically resolves `packages/<package>/package.json`, validates that the tag version matches the selected package's `package.json` version, then runs `npm publish --workspace packages/<package> --provenance --access public`.
 
-When working in Pi, the project-local `/release-package` command performs the validation, prints the exact commands it will run, asks for confirmation, then tags, pushes, and creates the GitHub release without invoking the agent:
+When working in Pi, the project-local `/release-package` command discovers publishable workspaces from `packages/*/package.json`, performs the validation, prints the exact commands it will run, asks for confirmation, then tags, pushes, and creates the GitHub release without invoking the agent:
 
 ```text
 /release-package pi-web-kit 0.1.5
