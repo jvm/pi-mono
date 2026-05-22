@@ -77,9 +77,8 @@ async function run(command: string, cwd: string): Promise<CommandResult> {
   console.log(`\n$ ${command}`);
 
   return await new Promise((resolve, reject) => {
-    const child = spawn(command, {
+    const child = spawn("bash", ["-lc", command], {
       cwd,
-      shell: true,
       env: process.env,
     });
 
@@ -109,9 +108,8 @@ async function run(command: string, cwd: string): Promise<CommandResult> {
 
 async function runQuiet(command: string, cwd: string): Promise<CommandResult> {
   return await new Promise((resolve, reject) => {
-    const child = spawn(command, {
+    const child = spawn("bash", ["-lc", command], {
       cwd,
-      shell: true,
       env: process.env,
     });
 

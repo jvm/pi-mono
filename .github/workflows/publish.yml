@@ -32,14 +32,18 @@ jobs:
       - name: Resolve package from release tag or input
         id: package
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_PACKAGE: ${{ inputs.package }}
+          RELEASE_TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            package_name="${{ inputs.package }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            package_name="$INPUT_PACKAGE"
             tag_version=""
           else
-            tag_name="${{ github.event.release.tag_name }}"
+            tag_name="$RELEASE_TAG_NAME"
             if [[ ! "$tag_name" =~ ^[a-z0-9][a-z0-9-]*@[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
               echo "Release tag must be '<package>@<version>', for example 'pi-web-kit@0.1.5'. Got: $tag_name" >&2
               exit 1
@@ -76,34 +80,43 @@ jobs:
             echo "Missing version in $package_dir/package.json" >&2
             exit 1
           fi
-          if [ "${{ github.event_name }}" = "release" ] && [ "$tag_version" != "$version" ]; then
+          if [ "$EVENT_NAME" = "release" ] && [ "$tag_version" != "$version" ]; then
             echo "Release tag version must match package.json version: $package_name@$version" >&2
             exit 1
           fi
 
-          echo "name=$package_name" >> "$GITHUB_OUTPUT"
-          echo "dir=$package_dir" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          {
+            echo "name=$package_name"
+            echo "dir=$package_dir"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Setup Node
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-          cache: npm
-          cache-dependency-path: package-lock.json
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci
 
       - name: Type check package
-        run: npm run check --workspace ${{ steps.package.outputs.dir }}
+        env:
+          PACKAGE_DIR: ${{ steps.package.outputs.dir }}
+        run: npm run check --workspace "$PACKAGE_DIR"
 
       - name: Test package
-        run: npm test --workspace ${{ steps.package.outputs.dir }} --if-present
+        env:
+          PACKAGE_DIR: ${{ steps.package.outputs.dir }}
+        run: npm test --workspace "$PACKAGE_DIR" --if-present
 
       - name: Verify package contents
-        run: npm run pack:dry-run --workspace ${{ steps.package.outputs.dir }}
+        env:
+          PACKAGE_DIR: ${{ steps.package.outputs.dir }}
+        run: npm run pack:dry-run --workspace "$PACKAGE_DIR"
 
       - name: Publish package
-        run: npm publish --workspace ${{ steps.package.outputs.dir }} --provenance --access public
+        env:
+          PACKAGE_DIR: ${{ steps.package.outputs.dir }}
+        run: npm publish --workspace "$PACKAGE_DIR" --provenance --access public

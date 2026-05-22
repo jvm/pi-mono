@@ -30,7 +30,7 @@ jobs:
           path: ./
           base: ${{ github.event.pull_request.base.sha }}
           head: ${{ github.event.pull_request.head.sha }}
-          version: v3.95.3
+          version: 3.95.3
           extra_args: --only-verified
 
       - name: Run TruffleHog on push diff
@@ -40,7 +40,7 @@ jobs:
           path: ./
           base: ${{ github.event.before }}
           head: ${{ github.sha }}
-          version: v3.95.3
+          version: 3.95.3
           extra_args: --only-verified
 
       - name: Run TruffleHog on current tree
@@ -48,7 +48,7 @@ jobs:
         uses: trufflesecurity/trufflehog@37b77001d0174ebec2fcca2bd83ff83a6d45a3ab # v3.95.3
         with:
           path: ./
-          version: v3.95.3
+          version: 3.95.3
           extra_args: --only-verified
 
   semgrep:
@@ -64,10 +64,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install Semgrep
+        run: python3 -m pip install --user semgrep==1.144.0
+
       - name: Run Semgrep
-        uses: semgrep/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
-        with:
-          config: p/default
+        run: semgrep scan --config p/default --error
 
   dependency-audit:
     name: Dependency audit
