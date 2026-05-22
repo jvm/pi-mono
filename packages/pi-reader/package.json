@@ -1,0 +1,77 @@
+{
+  "name": "pi-reader",
+  "version": "0.1.0",
+  "description": "Convert URLs and readable files to Markdown or structured JSON for Pi.",
+  "type": "module",
+  "license": "MIT",
+  "author": "jvm",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jvm/pi-mono.git",
+    "directory": "packages/pi-reader"
+  },
+  "bugs": {
+    "url": "https://github.com/jvm/pi-mono/issues"
+  },
+  "homepage": "https://github.com/jvm/pi-mono/tree/main/packages/pi-reader#readme",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "reader",
+    "markdown",
+    "readability"
+  ],
+  "bin": {
+    "pi-reader": "./bin/pi-reader.mjs"
+  },
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/index.js"
+    ]
+  },
+  "files": [
+    "bin",
+    "extensions",
+    "src",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "pack:dry-run": "npm pack --dry-run"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "jsdom": "^26.1.0",
+    "turndown": "^7.2.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.0",
+    "@earendil-works/pi-tui": "^0.74.0",
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^25.6.2",
+    "@types/turndown": "^5.0.5",
+    "typebox": "^1.1.33",
+    "typescript": "^6.0.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  }
+}
