@@ -40,3 +40,16 @@ test("parses slash command arguments", () => {
     overwrite: true,
   });
 });
+
+test("rejects private network URLs", async () => {
+  await assert.rejects(() => convertReaderInput({ input: "http://localhost:3000" }), /Localhost URLs are not allowed/);
+  await assert.rejects(() => convertReaderInput({ input: "http://127.0.0.1:3000" }), /Private network URLs are not allowed/);
+});
+
+test("rejects oversized files", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-reader-"));
+  const input = join(dir, "big.txt");
+  await writeFile(input, "hello");
+
+  await assert.rejects(() => convertReaderInput({ input, maxBytes: 1 }), /exceeds maximum size/);
+});

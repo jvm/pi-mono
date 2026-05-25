@@ -9,6 +9,7 @@ Convert HTTP(S) URLs and readable local files to Markdown or structured JSON for
 - CLI command: `pi-reader`
 - Inputs: web URLs, HTML files, Markdown, plain text, and JSON
 - Outputs: Markdown or JSON, inline or written to a file
+- Safer URL fetching: blocks localhost/private network targets, rejects credentialed URLs, disables redirects, enforces a timeout, and caps input size
 
 ## Installation
 

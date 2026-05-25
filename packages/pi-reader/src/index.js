@@ -1,4 +1,6 @@
+import { lookup } from "node:dns/promises";
 import { readFile, stat, writeFile } from "node:fs/promises";
+import { isIP } from "node:net";
 import { extname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Readability } from "@mozilla/readability";
@@ -6,19 +8,24 @@ import { JSDOM } from "jsdom";
 import TurndownService from "turndown";
 
 export const FORMATS = ["markdown", "json"];
+export const DEFAULT_MAX_INPUT_BYTES = 10 * 1024 * 1024;
+export const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 const TEXT_EXTENSIONS = new Set([".md", ".markdown", ".txt", ".text"]);
 const HTML_EXTENSIONS = new Set([".html", ".htm", ".xhtml"]);
 
 /**
  * @typedef {"markdown" | "json"} ReaderFormat
- * @typedef {{ input: string, format?: ReaderFormat, output?: string, overwrite?: boolean }} ConvertOptions
+ * @typedef {{ input: string, format?: ReaderFormat, output?: string, overwrite?: boolean, maxBytes?: number, timeoutMs?: number }} ConvertOptions
  */
 
 /** @param {ConvertOptions} options */
 export async function convertReaderInput(options) {
   const input = requireNonEmptyString(options.input, "input");
   const format = normalizeFormat(options.format ?? "markdown");
-  const source = await loadInput(input);
+  const source = await loadInput(input, {
+    maxBytes: options.maxBytes ?? DEFAULT_MAX_INPUT_BYTES,
+    timeoutMs: options.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS,
+  });
   const readable = await toReadableDocument(source);
   const rendered = renderReadable(readable, format);
 
@@ -44,11 +51,14 @@ export function normalizeFormat(value) {
   throw new Error("format must be 'markdown' or 'json'.");
 }
 
-/** @param {string} input */
-export async function loadInput(input) {
+/** @param {string} input @param {{ maxBytes: number, timeoutMs: number }} limits */
+export async function loadInput(input, limits = { maxBytes: DEFAULT_MAX_INPUT_BYTES, timeoutMs: DEFAULT_FETCH_TIMEOUT_MS }) {
   const trimmed = input.trim();
-  if (/^https?:\/\//i.test(trimmed)) return fetchUrl(trimmed);
+  if (/^https?:\/\//i.test(trimmed)) return fetchUrl(trimmed, limits);
   const path = resolve(trimmed);
+  const info = await stat(path);
+  if (!info.isFile()) throw new Error(`Input is not a regular file: ${path}`);
+  if (info.size > limits.maxBytes) throw new Error(`Input exceeds maximum size of ${limits.maxBytes} bytes.`);
   const buffer = await readFile(path);
   return {
     kind: "file",
@@ -59,19 +69,74 @@ export async function loadInput(input) {
   };
 }
 
-/** @param {string} url */
-async function fetchUrl(url) {
+/** @param {string} url @param {{ maxBytes: number, timeoutMs: number }} limits */
+async function fetchUrl(url, limits) {
   const parsed = new URL(url);
   if (parsed.username || parsed.password) throw new Error("URL credentials are not allowed.");
-  const response = await fetch(parsed, {
-    headers: {
-      "accept": "text/html,application/xhtml+xml,application/json,text/markdown,text/plain;q=0.9,*/*;q=0.1",
-      "user-agent": "pi-reader/0.1",
-    },
-  });
-  if (!response.ok) throw new Error(`Fetch failed with HTTP ${response.status} ${response.statusText}`);
-  const mediaType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() || "text/html";
-  return { kind: "url", source: parsed.href, mediaType, body: await response.text() };
+  await assertPublicHttpUrl(parsed);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), limits.timeoutMs);
+  try {
+    const response = await fetch(parsed, {
+      signal: controller.signal,
+      redirect: "error",
+      headers: {
+        "accept": "text/html,application/xhtml+xml,application/json,text/markdown,text/plain;q=0.9,*/*;q=0.1",
+        "user-agent": "pi-reader/0.1",
+      },
+    });
+    if (!response.ok) throw new Error(`Fetch failed with HTTP ${response.status} ${response.statusText}`);
+    const contentLength = Number(response.headers.get("content-length") || "0");
+    if (contentLength > limits.maxBytes) throw new Error(`Response exceeds maximum size of ${limits.maxBytes} bytes.`);
+    const mediaType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() || "text/html";
+    return { kind: "url", source: parsed.href, mediaType, body: await readResponseText(response, limits.maxBytes) };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/** @param {URL} url */
+async function assertPublicHttpUrl(url) {
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Only HTTP(S) URLs are supported.");
+  const hostname = url.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) throw new Error("Localhost URLs are not allowed.");
+  if (isPrivateAddress(hostname)) throw new Error("Private network URLs are not allowed.");
+  const addresses = await lookup(hostname, { all: true, verbatim: true });
+  if (addresses.some((entry) => isPrivateAddress(entry.address))) throw new Error("Private network URLs are not allowed.");
+}
+
+/** @param {string} address */
+function isPrivateAddress(address) {
+  if (address.startsWith("[")) address = address.slice(1, -1);
+  const kind = isIP(address);
+  if (kind === 4) {
+    const parts = address.split(".").map(Number);
+    return parts[0] === 0 || parts[0] === 10 || parts[0] === 127 || (parts[0] === 169 && parts[1] === 254) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 192 && parts[1] === 168);
+  }
+  if (kind === 6) {
+    const normalized = address.toLowerCase();
+    return normalized === "::1" || normalized === "::" || normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:");
+  }
+  return false;
+}
+
+/** @param {Response} response @param {number} maxBytes */
+async function readResponseText(response, maxBytes) {
+  if (!response.body) return response.text();
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new Error(`Response exceeds maximum size of ${maxBytes} bytes.`);
+    }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
 /** @param {string} path */
