@@ -1,0 +1,63 @@
+{
+  "name": "pi-ollama",
+  "version": "0.1.0",
+  "description": "Automatically register locally pulled Ollama models as a Pi provider.",
+  "type": "module",
+  "license": "MIT",
+  "author": "jvm",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jvm/pi-mono.git",
+    "directory": "packages/pi-ollama"
+  },
+  "bugs": {
+    "url": "https://github.com/jvm/pi-mono/issues"
+  },
+  "homepage": "https://github.com/jvm/pi-mono/tree/main/packages/pi-ollama#readme",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "ollama",
+    "local-llm"
+  ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ]
+  },
+  "files": [
+    "extensions",
+    "src",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.mjs",
+    "pack:dry-run": "npm pack --dry-run"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  }
+}
