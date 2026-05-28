@@ -13,7 +13,7 @@ For local development:
 ```bash
 pi -e ./packages/pi-goal
 # or
-pi -e ./packages/pi-goal/extensions/pi-goal/index.ts
+pi -e ./packages/pi-goal/extensions/index.ts
 ```
 
 ## Commands

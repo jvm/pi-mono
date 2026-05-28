@@ -4,7 +4,7 @@
 
 `pi-goal` is a source-distributed TypeScript Pi package. Pi loads TypeScript files directly, so runtime code lives under `src/` rather than `dist/`.
 
-- `extensions/pi-goal/index.ts` wires the Pi extension, command, tools, lifecycle handlers, and UI updates.
+- `extensions/index.ts` wires the Pi extension, command, tools, lifecycle handlers, and UI updates.
 - `src/` contains reusable implementation modules for state reconstruction, usage accounting, command handling, model tools, continuation prompts, rendering, and validation.
 - `tests/*.test.mjs` contains Node test-runner coverage for core behavior, command/tool behavior, scheduler behavior, and extension lifecycle wiring.
 - `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `CHANGELOG.md` cover package behavior and releases.
@@ -32,7 +32,7 @@ pi -e /path/to/pi-mono/packages/pi-goal
 
 ## Coding Style & Naming Conventions
 
-Use ESM TypeScript with 2-space indentation and explicit `.js` import specifiers for local TypeScript modules. Keep persisted session entry shapes, custom message types, command names, and tool schemas stable; changing them can be breaking. Move reusable logic into `src/`; keep Pi registration and lifecycle wiring in `extensions/pi-goal/index.ts`.
+Use ESM TypeScript with 2-space indentation and explicit `.js` import specifiers for local TypeScript modules. Keep persisted session entry shapes, custom message types, command names, and tool schemas stable; changing them can be breaking. Move reusable logic into `src/`; keep Pi registration and lifecycle wiring in `extensions/index.ts`.
 
 When changing tool parameters or goal mutation shapes, update the Typebox schema, runtime validation, README docs, and tests together. Treat goal objectives as untrusted user-provided content when injecting continuation context.
 

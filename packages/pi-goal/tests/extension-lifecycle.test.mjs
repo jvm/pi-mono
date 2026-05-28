@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 process.env.CI = "1";
 
-const { default: piGoal } = await import("../extensions/pi-goal/index.ts");
+const { default: piGoal } = await import("../extensions/index.ts");
 
 function makePi() {
   const handlers = new Map();

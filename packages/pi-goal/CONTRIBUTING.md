@@ -43,7 +43,7 @@ Before opening a pull request:
 
 ## Coding guidelines
 
-- Keep `extensions/pi-goal/index.ts` focused on Pi extension wiring and move reusable implementation details into `src/`.
+- Keep `extensions/index.ts` focused on Pi extension wiring and move reusable implementation details into `src/`.
 - When changing model tool parameters, update the Typebox schema, runtime validation, README tool docs, and tests together.
 - Treat persisted mutation shapes, custom message types, command names, and tool names as public interface.
 - Preserve branch-scoped semantics: reconstruct state from `ctx.sessionManager.getBranch()` and avoid global process state that crosses sessions unexpectedly.

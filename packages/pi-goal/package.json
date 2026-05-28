@@ -1,6 +1,6 @@
 {
   "name": "@mocito/pi-goal",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Persistent long-running goals for Pi.",
   "type": "module",
   "license": "MIT",
@@ -26,7 +26,7 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/pi-goal/index.ts"
+      "./extensions/index.ts"
     ]
   },
   "files": [

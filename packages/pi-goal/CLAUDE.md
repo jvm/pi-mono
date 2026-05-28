@@ -37,13 +37,13 @@ pi -e /path/to/pi-mono/packages/pi-goal
 
 ### Data flow
 
-User `/goal` command or model goal tool → `extensions/pi-goal/index.ts` → `src/commands.ts` or `src/tools.ts` → goal mutation appended through `pi.appendEntry()` → state reconstructed from `ctx.sessionManager.getBranch()` → UI/status updates and optional hidden continuation context.
+User `/goal` command or model goal tool → `extensions/index.ts` → `src/commands.ts` or `src/tools.ts` → goal mutation appended through `pi.appendEntry()` → state reconstructed from `ctx.sessionManager.getBranch()` → UI/status updates and optional hidden continuation context.
 
 ### Key modules
 
 | Module | Role |
 |---|---|
-| `extensions/pi-goal/index.ts` | Extension entry point; registers `/goal`, model tools, renderers, lifecycle handlers, usage accounting, and continuation scheduling. |
+| `extensions/index.ts` | Extension entry point; registers `/goal`, model tools, renderers, lifecycle handlers, usage accounting, and continuation scheduling. |
 | `src/state.ts` | Goal mutation creation/application and branch reconstruction. |
 | `src/accounting.ts` | Assistant usage-token accounting and budget checks. |
 | `src/commands.ts` | `/goal` command parsing and command handlers. |
@@ -57,6 +57,6 @@ User `/goal` command or model goal tool → `extensions/pi-goal/index.ts` → `s
 
 - ESM TypeScript, 2-space indent, explicit `.js` import specifiers for local modules.
 - Tests use `node:test` and `node:assert/strict` in `.test.mjs` files.
-- New reusable logic belongs in `src/`; Pi wiring belongs in `extensions/pi-goal/index.ts`.
+- New reusable logic belongs in `src/`; Pi wiring belongs in `extensions/index.ts`.
 - Persisted custom entry shapes and model tool schemas are public API; update docs and tests with any changes.
 - Goal objectives are untrusted user text. JSON-encode or otherwise safely delimit objectives before putting them in model-visible continuation context.
