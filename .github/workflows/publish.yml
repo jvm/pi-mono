@@ -44,20 +44,21 @@ jobs:
             tag_version=""
           else
             tag_name="$RELEASE_TAG_NAME"
-            if [[ ! "$tag_name" =~ ^[a-z0-9][a-z0-9-]*@[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
-              echo "Release tag must be '<package>@<version>', for example 'pi-web-kit@0.1.5'. Got: $tag_name" >&2
+            if [[ ! "$tag_name" =~ ^(@[a-z0-9][a-z0-9-]*/)?[a-z0-9][a-z0-9-]*@[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+              echo "Release tag must be '<package>@<version>', for example 'pi-web-kit@0.1.5' or '@scope/pkg@0.1.0'. Got: $tag_name" >&2
               exit 1
             fi
             package_name="${tag_name%@*}"
             tag_version="${tag_name##*@}"
           fi
 
-          if [[ ! "$package_name" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+          if [[ ! "$package_name" =~ ^(@[a-z0-9][a-z0-9-]*/)?[a-z0-9][a-z0-9-]*$ ]]; then
             echo "Invalid package name: $package_name" >&2
             exit 1
           fi
 
-          package_dir="packages/$package_name"
+          package_slug="${package_name##*/}"
+          package_dir="packages/$package_slug"
           if [ ! -f "$package_dir/package.json" ]; then
             echo "Package directory not found: $package_dir" >&2
             exit 1
