@@ -7,6 +7,8 @@ Monorepo for Pi-related projects: installable Pi packages, skills, prompt templa
 | Package | Description |
 | --- | --- |
 | [pi-codex-image-gen](./packages/pi-codex-image-gen) | Image generation for Pi using the ChatGPT Images 2.0 model. |
+| [pi-goal](./packages/pi-goal) | Persistent long-running goals for Pi. |
+| [pi-scout](./packages/pi-scout) | Register local reference codebases for Pi agent exploration. |
 | [pi-skillful](./packages/pi-skillful) | Pi package with skill invocation and visibility improvements. |
 | [pi-web-kit](./packages/pi-web-kit) | Context-efficient web search and fetch tools for Pi. |
 
@@ -23,6 +25,14 @@ npm run validate
 ```
 
 Package-specific validation and Pi smoke-test instructions live in each package's README and AGENTS.md.
+
+## Tests
+
+Run the monorepo test suite from the repository root:
+
+```bash
+npm test
+```
 
 ## Security
 
@@ -60,12 +70,15 @@ git push origin main pi-web-kit@0.1.5
 gh release create pi-web-kit@0.1.5 --title "pi-web-kit@0.1.5" --notes "..."
 ```
 
-The publish workflow dynamically resolves `packages/<package>/package.json`, validates that the tag version matches the selected package's `package.json` version, then runs `npm publish --workspace packages/<package> --provenance --access public`.
+Scoped package tags are also supported, for example `@mocito/pi-goal@0.1.0`.
+
+The publish workflow dynamically resolves `packages/<package-slug>/package.json`, validates that the tag version matches the selected package's `package.json` version, then runs `npm publish --workspace packages/<package-slug> --provenance --access public`.
 
 When working in Pi, the project-local `/release-package` command discovers publishable workspaces from `packages/*/package.json`, performs the validation, prints the exact commands it will run, asks for confirmation, then tags, pushes, and creates the GitHub release without invoking the agent:
 
 ```text
 /release-package pi-web-kit 0.1.5
+/release-package @mocito/pi-goal 0.1.0
 ```
 
 ## License

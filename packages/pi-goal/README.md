@@ -6,7 +6,6 @@ Persistent long-running goals for Pi, modeled after Codex `/goal`.
 
 ```bash
 pi install npm:@mocito/pi-goal
-pi install git:github.com/jvm/pi-mono
 ```
 
 For local development:
@@ -85,6 +84,40 @@ v1 has no user-facing configuration. Automatic continuation is enabled for activ
 - Usage-limit handling is best-effort via HTTP 429 provider responses.
 - Automatic continuation is session-local, not a background daemon.
 
-## Security
+## Development and validation
+
+From the monorepo root:
+
+```bash
+npm install
+npm run check --workspace packages/pi-goal
+npm test --workspace packages/pi-goal
+npm run pack:dry-run --workspace packages/pi-goal
+npm audit --omit=dev
+```
+
+Before publishing, also run the root validation loop:
+
+```bash
+npm run validate
+```
+
+## Publishing
+
+`@mocito/pi-goal` is published independently from this workspace. Release tags use the monorepo package format:
+
+```text
+@mocito/pi-goal@0.1.0
+```
+
+Use the project-local release command from the repository root when possible:
+
+```text
+/release-package @mocito/pi-goal 0.1.0
+```
+
+## Security and privacy
 
 Pi packages execute arbitrary code with your user permissions. Install only from sources you trust.
+
+`pi-goal` does not require API keys, does not read provider credentials, and does not make network requests. Goal state is stored in local Pi session entries and goal objectives may be sent to the active model as hidden continuation context. Do not put secrets, credentials, tokens, or private data into goal objectives. See [SECURITY.md](./SECURITY.md) for the full security model and reporting instructions.

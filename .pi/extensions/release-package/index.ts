@@ -63,7 +63,7 @@ function parseArgs(args: string): { packageName: PackageName; version: string } 
   }
 
   const [packageName, version] = parts;
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(packageName)) {
+  if (!/^(?:@[a-z0-9][a-z0-9-]*\/)?[a-z0-9][a-z0-9-]*$/.test(packageName)) {
     throw new Error(`Invalid package name: ${packageName}`);
   }
   if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {

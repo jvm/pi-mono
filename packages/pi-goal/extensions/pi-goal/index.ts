@@ -64,6 +64,11 @@ export default function piGoal(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     const diagnostics: string[] = [];
     goal = reconstructGoalState(ctx.sessionManager.getBranch() as any[], diagnostics);
+    if (goal?.status === "active" && !goal.activeStartedAt) {
+      const resumed = statusMutation(goal, "active", realizedTimeUsed(goal), nowIso());
+      appendGoalMutation(pi, resumed);
+      goal = applyGoalMutation(goal, resumed);
+    }
     if (diagnostics.length) ctx.ui.notify(`pi-goal: ${diagnostics[0]}`, "warning");
     updateGoalUi(ctx, goal);
     if (goal?.status === "active" && ctx.isIdle() && !ctx.hasPendingMessages()) scheduler.schedule(ctx, "continue");
@@ -118,7 +123,7 @@ export default function piGoal(pi: ExtensionAPI) {
   });
   pi.on("session_shutdown", async (_event, ctx) => {
     if (goal?.status === "active") {
-      const stopped = statusMutation(goal, "active", realizedTimeUsed(goal), nowIso());
+      const stopped = statusMutation(goal, "active", realizedTimeUsed(goal), undefined);
       appendGoalMutation(pi, stopped);
     }
     scheduler.clear();
