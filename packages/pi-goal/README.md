@@ -1,0 +1,90 @@
+# @mocito/pi-goal
+
+Persistent long-running goals for Pi, modeled after Codex `/goal`.
+
+## Install
+
+```bash
+pi install npm:@mocito/pi-goal
+pi install git:github.com/jvm/pi-mono
+```
+
+For local development:
+
+```bash
+pi -e ./packages/pi-goal
+# or
+pi -e ./packages/pi-goal/extensions/pi-goal/index.ts
+```
+
+## Commands
+
+- `/goal` or `/goal status` — show current goal and usage.
+- `/goal <objective>` — create or replace the branch goal.
+- `/goal --budget 50000 <objective>` — create a budgeted goal.
+- `/goal edit` — edit the objective in a multiline editor.
+- `/goal pause` — pause automatic continuation.
+- `/goal resume` — resume automatic continuation.
+- `/goal clear` — clear the current branch goal.
+- `/goal budget 50000` — set/update token budget.
+- `/goal budget clear` — remove token budget.
+
+Replacing a non-complete goal asks for confirmation when UI is available.
+
+## Model tools
+
+- `get_goal` returns current goal state and remaining budget.
+- `create_goal` creates a goal only when explicitly requested and fails if one already exists.
+- `update_goal` lets the model mark a goal `complete` or `blocked` only. It should mark complete only after requirement-by-requirement verification, and blocked only after the same blocker repeats for at least three goal turns.
+
+## Behavior
+
+Goal state is stored as immutable `pi-goal` custom session entries and reconstructed from `ctx.sessionManager.getBranch()`, so state follows Pi session branches, tree navigation, forks, and reloads.
+
+When an active goal is idle, the extension injects a hidden `pi-goal-context` message and triggers another turn. A context filter keeps only the latest goal context message for the current goal to avoid linear context growth.
+
+The footer and optional editor widget show status, elapsed active time, token usage, and budget.
+
+## Examples
+
+Simple goal:
+
+```text
+/goal update the README with installation instructions
+```
+
+Budgeted goal:
+
+```text
+/goal --budget 50000 refactor the parser and run the test suite
+```
+
+Pause and resume:
+
+```text
+/goal pause
+/goal resume
+```
+
+Branch behavior: goal mutations are stored on the current session branch. If you use `/tree`, `/fork`, or `/clone`, Pi Goal reconstructs the goal from that branch only, so divergent branches can have different goal state.
+
+## Configuration
+
+v1 has no user-facing configuration. Automatic continuation is enabled for active goals and stops when the goal is paused, blocked, complete, usage-limited, budget-limited, cleared, or when pending user messages exist.
+
+## Troubleshooting
+
+- If continuation does not start, run `/goal status` and confirm the goal is `active`.
+- If a goal stops unexpectedly, check whether it reached its token budget or the provider returned a rate/usage limit.
+- If context appears stale after tree navigation or reload, run `/goal status`; branch state is reconstructed from the active branch.
+- In print/JSON modes, commands and tools work, but interactive confirmations/editors are unavailable.
+
+## Limitations
+
+- Token budget is enforced after finalized assistant usage is visible; v1 cannot hard-stop mid-turn.
+- Usage-limit handling is best-effort via HTTP 429 provider responses.
+- Automatic continuation is session-local, not a background daemon.
+
+## Security
+
+Pi packages execute arbitrary code with your user permissions. Install only from sources you trust.
