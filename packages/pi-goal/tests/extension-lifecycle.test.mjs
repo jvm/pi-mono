@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import piGoal from "../extensions/pi-goal/index.ts";
+
+process.env.CI = "1";
+
+const { default: piGoal } = await import("../extensions/pi-goal/index.ts");
 
 function makePi() {
   const handlers = new Map();

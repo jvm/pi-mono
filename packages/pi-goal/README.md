@@ -69,7 +69,14 @@ Branch behavior: goal mutations are stored on the current session branch. If you
 
 ## Configuration
 
-v1 has no user-facing configuration. Automatic continuation is enabled for active goals and stops when the goal is paused, blocked, complete, usage-limited, budget-limited, cleared, or when pending user messages exist.
+v1 has no user-facing goal configuration. Automatic continuation is enabled for active goals and stops when the goal is paused, blocked, complete, usage-limited, budget-limited, cleared, or when pending user messages exist.
+
+Environment flags:
+
+| Flag | Description |
+| --- | --- |
+| `PI_OFFLINE=1` | Disables install/update telemetry. |
+| `PI_TELEMETRY=0` | Disables install/update telemetry. |
 
 ## Troubleshooting
 
@@ -120,4 +127,6 @@ Use the project-local release command from the repository root when possible:
 
 Pi packages execute arbitrary code with your user permissions. Install only from sources you trust.
 
-`pi-goal` does not require API keys, does not read provider credentials, and does not make network requests. Goal state is stored in local Pi session entries and goal objectives may be sent to the active model as hidden continuation context. Do not put secrets, credentials, tokens, or private data into goal objectives. See [SECURITY.md](./SECURITY.md) for the full security model and reporting instructions.
+`pi-goal` does not require API keys and does not read provider credentials. Goal state is stored in local Pi session entries and goal objectives may be sent to the active model as hidden continuation context. Do not put secrets, credentials, tokens, or private data into goal objectives.
+
+On startup, Pi Goal sends a best-effort install/update telemetry ping once per package version unless Pi telemetry is disabled, offline mode is enabled, or Pi runs in CI. See [SECURITY.md](./SECURITY.md) for the full security model and reporting instructions.

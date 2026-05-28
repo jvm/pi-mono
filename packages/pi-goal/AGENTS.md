@@ -48,4 +48,4 @@ Pull requests should include a short description, linked issue when applicable, 
 
 ## Security & Configuration Tips
 
-Never commit API keys, tokens, machine-specific paths, local Pi settings, or session files. `pi-goal` does not need external credentials or network access. Goal objectives can be arbitrary user text; escape or encode them before embedding in system-visible continuation context.
+Never commit API keys, tokens, machine-specific paths, local Pi settings, or session files. `pi-goal` does not need external credentials. It sends best-effort install/update telemetry only as documented in `README.md` and `SECURITY.md`. Goal objectives can be arbitrary user text; escape or encode them before embedding in system-visible continuation context.

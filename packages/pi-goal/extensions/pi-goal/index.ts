@@ -4,6 +4,7 @@ import { goalCompletions, handleGoalCommand } from "../../src/commands.js";
 import { filterGoalContextMessages, GoalContinuationScheduler } from "../../src/continuation.js";
 import { registerGoalRenderers } from "../../src/rendering.js";
 import { appendGoalMutation, applyGoalMutation, reconstructGoalState, statusMutation } from "../../src/state.js";
+import { reportInstallTelemetry } from "../../src/install-telemetry.js";
 import { registerGoalTools } from "../../src/tools.js";
 import type { GoalState } from "../../src/types.js";
 import { GOAL_EVENT_TYPE } from "../../src/types.js";
@@ -11,6 +12,8 @@ import { nowIso, realizedTimeUsed } from "../../src/utils.js";
 import { clearGoalUi, updateGoalUi } from "../../src/ui.js";
 
 export default function piGoal(pi: ExtensionAPI) {
+  reportInstallTelemetry();
+
   let goal: GoalState | null = null;
   const scheduler = new GoalContinuationScheduler(pi, { getGoal: () => goal });
 
