@@ -2,8 +2,8 @@ name: Check Codex Prompt Sync
 
 on:
   schedule:
-    - cron: '0 9 * * *'  # Daily at 9 AM UTC
-  workflow_dispatch:      # Manual trigger
+    - cron: '0 9 * * *'
+  workflow_dispatch:
   push:
     paths:
       - 'packages/pi-agentsmd/prompts/init.md'
