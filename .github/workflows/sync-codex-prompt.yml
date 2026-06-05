@@ -1,5 +1,7 @@
 name: Check Codex Prompt Sync
 
+# This workflow checks if the prompt in pi-agentsmd has changed from the original Codex source
+
 on:
   schedule:
     - cron: '0 9 * * *'
