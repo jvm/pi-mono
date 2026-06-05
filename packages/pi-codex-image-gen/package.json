@@ -1,10 +1,10 @@
 {
   "name": "pi-codex-image-gen",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Image generation for Pi using the ChatGPT Images 2.0 model.",
   "type": "module",
   "license": "Apache-2.0",
-  "author": "jvm",
+  "author": "Jose Mocito",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jvm/pi-mono.git",
@@ -22,12 +22,17 @@
     "image-generation",
     "gpt-image-2"
   ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "files": [
     "index.ts",
+    "extensions",
+    "src",
     "skills",
     "README.md",
-    "LICENSE",
     "NOTICE",
+    "LICENSE",
     "CHANGELOG.md",
     "SECURITY.md",
     "CONTRIBUTING.md",
@@ -35,6 +40,7 @@
   ],
   "scripts": {
     "check": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "pack:dry-run": "npm pack --dry-run"
   },
   "pi": {
@@ -54,7 +60,7 @@
     "@earendil-works/pi-ai": "^0.75.4",
     "@earendil-works/pi-coding-agent": "^0.75.4",
     "typebox": "^1.1.33",
-    "@types/node": "^25.6.0",
+    "@types/node": "^25.6.2",
     "typescript": "^6.0.3"
   },
   "publishConfig": {

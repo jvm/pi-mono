@@ -4,9 +4,9 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
-    "noEmit": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node"],
+    "noEmit": true
   },
-  "include": ["*.ts", "skills/**/*.ts"]
+  "include": ["index.ts", "src/**/*.ts", "extensions/**/*.ts"]
 }

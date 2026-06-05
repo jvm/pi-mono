@@ -6,6 +6,13 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-06-06
+
+### Changed
+
+- Restructured package to follow monorepo guidelines (added root `index.ts` re-export, moved extension code to `extensions/index.ts`, extracted telemetry to `src/install-telemetry.ts`).
+- Update `author` field to full name for monorepo consistency.
+
 ## [0.1.9] - 2026-05-20
 
 ### Changed
