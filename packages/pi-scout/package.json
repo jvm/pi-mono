@@ -1,10 +1,10 @@
 {
   "name": "pi-scout",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Register local reference codebases for Pi agent exploration.",
   "type": "module",
   "license": "MIT",
-  "author": "jvm",
+  "author": "Jose Mocito",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jvm/pi-mono.git",

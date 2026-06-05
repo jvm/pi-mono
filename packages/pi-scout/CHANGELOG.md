@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-06-06
+
+### Changed
+
+- Update `author` field to full name for monorepo consistency.
+
 ## [0.1.1] - TBD
 
 ### Added
