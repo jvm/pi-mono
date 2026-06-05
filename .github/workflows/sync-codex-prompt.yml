@@ -1,0 +1,138 @@
+name: Check Codex Prompt Sync
+
+on:
+  schedule:
+    - cron: '0 9 * * *'  # Daily at 9 AM UTC
+  workflow_dispatch:      # Manual trigger
+  push:
+    paths:
+      - 'packages/pi-agentsmd/prompts/init.md'
+      - '.github/workflows/sync-codex-prompt.yml'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      
+      - name: Fetch original prompt from Codex
+        run: |
+          curl -fsSL -o /tmp/codex-prompt.md \
+            "https://raw.githubusercontent.com/openai/codex/main/codex-rs/tui/prompt_for_init_command.md"
+          
+          if [ ! -s /tmp/codex-prompt.md ]; then
+            echo "::error::Failed to fetch original prompt from Codex repo"
+            exit 1
+          fi
+          
+          echo "Fetched original prompt ($(wc -c < /tmp/codex-prompt.md) bytes)"
+      
+      - name: Compare prompts
+        id: compare
+        run: |
+          LOCAL_FILE="packages/pi-agentsmd/prompts/init.md"
+          REMOTE_FILE="/tmp/codex-prompt.md"
+          
+          # Generate diff
+          DIFF_OUTPUT=$(diff -u "$LOCAL_FILE" "$REMOTE_FILE" || true)
+          
+          if [ -z "$DIFF_OUTPUT" ]; then
+            echo "status=in-sync" >> $GITHUB_OUTPUT
+            echo "✅ Prompts are in sync"
+          else
+            echo "status=differs" >> $GITHUB_OUTPUT
+            echo "diff<<EOF" >> $GITHUB_OUTPUT
+            echo "$DIFF_OUTPUT" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            echo "❌ Prompts differ"
+            echo ""
+            echo "Diff:"
+            echo "$DIFF_OUTPUT"
+          fi
+      
+      - name: Check for existing issue
+        if: steps.compare.outputs.status == 'differs'
+        id: check-issue
+        run: |
+          # Check if there's already an open issue about this
+          EXISTING=$(gh issue list --label "codex-prompt-sync" --state open --json number --jq '.[0].number // empty')
+          
+          if [ -n "$EXISTING" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "number=$EXISTING" >> $GITHUB_OUTPUT
+            echo "Found existing issue #$EXISTING"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "No existing issue found"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Create issue
+        if: steps.compare.outputs.status == 'differs' && steps.check-issue.outputs.exists != 'true'
+        run: |
+          # Save diff to file for the issue body
+          echo "${{ steps.compare.outputs.diff }}" > /tmp/prompt-diff.txt
+          
+          # Create issue with diff
+          gh issue create \
+            --title "Codex prompt has changed upstream" \
+            --label "codex-prompt-sync,enhancement" \
+            --body "## Upstream Change Detected
+
+The original prompt in the [OpenAI Codex repository](https://github.com/openai/codex/blob/main/codex-rs/tui/prompt_for_init_command.md) has changed.
+
+### Action Required
+
+Review the changes and update \`packages/pi-agentsmd/prompts/init.md\` accordingly.
+
+### Changes
+
+\`\`\`diff
+$(cat /tmp/prompt-diff.txt)
+\`\`\`
+
+### References
+
+- Source: https://github.com/openai/codex/blob/main/codex-rs/tui/prompt_for_init_command.md
+- Local file: packages/pi-agentsmd/prompts/init.md
+- THIRD-PARTY-NOTICES: packages/pi-agentsmd/THIRD-PARTY-NOTICES
+
+---
+*This issue was created automatically by the [Codex Prompt Sync](${{ github.server_url }}/${{ github.repository }}/actions/workflows/sync-codex-prompt.yml) workflow.*"
+          
+          echo "✅ Issue created"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Update existing issue
+        if: steps.compare.outputs.status == 'differs' && steps.check-issue.outputs.exists == 'true'
+        run: |
+          ISSUE_NUM="${{ steps.check-issue.outputs.number }}"
+          
+          gh issue comment "$ISSUE_NUM" \
+            --body "## Update: Upstream prompt still differs
+
+The prompt was checked again and differences still exist.
+
+### Latest Diff
+
+\`\`\`diff
+${{ steps.compare.outputs.diff }}
+\`\`\`
+
+---
+*Updated automatically by the [Codex Prompt Sync](${{ github.server_url }}/${{ github.repository }}/actions/workflows/sync-codex-prompt.yml) workflow.*"
+          
+          echo "✅ Updated issue #$ISSUE_NUM"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
