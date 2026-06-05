@@ -1,10 +1,10 @@
 {
-  "name": "@mocito/pi-goal",
+  "name": "pi-goal",
   "version": "0.1.2",
   "description": "Persistent long-running goals for Pi.",
   "type": "module",
   "license": "MIT",
-  "author": "jvm",
+  "author": "Jose Mocito",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jvm/pi-mono.git",
@@ -26,10 +26,11 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/index.ts"
+      "./index.ts"
     ]
   },
   "files": [
+    "index.ts",
     "extensions",
     "src",
     "README.md",
@@ -43,7 +44,6 @@
     "check": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.mjs",
-    "format": "tsc --noEmit",
     "pack:dry-run": "npm pack --dry-run"
   },
   "peerDependencies": {

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3 - 2026-06-06
+
+### Changed
+
+- Rename package from `@mocito/pi-goal` to `pi-goal` (unscoped).
+- Aligned package structure with monorepo guidelines (added root `index.ts` re-export, `.editorconfig`, `.gitignore`; fixed extension entry point; removed non-canonical tsconfig flags).
+- Update `author` field to full name for monorepo consistency.
+
 ## 0.1.2
 
 - Move the extension entry point to `extensions/index.ts` so Pi displays the package extension compactly.
