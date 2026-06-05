@@ -6,6 +6,16 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-06-06
+
+### Changed
+
+- Extract install telemetry to separate `src/install-telemetry.ts` module for consistency with monorepo guidelines.
+- Add root `index.ts` re-export and fix `pi.extensions` path to `./index.ts`.
+- Update `peerDependencies` to use `*` for Pi core packages.
+- Add Pi core packages to `devDependencies` for type checking.
+- Update `author` field to full name.
+
 ## [0.1.5] - 2026-05-20
 
 ### Changed

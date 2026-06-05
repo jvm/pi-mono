@@ -1,10 +1,10 @@
 {
   "name": "pi-web-kit",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Context-efficient web search and fetch tools for Pi.",
   "type": "module",
   "license": "MIT",
-  "author": "jvm",
+  "author": "Jose Mocito",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jvm/pi-mono.git",
@@ -28,10 +28,11 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/index.ts"
+      "./index.ts"
     ]
   },
   "files": [
+    "index.ts",
     "extensions",
     "src",
     "README.md",
@@ -48,14 +49,18 @@
     "pack:dry-run": "npm pack --dry-run"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "^0.75.4",
-    "@earendil-works/pi-coding-agent": "^0.75.4",
-    "@earendil-works/pi-tui": "^0.75.4",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "^0.75.4",
+    "@earendil-works/pi-coding-agent": "^0.75.4",
+    "@earendil-works/pi-tui": "^0.75.4",
     "@types/node": "^25.6.2",
     "tsx": "^4.21.0",
+    "typebox": "^1.1.33",
     "typescript": "^6.0.3"
   },
   "publishConfig": {
