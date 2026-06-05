@@ -1,8 +1,10 @@
 node_modules/
 dist/
 *.tgz
-PLAN.md
+*.tsbuildinfo
 .DS_Store
 .env
 .env.*
 !.env.example
+npm-debug.log*
+PLAN.md

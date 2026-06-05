@@ -6,6 +6,13 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-06-06
+
+### Changed
+
+- Aligned package structure with monorepo guidelines (added root `index.ts` re-export, `src/index.ts`, fixed extension entry point).
+- Update `author` field to full name for monorepo consistency.
+
 ## [0.3.7] - 2026-05-20
 
 ### Changed
