@@ -18,6 +18,19 @@ For now, this repo contains only packages under `packages/*`.
 
 - Keep package names purpose-specific; do not create generic buckets such as `pi-prompt-templates`.
 - Use conventional Pi resource directories inside a package: `extensions/`, `skills/`, `prompts/`, and `themes/`.
+- Every package with extensions must include a root-level `index.ts` that re-exports the extension entry point, and configure the `pi` manifest to reference `./index.ts` (not `./extensions/index.ts`). This ensures Pi displays the extension as the package name (e.g., "pi-agentsmd") rather than the internal path.
+  ```ts
+  // index.ts (package root)
+  export { default } from "./extensions/index.js";
+  ```
+  ```json
+  // package.json
+  {
+    "pi": {
+      "extensions": ["./index.ts"]
+    }
+  }
+  ```
 - Every publishable package must include the `pi-package` keyword and a correct `pi` manifest in `package.json`.
 - Keep npm publishing metadata package-local:
   - `repository.url`: `git+https://github.com/jvm/pi-mono.git`
