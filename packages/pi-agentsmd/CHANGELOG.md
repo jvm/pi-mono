@@ -1,0 +1,16 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+This project follows the spirit of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and uses semantic versioning for releases.
+
+## [Unreleased]
+
+## [0.1.0] - TBD
+
+### Added
+
+- Initial `pi-agentsmd` package scaffold.
+- `/init` command to generate an `AGENTS.md` contributor guide for the current repository.
+- `--force` flag to overwrite an existing `AGENTS.md` file.
+- Init prompt adapted from OpenAI Codex (Apache 2.0).
