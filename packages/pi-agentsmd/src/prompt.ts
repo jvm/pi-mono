@@ -5,6 +5,6 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export const INIT_PROMPT = readFileSync(
-  join(__dirname, "../../prompts/init.md"),
+  join(__dirname, "../prompts/init.md"),
   "utf8",
 );
