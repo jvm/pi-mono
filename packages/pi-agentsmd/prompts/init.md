@@ -34,7 +34,7 @@ Testing Guidelines
 
 Commit & Pull Request Guidelines
 
-- Summarize commit message conventions found in the project's Git history.
+- Summarize commit message conventions found in the project’s Git history.
 - Outline pull request requirements (descriptions, linked issues, screenshots, etc.).
 
 (Optional) Add other sections if relevant, such as Security & Configuration Tips, Architecture Overview, or Agent-Specific Instructions.
