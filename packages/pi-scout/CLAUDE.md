@@ -5,7 +5,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with `p
 ## Commands
 
 ```bash
-npm install          # install deps
 npm run check        # type-check (tsc --noEmit)
 npm run pack:dry-run # verify published package contents
 ```
@@ -18,16 +17,17 @@ pi -e /path/to/pi-mono/packages/pi-scout --print "list your tools"
 
 ## Architecture
 
-`pi-scout` is a source-distributed Pi package. Pi loads TypeScript directly; there is no `dist/`.
+`pi-scout` is a source-distributed Pi package (no build step, Pi loads TypeScript directly).
 
-- `index.ts`: package-level Pi extension entry point for clean startup display names.
-- `extensions/index.ts`: extension wiring.
-- `src/index.ts`: public package surface.
+### Data flow
 
-The package is currently scaffolded and intentionally behavior-light until its product scope is defined.
+`/scout` command or `scout_add` tool → `src/repo.ts` (shallow clone into `/tmp/pi-scout/`) → `src/state.ts` (persists to `<agentDir>/scout/repos.json`) → `before_agent_start` hook reads state and injects a system prompt snippet via `src/prompt.ts` listing registered repo paths.
 
-## Coding conventions
+### Key modules
 
-- ESM TypeScript, 2-space indentation, explicit `.js` import specifiers for local TypeScript modules.
-- New reusable logic belongs in `src/`; Pi wiring belongs in `extensions/index.ts`; root `index.ts` should stay a thin re-export.
-- When adding tools or commands, update README usage docs and add validation/tests where appropriate.
+| Module | Role |
+|---|---|
+| `extensions/index.ts` | Registers `scout_add`/`scout_rm` tools and `/scout` command; `scout_rm` is registered lazily and toggled active only when repos exist; injects scout context via `before_agent_start`. |
+| `src/repo.ts` | Clones repos via `git clone --depth 1` into `/tmp/pi-scout/` (or `PI_SCOUT_TMPDIR`); resolves GitHub `owner/repo` shorthand to HTTPS URLs. |
+| `src/state.ts` | Reads/writes `<agentDir>/scout/repos.json`; `loadPrunedState()` auto-removes records whose clone paths no longer exist on disk. |
+| `src/prompt.ts` | Builds the `before_agent_start` system prompt snippet: a plain list of `name: path` entries prefixed with "Scout repos:". |
