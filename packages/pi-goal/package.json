@@ -1,5 +1,5 @@
 {
-  "name": "pi-goal",
+  "name": "@mocito/pi-goal",
   "version": "0.1.6",
   "description": "Persistent long-running goals for Pi.",
   "type": "module",

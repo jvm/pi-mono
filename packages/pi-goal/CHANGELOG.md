@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Rename package from `@mocito/pi-goal` to `pi-goal` (unscoped).
+- Revert package name to `@mocito/pi-goal` (scoped) due to npm name conflict.
 - Aligned package structure with monorepo guidelines (added root `index.ts` re-export, `.editorconfig`, `.gitignore`; fixed extension entry point; removed non-canonical tsconfig flags).
 - Update `author` field to full name for monorepo consistency.
 
