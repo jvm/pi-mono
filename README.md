@@ -8,6 +8,7 @@ Monorepo for Pi-related projects: installable Pi packages, skills, prompt templa
 | --- | --- |
 | [pi-codex-image-gen](./packages/pi-codex-image-gen) | Image generation for Pi using the ChatGPT Images 2.0 model. |
 | [pi-goal](./packages/pi-goal) | Persistent long-running goals for Pi. |
+| [pi-insomnia](./packages/pi-insomnia) | Prevent macOS idle sleep while Pi agents are working. |
 | [pi-scout](./packages/pi-scout) | Register local reference codebases for Pi agent exploration. |
 | [pi-skillful](./packages/pi-skillful) | Pi package with skill invocation and visibility improvements. |
 | [pi-web-kit](./packages/pi-web-kit) | Context-efficient web search and fetch tools for Pi. |
