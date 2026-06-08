@@ -6,7 +6,13 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
-## [0.1.0] - TBD
+## [0.1.1] - 2026-06-08
+
+### Fixed
+
+- Apostrophe encoding in init prompt to match upstream Codex
+
+## [0.1.0] - 2026-06-05
 
 ### Added
 
