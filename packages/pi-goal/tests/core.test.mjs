@@ -65,6 +65,17 @@ test("accounting does not compound active elapsed time", () => {
   assert.equal(realizedTimeUsed(twice, start + 20_000), 20);
 });
 
+test("legacy account mutations with elapsed time do not inflate reconstructed time", () => {
+  const create = createGoalMutation("ship it");
+  const account = { schemaVersion: 1, kind: "account", goalId: create.goalId, tokens: 10, entryIds: ["a"], timeUsedSeconds: 3600, at: create.at };
+  const goal = reconstructGoalState([
+    { type: "custom", customType: "pi-goal", id: "1", timestamp: create.at, data: create },
+    { type: "custom", customType: "pi-goal", id: "2", timestamp: create.at, data: account },
+  ]);
+  assert.equal(goal.tokensUsed, 10);
+  assert.equal(goal.timeUsedSeconds, 0);
+});
+
 test("extracts usage fallback fields", () => {
   assert.equal(assistantUsageTokens({ role: "assistant", usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } }), 10);
 });
@@ -85,7 +96,7 @@ test("prompt includes strict goal instructions", () => {
   const goal = reconstructGoalState([{ type: "custom", customType: "pi-goal", id: "1", data: create }]);
   const prompt = buildGoalContextMessage(goal, "continue");
   assert.match(prompt, /objective below is JSON-encoded user-provided task data/);
-  assert.match(prompt, /update_goal\(\{ status: "complete" \}\)/);
+  assert.match(prompt, /Invoke the update_goal tool with status "complete"/);
 });
 
 test("prompt JSON-encodes objective to prevent delimiter injection", () => {

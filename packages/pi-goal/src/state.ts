@@ -1,18 +1,19 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { BranchEntry, GoalMutation, GoalState, GoalStatus } from "./types.js";
+import type { BranchEntry, GoalMutation, GoalMutationMeta, GoalState, GoalStatus } from "./types.js";
 import { GOAL_ENTRY_TYPE, GOAL_SCHEMA_VERSION } from "./types.js";
+import { withPiGoalVersion } from "./metadata.js";
 import { newGoalId, nowIso } from "./utils.js";
 
 export function appendGoalMutation(pi: ExtensionAPI, mutation: GoalMutation): void {
   pi.appendEntry(GOAL_ENTRY_TYPE, mutation);
 }
 
-export function createGoalMutation(objective: string, tokenBudget?: number): GoalMutation {
-  return { schemaVersion: GOAL_SCHEMA_VERSION, kind: "create", goalId: newGoalId(), objective, tokenBudget, at: nowIso() };
+export function createGoalMutation(objective: string, tokenBudget?: number, meta?: GoalMutationMeta): GoalMutation {
+  return { schemaVersion: GOAL_SCHEMA_VERSION, kind: "create", goalId: newGoalId(), objective, tokenBudget, at: nowIso(), meta: withPiGoalVersion(meta) };
 }
 
-export function replaceGoalMutation(objective: string, tokenBudget?: number): GoalMutation {
-  return { schemaVersion: GOAL_SCHEMA_VERSION, kind: "replace", goalId: newGoalId(), objective, tokenBudget, at: nowIso() };
+export function replaceGoalMutation(objective: string, tokenBudget?: number, meta?: GoalMutationMeta): GoalMutation {
+  return { schemaVersion: GOAL_SCHEMA_VERSION, kind: "replace", goalId: newGoalId(), objective, tokenBudget, at: nowIso(), meta: withPiGoalVersion(meta) };
 }
 
 export function reconstructGoalState(branchEntries: BranchEntry[], diagnostics: string[] = []): GoalState | null {
@@ -75,6 +76,6 @@ function isKnownMutation(value: Partial<GoalMutation> | undefined): value is Goa
   return value.kind === "clear";
 }
 
-export function statusMutation(goal: GoalState, status: GoalStatus, timeUsedSeconds: number, activeStartedAt?: string): GoalMutation {
-  return { schemaVersion: GOAL_SCHEMA_VERSION, kind: "status", goalId: goal.goalId, status, timeUsedSeconds, activeStartedAt, at: nowIso() };
+export function statusMutation(goal: GoalState, status: GoalStatus, timeUsedSeconds: number, activeStartedAt?: string, meta?: GoalMutationMeta): GoalMutation {
+  return { schemaVersion: GOAL_SCHEMA_VERSION, kind: "status", goalId: goal.goalId, status, timeUsedSeconds, activeStartedAt, at: nowIso(), meta: withPiGoalVersion(meta) };
 }

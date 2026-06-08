@@ -3,6 +3,7 @@ import type { GoalMutation, GoalState, ParsedGoalCommand } from "./types.js";
 import { GOAL_EVENT_TYPE, GOAL_SCHEMA_VERSION, GOAL_SUMMARY_TYPE } from "./types.js";
 import { accountUsageFromBranch } from "./accounting.js";
 import { appendGoalMutation, applyGoalMutation, createGoalMutation, replaceGoalMutation, statusMutation } from "./state.js";
+import { PI_GOAL_VERSION, transitionMeta, withPiGoalVersion } from "./metadata.js";
 import { formatElapsed, goalToSummary, goalUsageSummary, nowIso, realizedTimeUsed } from "./utils.js";
 import { validateObjective, validateTokenBudget } from "./validation.js";
 
@@ -47,13 +48,13 @@ function showStatus(pi: ExtensionAPI, ctx: ExtensionCommandContext, goal: GoalSt
   if (!goal) {
     const text = "No goal set. Usage: /goal <objective> or /goal --budget 50000 <objective>.";
     ctx.ui.notify(text, "info");
-    pi.sendMessage({ customType: GOAL_SUMMARY_TYPE, content: text, display: true, details: { goal: null } });
+    pi.sendMessage({ customType: GOAL_SUMMARY_TYPE, content: text, display: true, details: { goal: null, piGoalVersion: PI_GOAL_VERSION } });
     return;
   }
   const summary = goalToSummary(goal);
   const budget = summary.tokenBudget ? `\nBudget: ${summary.tokensUsed}/${summary.tokenBudget} tokens (${summary.remainingTokens} remaining)` : "";
   const text = `Goal ${summary.status}\nObjective: ${summary.objective}\nUsage: ${goalUsageSummary(summary)}${budget}\nCommands: /goal pause, /goal resume, /goal edit, /goal budget <n>, /goal clear`;
-  pi.sendMessage({ customType: GOAL_SUMMARY_TYPE, content: text, display: true, details: { goal: summary } });
+  pi.sendMessage({ customType: GOAL_SUMMARY_TYPE, content: text, display: true, details: { goal: summary, piGoalVersion: PI_GOAL_VERSION } });
 }
 
 async function createOrReplace(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime: CommandRuntime, rawObjective: unknown, rawBudget: unknown): Promise<void> {
@@ -67,7 +68,7 @@ async function createOrReplace(pi: ExtensionAPI, ctx: ExtensionCommandContext, r
     const ok = await ctx.ui.confirm("Replace current goal?", `Current goal (${existing.status}): ${existing.objective}`);
     if (!ok) return;
   }
-  const mutation = existing ? replaceGoalMutation(objective.value, budget.value) : createGoalMutation(objective.value, budget.value);
+  const mutation = existing ? replaceGoalMutation(objective.value, budget.value, { source: "command:/goal" }) : createGoalMutation(objective.value, budget.value, { source: "command:/goal" });
   appendGoalMutation(pi, mutation);
   runtime.setGoal(applyGoalMutation(existing, mutation));
   runtime.afterGoalChanged(ctx, existing ? "Goal replaced." : "Goal created.");
@@ -83,7 +84,7 @@ async function editGoal(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime:
   const objective = validateObjective(next);
   if (!objective.ok) return ctx.ui.notify(objective.error, "error");
   const reactivate = current.status === "complete" || current.status === "budget_limited";
-  const mutation: GoalMutation = { schemaVersion: GOAL_SCHEMA_VERSION, kind: "edit", goalId: current.goalId, objective: objective.value, status: reactivate ? "active" : current.status, at: nowIso() };
+  const mutation: GoalMutation = { schemaVersion: GOAL_SCHEMA_VERSION, kind: "edit", goalId: current.goalId, objective: objective.value, status: reactivate ? "active" : current.status, at: nowIso(), meta: withPiGoalVersion({ source: "command:/goal edit" }) };
   appendGoalMutation(pi, mutation);
   runtime.setGoal(applyGoalMutation(current, mutation));
   runtime.afterGoalChanged(ctx, "Goal updated.");
@@ -95,7 +96,7 @@ function setGoalStatus(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime: 
   if (!current) return ctx.ui.notify("No goal set.", "error");
   const time = status === "active" ? current.timeUsedSeconds : realizedTimeUsed(current);
   const activeStartedAt = status === "active" ? nowIso() : undefined;
-  const mutation = statusMutation(current, status, time, activeStartedAt);
+  const mutation = statusMutation(current, status, time, activeStartedAt, transitionMeta(status === "active" ? "command:/goal resume" : "command:/goal pause", current, time, nowIso()));
   appendGoalMutation(pi, mutation);
   runtime.setGoal(applyGoalMutation(current, mutation));
   runtime.afterGoalChanged(ctx, status === "active" ? "Goal resumed." : "Goal paused.");
@@ -105,7 +106,8 @@ function setGoalStatus(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime: 
 function clearGoal(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime: CommandRuntime): void {
   const current = accountCurrent(pi, ctx, runtime.getGoal());
   if (!current) return ctx.ui.notify("No goal set.", "error");
-  appendGoalMutation(pi, { schemaVersion: GOAL_SCHEMA_VERSION, kind: "clear", goalId: current.goalId, timeUsedSeconds: realizedTimeUsed(current), at: nowIso() });
+  const time = realizedTimeUsed(current);
+  appendGoalMutation(pi, { schemaVersion: GOAL_SCHEMA_VERSION, kind: "clear", goalId: current.goalId, timeUsedSeconds: time, at: nowIso(), meta: transitionMeta("command:/goal clear", current, time, nowIso()) });
   runtime.setGoal(null);
   runtime.afterGoalChanged(ctx, "Goal cleared.");
 }
@@ -115,11 +117,12 @@ function setBudget(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime: Comm
   if (!current) return ctx.ui.notify("No goal set.", "error");
   const budget = validateTokenBudget(rawBudget, { allowEmpty: rawBudget === undefined });
   if (!budget.ok) return ctx.ui.notify(budget.error, "error");
-  const mutation: GoalMutation = { schemaVersion: GOAL_SCHEMA_VERSION, kind: "budget", goalId: current.goalId, tokenBudget: budget.value, at: nowIso() };
+  const mutation: GoalMutation = { schemaVersion: GOAL_SCHEMA_VERSION, kind: "budget", goalId: current.goalId, tokenBudget: budget.value, at: nowIso(), meta: withPiGoalVersion({ source: "command:/goal budget" }) };
   appendGoalMutation(pi, mutation);
   let next = applyGoalMutation(current, mutation)!;
   if (next.tokenBudget != null && next.tokensUsed >= next.tokenBudget && next.status === "active") {
-    const limited = statusMutation(next, "budget_limited", realizedTimeUsed(next), undefined);
+    const time = realizedTimeUsed(next);
+    const limited = statusMutation(next, "budget_limited", time, undefined, transitionMeta("budget", next, time, nowIso()));
     appendGoalMutation(pi, limited);
     next = applyGoalMutation(next, limited)!;
   }

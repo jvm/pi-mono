@@ -1,5 +1,6 @@
 import type { BranchEntry, GoalMutation, GoalState } from "./types.js";
 import { GOAL_SCHEMA_VERSION } from "./types.js";
+import { withPiGoalVersion } from "./metadata.js";
 import { nowIso } from "./utils.js";
 
 export interface UsageAccountingResult {
@@ -23,11 +24,17 @@ export function accountUsageFromBranch(goal: GoalState, branchEntries: BranchEnt
   const accounted = new Set(goal.accountedUsage.entryIds);
   const createdMs = Date.parse(goal.createdAt);
   let addedTokens = 0;
+  let scannedAssistantEntries = 0;
+  let cacheTokensIncluded = false;
   const addedEntryIds: string[] = [];
   for (const entry of branchEntries) {
-    if (entry?.type !== "message" || !entry.id || accounted.has(entry.id)) continue;
+    if (entry?.type !== "message" || !entry.id || entry.message?.role !== "assistant") continue;
+    scannedAssistantEntries++;
+    if (accounted.has(entry.id)) continue;
     const entryMs = Date.parse(entry.timestamp ?? "");
     if (Number.isFinite(createdMs) && Number.isFinite(entryMs) && entryMs < createdMs) continue;
+    const usage = entry.message?.usage;
+    if (usage && (Number.isFinite(usage.cacheRead) || Number.isFinite(usage.cacheWrite))) cacheTokensIncluded = true;
     const tokens = assistantUsageTokens(entry.message);
     if (tokens <= 0) continue;
     addedTokens += tokens;
@@ -42,6 +49,10 @@ export function accountUsageFromBranch(goal: GoalState, branchEntries: BranchEnt
     tokens: addedTokens,
     entryIds: addedEntryIds,
     at: nowIso(),
+    meta: withPiGoalVersion({
+      source: "accounting",
+      accounting: { scannedAssistantEntries, addedEntryCount: addedEntryIds.length, cacheTokensIncluded },
+    }),
   };
   return {
     mutation,

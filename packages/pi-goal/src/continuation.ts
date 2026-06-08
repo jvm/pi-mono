@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { buildGoalContextMessage } from "./prompts.js";
+import { PI_GOAL_VERSION } from "./metadata.js";
 import { GOAL_CONTEXT_TYPE } from "./types.js";
 import type { GoalContextReason, GoalState } from "./types.js";
 
@@ -41,7 +42,7 @@ export class GoalContinuationScheduler {
         customType: GOAL_CONTEXT_TYPE,
         content: buildGoalContextMessage(goal, reason === "created" || reason === "resumed" || reason === "objective_updated" ? reason : "continue"),
         display: false,
-        details: { goalId: goal.goalId, reason, turnCount: this.turnCount },
+        details: { goalId: goal.goalId, reason, turnCount: this.turnCount, piGoalVersion: PI_GOAL_VERSION, status: goal.status, usage: { tokensUsed: goal.tokensUsed, timeUsedSeconds: goal.timeUsedSeconds } },
       }, { triggerTurn: true, deliverAs: ctx.isIdle() ? "steer" : "followUp" });
     } finally {
       this.inFlight = false;

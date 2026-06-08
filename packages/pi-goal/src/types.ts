@@ -31,11 +31,46 @@ export interface GoalState {
   blockedAudit?: BlockedAuditState;
 }
 
+export interface GoalMutationMeta {
+  piGoalVersion?: string;
+  source?: string;
+  trigger?: {
+    messageId?: string;
+    toolCallId?: string;
+    siblingToolCalls?: Array<{ id?: string; name?: string }>;
+    continuationReason?: string;
+  };
+  time?: {
+    activeStartedAt?: string;
+    endedAt?: string;
+    elapsedDeltaSeconds?: number;
+    realizedTimeUsedSeconds?: number;
+  };
+  accounting?: {
+    scannedAssistantEntries?: number;
+    addedEntryCount?: number;
+    cacheTokensIncluded?: boolean;
+  };
+  providerLimit?: {
+    kind?: string;
+    reason?: string;
+    resetHint?: string;
+    retryAfterSeconds?: number;
+  };
+  verification?: {
+    summary?: string;
+    checkedRequirements?: string[];
+    commands?: string[];
+    worktreeStatus?: "clean" | "dirty" | "unknown";
+  };
+}
+
 interface MutationBase {
   schemaVersion: 1;
   kind: string;
   at: string;
   goalId?: string;
+  meta?: GoalMutationMeta;
 }
 
 export type GoalMutation =

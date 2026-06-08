@@ -133,10 +133,37 @@ test("update_goal accounts current branch usage before terminal transition", asy
   const branch = [
     ...pi.entries.map((entry, i) => ({ type: "custom", customType: entry.customType, id: `c${i}`, timestamp: entry.data.at, data: entry.data })),
     { type: "message", id: "a1", timestamp: new Date().toISOString(), message: { role: "assistant", usage: { totalTokens: 12 } } },
+    { type: "message", id: "assistant", timestamp: new Date().toISOString(), message: { role: "assistant", content: [
+      { type: "toolCall", id: "2", name: "update_goal", arguments: { status: "blocked" } },
+    ] } },
   ];
-  const result = await pi.tools.get("update_goal").execute("2", { status: "blocked" }, undefined, undefined, makeCtx(branch));
+  const result = await pi.tools.get("update_goal").execute("2", { status: "blocked", verification: { summary: "blocked after retries", checked_requirements: ["network"], commands: ["npm test"], worktree_status: "dirty" } }, undefined, undefined, makeCtx(branch));
   assert.equal(result.details.goal.tokensUsed, 12);
   assert.equal(result.details.goal.status, "blocked");
+  const status = pi.entries.at(-1).data;
+  assert.equal(status.meta.source, "tool:update_goal:blocked");
+  assert.equal(status.meta.trigger.messageId, "assistant");
+  assert.equal(status.meta.verification.summary, "blocked after retries");
+  assert.equal(status.meta.verification.checkedRequirements[0], "network");
+});
+
+test("update_goal rejects mixed verification and terminal tool calls in one turn", async () => {
+  const pi = makePi();
+  let goal = null;
+  const runtime = { getGoal: () => goal, setGoal: (next) => { goal = next; }, afterGoalChanged: () => {}, clearContinuation: () => {} };
+  registerGoalTools(pi, runtime);
+  await pi.tools.get("create_goal").execute("create", { objective: "ship" }, undefined, undefined, makeCtx());
+  const branch = [
+    { type: "message", id: "assistant", timestamp: new Date().toISOString(), message: { role: "assistant", content: [
+      { type: "toolCall", id: "verify", name: "bash", arguments: { command: "npm test" } },
+      { type: "toolCall", id: "finish", name: "update_goal", arguments: { status: "complete" } },
+    ] } },
+  ];
+  await assert.rejects(
+    () => pi.tools.get("update_goal").execute("finish", { status: "complete" }, undefined, undefined, makeCtx(branch)),
+    /only tool call/,
+  );
+  assert.equal(goal.status, "active");
 });
 
 test("scheduler sends one hidden goal continuation when idle", async () => {

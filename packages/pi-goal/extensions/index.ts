@@ -8,6 +8,7 @@ import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import { registerGoalTools } from "../src/tools.js";
 import type { GoalState } from "../src/types.js";
 import { GOAL_EVENT_TYPE } from "../src/types.js";
+import { PI_GOAL_VERSION, transitionMeta } from "../src/metadata.js";
 import { nowIso, realizedTimeUsed } from "../src/utils.js";
 import { classifyAssistantError, classifyProviderLimit } from "../src/provider-limits.js";
 import type { ProviderLimitClassification } from "../src/provider-limits.js";
@@ -27,14 +28,22 @@ export default function piGoal(pi: ExtensionAPI) {
     updateGoalUi(ctx, goal);
     if (event) {
       ctx.ui.notify(event, "info");
-      pi.sendMessage({ customType: GOAL_EVENT_TYPE, content: event, display: true, details: { goal } });
+      pi.sendMessage({ customType: GOAL_EVENT_TYPE, content: event, display: true, details: { goal, piGoalVersion: PI_GOAL_VERSION } });
     }
     if (!goal || goal.status !== "active") scheduler.clear();
   }
 
   function pauseForProviderLimit(ctx: ExtensionContext, classification: ProviderLimitClassification): void {
     if (!goal || goal.status !== "active" || !classification.pause) return;
-    const limited = statusMutation(goal, "usage_limited", realizedTimeUsed(goal), undefined);
+    const time = realizedTimeUsed(goal);
+    const limited = statusMutation(goal, "usage_limited", time, undefined, transitionMeta("provider-limit", goal, time, nowIso(), {
+      providerLimit: {
+        kind: classification.kind,
+        reason: classification.reason,
+        resetHint: classification.resetHint,
+        retryAfterSeconds: classification.retryAfterSeconds,
+      },
+    }));
     appendGoalMutation(pi, limited);
     goal = applyGoalMutation(goal, limited);
     const suffix = classification.resetHint ? ` (${classification.resetHint})` : classification.retryAfterSeconds != null ? ` (retry after ${classification.retryAfterSeconds}s)` : "";
@@ -49,7 +58,8 @@ export default function piGoal(pi: ExtensionAPI) {
     if (result.mutation) appendGoalMutation(pi, result.mutation);
     goal = result.goal;
     if (goal.status === "active" && isBudgetExceeded(goal)) {
-      const limited = statusMutation(goal, "budget_limited", realizedTimeUsed(goal), undefined);
+      const time = realizedTimeUsed(goal);
+      const limited = statusMutation(goal, "budget_limited", time, undefined, transitionMeta("budget", goal, time, nowIso()));
       appendGoalMutation(pi, limited);
       goal = applyGoalMutation(goal, limited);
       ctx.ui.notify("Goal token budget reached.", "warning");
@@ -83,7 +93,8 @@ export default function piGoal(pi: ExtensionAPI) {
     const diagnostics: string[] = [];
     goal = reconstructGoalState(ctx.sessionManager.getBranch() as any[], diagnostics);
     if (goal?.status === "active" && !goal.activeStartedAt) {
-      const resumed = statusMutation(goal, "active", realizedTimeUsed(goal), nowIso());
+      const time = realizedTimeUsed(goal);
+      const resumed = statusMutation(goal, "active", time, nowIso(), transitionMeta("session_start:reactivate", goal, time, nowIso()));
       appendGoalMutation(pi, resumed);
       goal = applyGoalMutation(goal, resumed);
     }
@@ -151,7 +162,8 @@ export default function piGoal(pi: ExtensionAPI) {
   });
   pi.on("session_shutdown", async (_event, ctx) => {
     if (goal?.status === "active") {
-      const stopped = statusMutation(goal, "active", realizedTimeUsed(goal), undefined);
+      const time = realizedTimeUsed(goal);
+      const stopped = statusMutation(goal, "active", time, undefined, transitionMeta("session_shutdown", goal, time, nowIso()));
       appendGoalMutation(pi, stopped);
     }
     scheduler.clear();
