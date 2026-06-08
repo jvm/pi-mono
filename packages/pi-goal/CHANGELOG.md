@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Stop compounding active elapsed time during token accounting; active time is now materialized only on status transitions and computed live for display.
+
+### Changed
+
+- Pause goals on assistant-surfaced provider usage/quota/billing limit errors and repeated provider failures, not only HTTP 429 response hooks.
+
 ## 0.1.6 - 2026-06-06
 
 ### Changed

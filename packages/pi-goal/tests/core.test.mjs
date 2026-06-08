@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { accountUsageFromBranch, assistantUsageTokens, buildGoalContextMessage, createGoalMutation, formatElapsed, formatTokensCompact, parseGoalCommand, reconstructGoalState, validateObjective, validateTokenBudget } from "../src/index.ts";
+import { accountUsageFromBranch, assistantUsageTokens, buildGoalContextMessage, classifyAssistantError, createGoalMutation, formatElapsed, formatTokensCompact, parseGoalCommand, realizedTimeUsed, reconstructGoalState, validateObjective, validateTokenBudget } from "../src/index.ts";
 
 test("validation rejects empty and long objectives", () => {
   assert.equal(validateObjective("  ").ok, false);
@@ -50,8 +50,34 @@ test("accounts assistant usage once", () => {
   assert.equal(again.addedTokens, 0);
 });
 
+test("accounting does not compound active elapsed time", () => {
+  const create = createGoalMutation("ship it");
+  const goal = reconstructGoalState([{ type: "custom", customType: "pi-goal", id: "1", timestamp: create.at, data: create }]);
+  const start = Date.parse(goal.activeStartedAt);
+  const branch = [
+    { type: "custom", customType: "pi-goal", id: "1", timestamp: create.at, data: create },
+    { type: "message", id: "a", timestamp: create.at, message: { role: "assistant", usage: { totalTokens: 1 } } },
+    { type: "message", id: "b", timestamp: create.at, message: { role: "assistant", usage: { totalTokens: 2 } } },
+  ];
+  const once = accountUsageFromBranch(goal, branch.slice(0, 2), start + 10_000).goal;
+  const twice = accountUsageFromBranch(once, branch, start + 20_000).goal;
+  assert.equal(twice.timeUsedSeconds, 0);
+  assert.equal(realizedTimeUsed(twice, start + 20_000), 20);
+});
+
 test("extracts usage fallback fields", () => {
   assert.equal(assistantUsageTokens({ role: "assistant", usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } }), 10);
+});
+
+test("classifies subscription usage limit assistant errors", () => {
+  const classification = classifyAssistantError({
+    role: "assistant",
+    stopReason: "error",
+    errorMessage: '429 {"type":"error","error":{"type":"GoUsageLimitError","message":"5-hour usage limit reached. Resets in 3hr 44min."}}',
+  });
+  assert.equal(classification.pause, true);
+  assert.equal(classification.kind, "usage_limit");
+  assert.equal(classification.resetHint, "resets in 3hr 44min");
 });
 
 test("prompt includes strict goal instructions", () => {

@@ -95,6 +95,28 @@ test("provider 429 transitions active goal to usage_limited", async () => {
   assert.match(ctx.ui.statuses.get("pi-goal"), /usage limits/);
 });
 
+test("assistant usage-limit error transitions active goal to usage_limited", async () => {
+  const pi = makePi();
+  piGoal(pi);
+  const ctx = makeCtx();
+  await pi.commands.get("goal").handler("ship", ctx);
+  await pi.handlers.get("message_end")[0]({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: '429 {"error":{"type":"GoUsageLimitError","message":"5-hour usage limit reached. Resets in 3hr 9min."}}' } }, ctx);
+  assert.equal(pi.entries.at(-1).data.status, "usage_limited");
+  assert.match(ctx.ui.notifications.at(-1).message, /resets in 3hr 9min/);
+});
+
+test("repeated assistant errors pause active goal", async () => {
+  const pi = makePi();
+  piGoal(pi);
+  const ctx = makeCtx();
+  await pi.commands.get("goal").handler("ship", ctx);
+  const handler = pi.handlers.get("message_end")[0];
+  await handler({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "terminated" } }, ctx);
+  await handler({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "terminated" } }, ctx);
+  await handler({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "terminated" } }, ctx);
+  assert.equal(pi.entries.at(-1).data.status, "usage_limited");
+});
+
 test("session_shutdown persists active elapsed time and clears UI", async () => {
   const pi = makePi();
   piGoal(pi);

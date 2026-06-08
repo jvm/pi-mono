@@ -1,6 +1,6 @@
 import type { BranchEntry, GoalMutation, GoalState } from "./types.js";
 import { GOAL_SCHEMA_VERSION } from "./types.js";
-import { nowIso, realizedTimeUsed } from "./utils.js";
+import { nowIso } from "./utils.js";
 
 export interface UsageAccountingResult {
   mutation?: GoalMutation;
@@ -34,14 +34,13 @@ export function accountUsageFromBranch(goal: GoalState, branchEntries: BranchEnt
     addedEntryIds.push(entry.id);
   }
   if (addedTokens === 0) return { goal, addedTokens: 0, addedEntryIds };
-  const timeUsedSeconds = realizedTimeUsed(goal, endMs);
+  void endMs;
   const mutation: GoalMutation = {
     schemaVersion: GOAL_SCHEMA_VERSION,
     kind: "account",
     goalId: goal.goalId,
     tokens: addedTokens,
     entryIds: addedEntryIds,
-    timeUsedSeconds,
     at: nowIso(),
   };
   return {
@@ -51,7 +50,6 @@ export function accountUsageFromBranch(goal: GoalState, branchEntries: BranchEnt
     goal: {
       ...goal,
       tokensUsed: goal.tokensUsed + addedTokens,
-      timeUsedSeconds,
       accountedUsage: {
         tokens: goal.tokensUsed + addedTokens,
         entryIds: [...goal.accountedUsage.entryIds, ...addedEntryIds],

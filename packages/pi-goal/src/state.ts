@@ -63,7 +63,7 @@ export function applyGoalMutation(current: GoalState | null, mutation: GoalMutat
     case "account": {
       const ids = [...new Set([...current.accountedUsage.entryIds, ...mutation.entryIds])];
       const tokens = current.tokensUsed + mutation.tokens;
-      return { ...current, tokensUsed: tokens, timeUsedSeconds: mutation.timeUsedSeconds ?? current.timeUsedSeconds, accountedUsage: { tokens, entryIds: ids }, updatedAt: mutation.at };
+      return { ...current, tokensUsed: tokens, accountedUsage: { tokens, entryIds: ids }, updatedAt: mutation.at };
     }
   }
 }

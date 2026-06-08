@@ -44,6 +44,8 @@ When an active goal is idle, the extension injects a hidden `pi-goal-context` me
 
 The footer and optional editor widget show status, elapsed active time, token usage, and budget.
 
+Provider usage-limit handling pauses active goals when Pi exposes HTTP 429 responses or assistant error messages that indicate subscription, quota, billing, balance, or repeated provider failures. This prevents automatic continuation from retrying indefinitely after provider limits such as 5-hour subscription caps.
+
 ## Examples
 
 Simple goal:
@@ -81,14 +83,14 @@ Environment flags:
 ## Troubleshooting
 
 - If continuation does not start, run `/goal status` and confirm the goal is `active`.
-- If a goal stops unexpectedly, check whether it reached its token budget or the provider returned a rate/usage limit.
+- If a goal stops unexpectedly, check whether it reached its token budget or the provider returned a rate/usage limit. Usage-limit pauses may include a provider reset hint when one is available.
 - If context appears stale after tree navigation or reload, run `/goal status`; branch state is reconstructed from the active branch.
 - In print/JSON modes, commands and tools work, but interactive confirmations/editors are unavailable.
 
 ## Limitations
 
 - Token budget is enforced after finalized assistant usage is visible; v1 cannot hard-stop mid-turn.
-- Usage-limit handling is best-effort via HTTP 429 provider responses.
+- Usage-limit handling is best-effort via HTTP responses and assistant error messages; provider transports vary in how much structured limit information they expose.
 - Automatic continuation is session-local, not a background daemon.
 
 ## Development and validation

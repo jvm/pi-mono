@@ -9,23 +9,38 @@ import { registerGoalTools } from "../src/tools.js";
 import type { GoalState } from "../src/types.js";
 import { GOAL_EVENT_TYPE } from "../src/types.js";
 import { nowIso, realizedTimeUsed } from "../src/utils.js";
+import { classifyAssistantError, classifyProviderLimit } from "../src/provider-limits.js";
+import type { ProviderLimitClassification } from "../src/provider-limits.js";
 import { clearGoalUi, updateGoalUi } from "../src/ui.js";
 
 export default function piGoal(pi: ExtensionAPI) {
   reportInstallTelemetry();
 
   let goal: GoalState | null = null;
+  let consecutiveAssistantErrors = 0;
   const scheduler = new GoalContinuationScheduler(pi, { getGoal: () => goal });
 
   const setGoal = (next: GoalState | null) => { goal = next; };
 
   function afterGoalChanged(ctx: ExtensionContext, event?: string): void {
+    if (event) consecutiveAssistantErrors = 0;
     updateGoalUi(ctx, goal);
     if (event) {
       ctx.ui.notify(event, "info");
       pi.sendMessage({ customType: GOAL_EVENT_TYPE, content: event, display: true, details: { goal } });
     }
     if (!goal || goal.status !== "active") scheduler.clear();
+  }
+
+  function pauseForProviderLimit(ctx: ExtensionContext, classification: ProviderLimitClassification): void {
+    if (!goal || goal.status !== "active" || !classification.pause) return;
+    const limited = statusMutation(goal, "usage_limited", realizedTimeUsed(goal), undefined);
+    appendGoalMutation(pi, limited);
+    goal = applyGoalMutation(goal, limited);
+    const suffix = classification.resetHint ? ` (${classification.resetHint})` : classification.retryAfterSeconds != null ? ` (retry after ${classification.retryAfterSeconds}s)` : "";
+    ctx.ui.notify(`Goal paused because the provider hit a usage/rate limit${suffix}.`, "warning");
+    updateGoalUi(ctx, goal);
+    scheduler.clear();
   }
 
   function accountAndEnforceBudget(ctx: ExtensionContext): void {
@@ -90,7 +105,22 @@ export default function piGoal(pi: ExtensionAPI) {
   });
 
   pi.on("message_end", async (event: any, ctx) => {
-    if (event.message?.role === "assistant") accountAndEnforceBudget(ctx);
+    if (event.message?.role !== "assistant") return;
+    const classification = classifyAssistantError(event.message);
+    if (classification.pause) {
+      consecutiveAssistantErrors = 0;
+      pauseForProviderLimit(ctx, classification);
+      return;
+    }
+    if (event.message?.stopReason === "error" || event.message?.errorMessage) {
+      consecutiveAssistantErrors++;
+      if (consecutiveAssistantErrors >= 3 && goal?.status === "active") {
+        pauseForProviderLimit(ctx, { kind: "provider_error", pause: true, reason: "repeated assistant provider errors" });
+      }
+      return;
+    }
+    consecutiveAssistantErrors = 0;
+    accountAndEnforceBudget(ctx);
   });
 
   pi.on("turn_end", async (_event, ctx) => {
@@ -103,13 +133,8 @@ export default function piGoal(pi: ExtensionAPI) {
   });
 
   pi.on("after_provider_response", async (event, ctx) => {
-    if (event.status !== 429 || !goal || goal.status !== "active") return;
-    const limited = statusMutation(goal, "usage_limited", realizedTimeUsed(goal), undefined);
-    appendGoalMutation(pi, limited);
-    goal = applyGoalMutation(goal, limited);
-    ctx.ui.notify("Goal paused because the provider returned a usage/rate limit.", "warning");
-    updateGoalUi(ctx, goal);
-    scheduler.clear();
+    if (!goal || goal.status !== "active") return;
+    pauseForProviderLimit(ctx, classifyProviderLimit({ status: event.status, headers: event.headers }));
   });
 
   pi.on("context", async (event) => {
