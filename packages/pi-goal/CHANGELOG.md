@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.7 - 2026-06-08
+
 ### Fixed
 
 - Stop compounding active elapsed time during token accounting; active time is now materialized only on status transitions and computed live for display.
