@@ -144,8 +144,6 @@ function prepareSuggestedVersion(cwd: string, packageInfo: PackageInfo, version:
 }
 
 async function run(command: string, cwd: string): Promise<CommandResult> {
-  console.log(`\n$ ${command}`);
-
   return await new Promise((resolve, reject) => {
     const child = spawn("bash", ["-lc", command], {
       cwd,
@@ -156,21 +154,18 @@ async function run(command: string, cwd: string): Promise<CommandResult> {
     let stderr = "";
 
     child.stdout?.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      stdout += text;
-      process.stdout.write(text);
+      stdout += chunk.toString();
     });
     child.stderr?.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      stderr += text;
-      process.stderr.write(text);
+      stderr += chunk.toString();
     });
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) {
         resolve({ stdout, stderr });
       } else {
-        reject(new Error(`Command failed with exit code ${code}: ${command}`));
+        const output = [stderr.trim(), stdout.trim()].filter(Boolean).join("\n");
+        reject(new Error(`Command failed with exit code ${code}: ${command}${output ? `\n${output}` : ""}`));
       }
     });
   });
@@ -386,7 +381,6 @@ export default function releaseExtension(pi: ExtensionAPI) {
           throw error;
         }
 
-        console.log(`\n${formattedPlan}\n`);
         const confirmed = await ctx.ui.confirm("Release package?", `${formattedPlan}\n\nProceed?`);
         if (!confirmed) {
           if (preparedSnapshots) restoreFiles(preparedSnapshots);
@@ -399,7 +393,6 @@ export default function releaseExtension(pi: ExtensionAPI) {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         ctx.ui.notify(message, "error");
-        console.error(message);
       }
     },
   });
