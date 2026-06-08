@@ -1,13 +1,14 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 type PackageName = string;
 
 interface PackageInfo {
   name: PackageName;
+  slug: string;
   dir: string;
   version?: string;
 }
@@ -24,6 +25,11 @@ interface ReleasePlan {
   tag: string;
   hasChanges: boolean;
   commands: string[];
+}
+
+interface FileSnapshot {
+  path: string;
+  content?: string;
 }
 
 function shellQuote(value: string): string {
@@ -48,7 +54,7 @@ function discoverPackages(cwd: string): PackageInfo[] {
           version?: string;
         };
         if (!packageJson.name || packageJson.private) return [];
-        return [{ name: packageJson.name, dir, version: packageJson.version }];
+        return [{ name: packageJson.name, slug: entry.name, dir, version: packageJson.version }];
       } catch {
         return [];
       }
@@ -56,21 +62,85 @@ function discoverPackages(cwd: string): PackageInfo[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function parseArgs(args: string): { packageName: PackageName; version: string } {
+function parseArgs(args: string): { packageName: PackageName; version?: string } {
   const parts = args.trim().split(/\s+/).filter(Boolean);
-  if (parts.length !== 2) {
-    throw new Error("Usage: /release-package <package> <version>");
+  if (parts.length < 1 || parts.length > 2) {
+    throw new Error("Usage: /release-package <package> [version]");
   }
 
   const [packageName, version] = parts;
   if (!/^(?:@[a-z0-9][a-z0-9-]*\/)?[a-z0-9][a-z0-9-]*$/.test(packageName)) {
     throw new Error(`Invalid package name: ${packageName}`);
   }
-  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
+  if (version && !isSemver(version)) {
     throw new Error(`Invalid semver version: ${version}`);
   }
 
   return { packageName, version };
+}
+
+function isSemver(value: string): boolean {
+  return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(value);
+}
+
+function suggestNextPatchVersion(version: string | undefined): string {
+  if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error(`Cannot suggest next version from current version: ${version ?? "<missing>"}`);
+  }
+  const [major, minor, patch] = version.split(".").map(Number);
+  return `${major}.${minor}.${patch + 1}`;
+}
+
+function findPackage(cwd: string, packageIdentifier: PackageName): PackageInfo {
+  const packages = discoverPackages(cwd);
+  const packageInfo = packages.find((pkg) => pkg.name === packageIdentifier || pkg.slug === packageIdentifier);
+  if (!packageInfo) {
+    const expected = packages.map((pkg) => (pkg.name === pkg.slug ? pkg.name : `${pkg.slug} (${pkg.name})`)).join(", ") || "no publishable packages found";
+    throw new Error(`Unknown package: ${packageIdentifier}. Expected one of: ${expected}`);
+  }
+  return packageInfo;
+}
+
+function snapshotFiles(paths: string[]): FileSnapshot[] {
+  return paths.map((path) => ({ path, content: existsSync(path) ? readFileSync(path, "utf8") : undefined }));
+}
+
+function restoreFiles(snapshots: FileSnapshot[]): void {
+  for (const snapshot of snapshots) {
+    if (snapshot.content !== undefined) writeFileSync(snapshot.path, snapshot.content);
+  }
+}
+
+function updateJsonFile(path: string, update: (value: any) => void): void {
+  const value = JSON.parse(readFileSync(path, "utf8"));
+  update(value);
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function prepareSuggestedVersion(cwd: string, packageInfo: PackageInfo, version: string): void {
+  const packageJsonPath = join(cwd, packageInfo.dir, "package.json");
+  const changelogPath = join(cwd, packageInfo.dir, "CHANGELOG.md");
+  const packageLockPath = join(cwd, "package-lock.json");
+
+  updateJsonFile(packageJsonPath, (packageJson) => {
+    packageJson.version = version;
+  });
+
+  if (existsSync(packageLockPath)) {
+    updateJsonFile(packageLockPath, (packageLock) => {
+      if (packageLock.packages?.[packageInfo.dir]) packageLock.packages[packageInfo.dir].version = version;
+    });
+  }
+
+  if (!existsSync(changelogPath)) return;
+  const changelog = readFileSync(changelogPath, "utf8");
+  if (changelog.includes(`## ${version}`)) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const unreleased = "## Unreleased";
+  const next = changelog.includes(unreleased)
+    ? changelog.replace(unreleased, `## Unreleased\n\n## ${version} - ${today}`)
+    : changelog.replace("# Changelog\n", `# Changelog\n\n## ${version} - ${today}\n`);
+  writeFileSync(changelogPath, next);
 }
 
 async function run(command: string, cwd: string): Promise<CommandResult> {
@@ -151,14 +221,9 @@ function ensureCleanEnoughForPackage(statusPaths: string[], packageDir: string):
   }
 }
 
-async function buildPlan(cwd: string, packageName: PackageName, version: string): Promise<ReleasePlan> {
-  const packages = discoverPackages(cwd);
-  const packageInfo = packages.find((pkg) => pkg.name === packageName);
-  if (!packageInfo) {
-    const expected = packages.map((pkg) => pkg.name).join(", ") || "no publishable packages found";
-    throw new Error(`Unknown package: ${packageName}. Expected one of: ${expected}`);
-  }
-
+async function buildPlan(cwd: string, packageIdentifier: PackageName, version: string): Promise<ReleasePlan> {
+  const packageInfo = findPackage(cwd, packageIdentifier);
+  const packageName = packageInfo.name;
   const packageDir = packageInfo.dir;
   const packageJsonPath = join(cwd, packageDir, "package.json");
   const changelogPath = join(cwd, packageDir, "CHANGELOG.md");
@@ -268,28 +333,63 @@ export default function releaseExtension(pi: ExtensionAPI) {
       const packages = discoverPackages(process.cwd());
       const [first = "", second = ""] = prefix.split(/\s+/, 2);
       if (prefix.includes(" ")) {
-        const packageInfo = packages.find((pkg) => pkg.name === first);
-        if (packageInfo?.version?.startsWith(second)) {
-          return [{ value: `${packageInfo.name} ${packageInfo.version}`, label: packageInfo.version }];
+        const packageInfo = packages.find((pkg) => pkg.name === first || pkg.slug === first);
+        if (!packageInfo) return null;
+        let suggested: string;
+        try {
+          suggested = suggestNextPatchVersion(packageInfo.version);
+        } catch {
+          return null;
+        }
+        if (suggested.startsWith(second)) {
+          return [{ value: `${packageInfo.slug} ${suggested}`, label: `${suggested} (next patch)` }];
         }
         return null;
       }
 
       const items = packages
-        .filter((pkg) => pkg.name.startsWith(first))
-        .map((pkg) => ({ value: pkg.name, label: pkg.name }));
+        .filter((pkg) => pkg.slug.startsWith(first) || pkg.name.startsWith(first))
+        .map((pkg) => ({ value: pkg.slug, label: pkg.name === pkg.slug ? pkg.slug : `${pkg.slug} (${pkg.name})` }));
       return items.length > 0 ? items : null;
     },
     handler: async (args, ctx) => {
       try {
         const cwd = process.cwd();
-        const { packageName, version } = parseArgs(args);
-        const plan = await buildPlan(cwd, packageName, version);
-        const formattedPlan = formatPlan(plan);
+        const { packageName, version: requestedVersion } = parseArgs(args);
+        let version = requestedVersion;
+        let preparedSnapshots: FileSnapshot[] | undefined;
+        if (!version) {
+          const packageInfo = findPackage(cwd, packageName);
+          version = suggestNextPatchVersion(packageInfo.version);
+          const confirmedVersion = await ctx.ui.confirm(
+            "Use suggested version?",
+            `Current version for ${packageInfo.name} is ${packageInfo.version}.\n\nPrepare and release ${version}?`,
+          );
+          if (!confirmedVersion) {
+            ctx.ui.notify("Release cancelled", "info");
+            return;
+          }
+          preparedSnapshots = snapshotFiles([
+            join(cwd, packageInfo.dir, "package.json"),
+            join(cwd, "package-lock.json"),
+            join(cwd, packageInfo.dir, "CHANGELOG.md"),
+          ]);
+          prepareSuggestedVersion(cwd, packageInfo, version);
+        }
+        let plan: ReleasePlan;
+        let formattedPlan: string;
+        try {
+          plan = await buildPlan(cwd, packageName, version);
+          formattedPlan = formatPlan(plan);
+        } catch (error) {
+          if (preparedSnapshots) restoreFiles(preparedSnapshots);
+          throw error;
+        }
 
         console.log(`\n${formattedPlan}\n`);
         const confirmed = await ctx.ui.confirm("Release package?", `${formattedPlan}\n\nProceed?`);
         if (!confirmed) {
+          if (preparedSnapshots) restoreFiles(preparedSnapshots);
           ctx.ui.notify("Release cancelled", "info");
           return;
         }
