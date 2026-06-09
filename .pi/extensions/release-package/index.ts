@@ -1,4 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { DynamicBorder, keyHint } from "@earendil-works/pi-coding-agent";
+import { CancellableLoader, Container, Spacer, Text } from "@earendil-works/pi-tui";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -299,20 +301,30 @@ function formatPlan(plan: ReleasePlan): string {
   ].join("\n");
 }
 
-async function executePlan(cwd: string, plan: ReleasePlan): Promise<void> {
+async function executePlan(cwd: string, plan: ReleasePlan, onProgress?: (label: string) => void): Promise<void> {
+  onProgress?.("Type checking");
   await run(`npm run check --workspace ${plan.packageDir}`, cwd);
+  onProgress?.("Running tests");
   await run(`npm test --workspace ${plan.packageDir} --if-present`, cwd);
+  onProgress?.("Validating package");
   await run(`npm run pack:dry-run --workspace ${plan.packageDir}`, cwd);
+  onProgress?.("Auditing dependencies");
   await run("npm audit --omit=dev", cwd);
+  onProgress?.("Checking git status");
   await run("git status --short", cwd);
 
   if (plan.hasChanges) {
+    onProgress?.("Staging package changes");
     await run(`git add ${plan.packageDir} package.json package-lock.json`, cwd);
+    onProgress?.("Committing release");
     await run(`git commit -m ${shellQuote(`Release ${plan.packageName} ${plan.version}`)}`, cwd);
   }
 
+  onProgress?.("Creating git tag");
   await run(`git tag ${shellQuote(plan.tag)}`, cwd);
+  onProgress?.("Pushing to remote");
   await run(`git push origin main ${shellQuote(plan.tag)}`, cwd);
+  onProgress?.("Creating GitHub release");
   await run(
     `gh release create ${shellQuote(plan.tag)} --title ${shellQuote(plan.tag)} --notes ${shellQuote(
       `Release ${plan.packageName} ${plan.version}.`,
@@ -388,7 +400,44 @@ export default function releaseExtension(pi: ExtensionAPI) {
           return;
         }
 
-        await executePlan(cwd, plan);
+        const releaseResult = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
+          const loader = new CancellableLoader(
+            tui,
+            (s: string) => theme.fg("accent", s),
+            (s: string) => theme.fg("muted", s),
+            "Starting release...",
+          );
+          loader.onAbort = () => done("cancelled");
+
+          const container = new Container();
+          container.addChild(new DynamicBorder((s: string) => theme.fg("border", s)));
+          container.addChild(loader);
+          container.addChild(new Spacer(1));
+          container.addChild(new Text(keyHint("tui.select.cancel", "cancel"), 1, 0));
+          container.addChild(new Spacer(1));
+          container.addChild(new DynamicBorder((s: string) => theme.fg("border", s)));
+
+          executePlan(cwd, plan, (label) => loader.setMessage(label))
+            .then(() => done("success"))
+            .catch((err: unknown) => done(err instanceof Error ? err.message : String(err)));
+
+          return {
+            render: (w: number) => container.render(w),
+            invalidate: () => container.invalidate(),
+            handleInput: (data: string) => loader.handleInput(data),
+          };
+        });
+
+        if (releaseResult === "cancelled") {
+          if (preparedSnapshots) restoreFiles(preparedSnapshots);
+          ctx.ui.notify("Release cancelled", "info");
+          return;
+        }
+        if (releaseResult !== "success") {
+          ctx.ui.notify(releaseResult || "Release failed", "error");
+          return;
+        }
+
         ctx.ui.notify(`Created release ${plan.tag}. GitHub Actions will publish the npm package.`, "info");
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
