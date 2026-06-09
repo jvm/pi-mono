@@ -28,21 +28,24 @@ jobs:
       # Download zizmor prebuilt binary from GitHub Releases instead of using
       # the Docker-based action, which can fail transiently on ghcr.io pull
       # timeouts. This approach is faster and more reliable on Linux runners.
+      # Uses the latest release (like the old Docker action's version: latest).
       - name: Install zizmor
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ZIZMOR_VERSION="v1.25.2"
-          gh release download "$ZIZMOR_VERSION" \
-            --repo zizmorcore/zizmor \
+          gh release download --repo zizmorcore/zizmor \
             --pattern 'zizmor-x86_64-unknown-linux-gnu.tar.gz' \
             --output /tmp/zizmor.tar.gz
           tar xzf /tmp/zizmor.tar.gz -C /usr/local/bin zizmor
           chmod +x /usr/local/bin/zizmor
 
+      - name: Verify zizmor version
+        run: zizmor --version
+
       - name: Run zizmor
         run: |
-          zizmor --persona regular \
+          zizmor --color always \
+                 --persona regular \
                  --min-severity low \
                  --min-confidence medium \
                  .
