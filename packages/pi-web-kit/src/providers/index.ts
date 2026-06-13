@@ -1,6 +1,7 @@
 import { validateFetchProvider, validateSearchProvider } from "../config.js";
 import type { FetchProvider, SearchProvider, WebKitConfig } from "../types.js";
 import { BraveProvider } from "./brave.js";
+import { Context7Provider } from "./context7.js";
 import { ExaMcpProvider } from "./exa-mcp.js";
 import { ExaProvider } from "./exa.js";
 import { FirecrawlProvider } from "./firecrawl.js";
@@ -27,4 +28,12 @@ export function createFetchProvider(config: WebKitConfig): FetchProvider {
     case "markdown_new": return new MarkdownNewProvider(config);
     case "firecrawl": return new FirecrawlProvider(config);
   }
+}
+
+export function createContext7Provider(config: WebKitConfig): Context7Provider {
+  return new Context7Provider(config);
+}
+
+export function createCodeSearchProvider(config: WebKitConfig): ExaProvider {
+  return new ExaProvider(config);
 }

@@ -1,7 +1,7 @@
 import { asSnippet, normalizeUrls, requestJson } from "../http.js";
 import { DEFAULT_NUM_RESULTS } from "../limits.js";
 import { urlsMatch } from "../urls.js";
-import type { FetchInput, FetchProvider, SearchInput, SearchProvider, WebFetchResult, WebKitConfig } from "../types.js";
+import type { ExaCodeInput, ExaCodeResult, FetchInput, FetchProvider, SearchInput, SearchProvider, WebFetchResult, WebKitConfig } from "../types.js";
 import { requireKey } from "../config.js";
 import { applyExaFetchFallbacks } from "./fallback.js";
 
@@ -60,5 +60,27 @@ export class ExaProvider implements SearchProvider, FetchProvider {
       return { url: r.url ?? url, title: r.title, content: r.text ?? r.summary ?? "", format: "markdown" as const, metadata: r };
     }) };
     return applyExaFetchFallbacks(this.config, input, urls, primary, signal);
+  }
+
+  async searchCode(input: ExaCodeInput, signal?: AbortSignal): Promise<ExaCodeResult> {
+    const data = await requestJson<any>("https://api.exa.ai/context", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": this.key },
+      body: JSON.stringify({
+        query: input.query,
+        tokensNum: input.tokensNum ?? "dynamic",
+      }),
+      signal,
+      timeoutMs: 45_000,
+    });
+    return {
+      provider: "exa",
+      query: data.query ?? input.query,
+      response: data.response ?? "",
+      resultsCount: data.resultsCount,
+      searchTime: data.searchTime,
+      outputTokens: data.outputTokens,
+      requestId: data.requestId,
+    };
   }
 }

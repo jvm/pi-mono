@@ -26,6 +26,7 @@ export function resolveConfig(flags: { providerSearch?: unknown; providerFetch?:
       tinyfish: env.TINYFISH_API_KEY,
       brave: env.BRAVE_SEARCH_API_KEY,
       firecrawl: env.FIRECRAWL_API_KEY,
+      context7: env.CONTEXT7_API_KEY,
     },
   });
   const home = env.HOME ?? homedir();
@@ -63,9 +64,9 @@ export function validateFetchProvider(name: string): asserts name is FetchProvid
   if (!FETCH.includes(name as FetchProviderName)) throw new Error(`Unknown fetch provider '${name}'. Expected one of: ${FETCH.join(", ")}.`);
 }
 
-const PROVIDER_ENV_NAMES = { exa: "EXA_API_KEY", tinyfish: "TINYFISH_API_KEY", brave: "BRAVE_SEARCH_API_KEY", firecrawl: "FIRECRAWL_API_KEY" } as const;
+const PROVIDER_ENV_NAMES = { exa: "EXA_API_KEY", tinyfish: "TINYFISH_API_KEY", brave: "BRAVE_SEARCH_API_KEY", firecrawl: "FIRECRAWL_API_KEY", context7: "CONTEXT7_API_KEY" } as const;
 
-export function requireKey(config: WebKitConfig, provider: "exa" | "tinyfish" | "brave" | "firecrawl"): string {
+export function requireKey(config: WebKitConfig, provider: "exa" | "tinyfish" | "brave" | "firecrawl" | "context7"): string {
   const key = config.apiKeys[provider];
   const envName = PROVIDER_ENV_NAMES[provider];
   if (!key) throw new Error(`${provider} provider requires ${envName} or apiKeys.${provider} in .pi-web-kit.json / ~/.pi/agent/pi-web-kit.json.`);

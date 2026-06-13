@@ -1,6 +1,6 @@
 {
   "name": "pi-web-kit",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Context-efficient web search and fetch tools for Pi.",
   "type": "module",
   "license": "MIT",
@@ -20,6 +20,9 @@
     "pi",
     "web-search",
     "web-fetch",
+    "library-docs",
+    "code-search",
+    "context7",
     "exa",
     "firecrawl"
   ],

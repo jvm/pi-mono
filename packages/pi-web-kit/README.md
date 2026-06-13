@@ -1,14 +1,16 @@
 # pi-web-kit
 
-Context-efficient web search and fetch tools for [Pi](https://pi.dev): `web_search` and `web_fetch`.
+Context-efficient web and developer search tools for [Pi](https://pi.dev): `web_search`, `web_fetch`, `library_search`, `library_docs`, and `code_search`.
 
-`pi-web-kit` provides provider-backed search and page fetching with bounded output, chunked reads, URL validation, and an in-memory fetch cache designed for agent workflows.
+`pi-web-kit` provides provider-backed search, page fetching, library docs lookup, and code-context search with bounded output, chunked reads, URL validation, and an in-memory fetch cache designed for agent workflows.
 
 ## Features
 
 - `web_search` for current/external web information, including multi-query searches.
 - `web_fetch` for reading one or more URLs, with `offset` / `limit` chunk reads for long pages.
-- Multiple provider backends: Exa MCP, Exa API, TinyFish, Brave Search, Firecrawl, and markdown.new.
+- `library_search` and `library_docs` for library resolution and current, version-aware documentation/code examples.
+- `code_search` for practical examples and implementation context.
+- Multiple provider backends: Exa MCP, Exa API, TinyFish, Brave Search, Firecrawl, markdown.new, Context7, and Exa Code.
 - Provider-tailored tool schemas at Pi startup/reload.
 - URL validation: HTTP(S)-only, no embedded credentials, fragment stripping, duplicate removal, and length/count limits.
 - In-memory fetch cache with TTL, LRU eviction, max entry count, max byte count, and cache keys based on provider/config/fetch-affecting options.
@@ -96,7 +98,8 @@ PI_OFFLINE=1        # disables install/update telemetry
 PI_TELEMETRY=0      # disables install/update telemetry
 PI_WEB_KIT_PROVIDER_SEARCH=exa_mcp|exa|tinyfish|brave|firecrawl
 PI_WEB_KIT_PROVIDER_FETCH=exa_mcp|exa|tinyfish|markdown_new|firecrawl
-EXA_API_KEY=...
+EXA_API_KEY=...          # enables Exa provider and code_search
+CONTEXT7_API_KEY=...     # enables library_search and library_docs
 TINYFISH_API_KEY=...
 BRAVE_SEARCH_API_KEY=...
 FIRECRAWL_API_KEY=...
@@ -118,7 +121,9 @@ Example:
   "provider_search": "firecrawl",
   "provider_fetch": "markdown_new",
   "apiKeys": {
-    "firecrawl": "..."
+    "firecrawl": "...",
+    "context7": "...",
+    "exa": "..."
   },
   "markdownNew": {
     "method": "auto",
@@ -165,6 +170,39 @@ Fetches page content with the active fetch provider. Results are cached in memor
 
 Provider-specific parameters are exposed only for the configured provider, such as TinyFish `format`, markdown.new `method` / `retainImages`, or Firecrawl `format`, `waitFor`, `mobile`, `location`, and `maxAge`.
 
+### `library_search`
+
+Resolves packages, frameworks, SDKs, APIs, CLIs, and libraries to canonical library IDs.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `libraryName` | string | Library/package/framework name to search for. |
+| `query` | string | Optional user task/question for relevance ranking. |
+| `fast` | boolean | Skip LLM reranking for lower latency. |
+| `limit` | integer | Maximum libraries to return. Range: 1-20. Default: 10. |
+
+### `library_docs`
+
+Fetches current docs and code snippets for a library. Provide `libraryId`, or provide `libraryName` and the tool resolves the best match first.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `libraryId` | string | Canonical library ID, such as `/vercel/next.js`. |
+| `libraryName` | string | Library name to resolve when `libraryId` is not known. |
+| `query` | string | Specific docs question or coding task. |
+| `version` | string | Optional version/tag to pin, appended as `@version`. |
+| `fast` | boolean | Skip LLM reranking for lower latency. |
+| `limit` | integer | Maximum code and info snippets to return. Range: 1-20. Default: 10. |
+
+### `code_search`
+
+Finds practical code examples, implementation context, setup snippets, migrations, usage patterns, and error-message research.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `query` | string | Code-context query. |
+| `tokensNum` | `"dynamic"` or integer | Output token target. Integer range: 50-100000. Default: `"dynamic"`. |
+
 ## Cache and limits
 
 `web_fetch` uses an in-memory cache for the current Pi process.
@@ -183,7 +221,7 @@ Cache keys include the provider, canonical URL, fetch-affecting parameters, rele
 
 ## Privacy and security
 
-`pi-web-kit` sends search queries and fetched URLs to the configured provider. Fetch providers may also receive provider-specific options. API keys are read from environment variables or local config files and are used only for provider requests.
+`pi-web-kit` sends search queries and fetched URLs to the configured provider. Developer-search tools send library/doc queries to Context7 and code-context queries to Exa when those tools are enabled. Fetch providers may also receive provider-specific options. API keys are read from environment variables or local config files and are used only for provider requests.
 
 The extension rejects non-HTTP(S) URLs and URLs with embedded username/password credentials. Provider responses are not sandboxed; they are returned to Pi as tool output.
 

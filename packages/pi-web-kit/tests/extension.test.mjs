@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import extension, { buildCacheKey, buildFetchSchema, buildSearchSchema, fetchWithCache, pageSlice } from "../extensions/index.ts";
+import extension, { buildCacheKey, buildCodeSearchSchema, buildFetchSchema, buildLibraryDocsSchema, buildLibrarySearchSchema, buildSearchSchema, fetchWithCache, pageSlice } from "../extensions/index.ts";
 
 const propNames = (schema) => Object.keys(schema.properties ?? {}).sort();
 
@@ -62,6 +62,33 @@ test("search schema rejects unknown properties in principle", () => {
   assert.equal(buildSearchSchema("exa_mcp").additionalProperties, false);
   assert.equal(buildFetchSchema("firecrawl").additionalProperties, false);
   assert.equal(buildFetchSchema("firecrawl").properties.waitFor.minimum, 0);
+  assert.equal(buildLibrarySearchSchema().additionalProperties, false);
+  assert.equal(buildLibraryDocsSchema().additionalProperties, false);
+  assert.equal(buildCodeSearchSchema().additionalProperties, false);
+});
+
+// Developer-search tools are intentionally registered only when their API keys
+// exist so agents do not spend prompt tokens on unavailable capabilities.
+// This test scrubs the relevant process env keys for deterministic startup.
+test("developer-search tools are hidden unless backing API keys are available", () => {
+  const oldExa = process.env.EXA_API_KEY;
+  const oldContext7 = process.env.CONTEXT7_API_KEY;
+  try {
+    delete process.env.EXA_API_KEY;
+    delete process.env.CONTEXT7_API_KEY;
+    assert.deepEqual(registerWithFlags({}).map((t) => t.name).sort(), ["web_fetch", "web_search"]);
+
+    process.env.CONTEXT7_API_KEY = "ctx7sk_test";
+    assert.deepEqual(registerWithFlags({}).map((t) => t.name).sort(), ["library_docs", "library_search", "web_fetch", "web_search"]);
+
+    process.env.EXA_API_KEY = "exa-test";
+    assert.deepEqual(registerWithFlags({}).map((t) => t.name).sort(), ["code_search", "library_docs", "library_search", "web_fetch", "web_search"]);
+  } finally {
+    if (oldExa === undefined) delete process.env.EXA_API_KEY;
+    else process.env.EXA_API_KEY = oldExa;
+    if (oldContext7 === undefined) delete process.env.CONTEXT7_API_KEY;
+    else process.env.CONTEXT7_API_KEY = oldContext7;
+  }
 });
 
 test("web_search returns grouped multi-query output with bounded details", async () => {

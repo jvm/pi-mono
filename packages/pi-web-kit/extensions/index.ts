@@ -5,7 +5,7 @@ import { fetchCache, type CachedPage } from "../src/cache.js";
 import { resolveConfig } from "../src/config.js";
 import { DEFAULT_FETCH_LIMIT, DEFAULT_NUM_RESULTS, MAX_LIMIT, MAX_NUM_RESULTS, MAX_OFFSET, MAX_QUERY_COUNT, MAX_URL_COUNT, MULTI_FETCH_LIMIT } from "../src/limits.js";
 import { truncateText } from "../src/http.js";
-import { createFetchProvider, createSearchProvider } from "../src/providers/index.js";
+import { createCodeSearchProvider, createContext7Provider, createFetchProvider, createSearchProvider } from "../src/providers/index.js";
 import { mapFetchResults } from "../src/providers/fallback.js";
 import type { FetchProviderName, SearchProviderName, WebFetchResult } from "../src/types.js";
 import { canonicalWebUrl, normalizeUrlInput } from "../src/urls.js";
@@ -100,6 +100,69 @@ export default function (pi: ExtensionAPI) {
       return renderWebResult("fetch", result, options, theme, context);
     },
   });
+
+  if (startupConfig.apiKeys.context7) {
+    pi.registerTool({
+      name: "library_search",
+      label: "Library Search",
+      description: "Resolve library, package, framework, SDK, API, or CLI names to canonical library IDs.",
+      promptSnippet: "Resolve a library name to a canonical library ID before querying docs.",
+      promptGuidelines: ["Use library_search when a library/framework/package is ambiguous or you need a canonical library ID."],
+      parameters: buildLibrarySearchSchema(),
+      async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
+        const params = rawParams as Record<string, any>;
+        const libraryName = requiredString(params.libraryName, "libraryName");
+        const query = optionalString(params.query, "query") ?? libraryName;
+        const limit = parseInteger(params.limit, 10, "limit", 1, MAX_NUM_RESULTS);
+        const provider = createContext7Provider(runtimeConfig(pi, ctx.cwd));
+        const result = await provider.searchLibraries({ libraryName, query, fast: params.fast === true, limit }, signal);
+        return jsonToolResult(result);
+      },
+    });
+
+    pi.registerTool({
+      name: "library_docs",
+      label: "Library Docs",
+      description: "Fetch current, version-aware documentation and code examples for a library.",
+      promptSnippet: "Get current library documentation and code examples.",
+      promptGuidelines: ["Use library_docs for current APIs, framework behavior, SDK examples, package docs, and version-specific library questions."],
+      parameters: buildLibraryDocsSchema(),
+      async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
+        const params = rawParams as Record<string, any>;
+        const query = requiredString(params.query, "query");
+        const limit = parseInteger(params.limit, 10, "limit", 1, MAX_NUM_RESULTS);
+        const provider = createContext7Provider(runtimeConfig(pi, ctx.cwd));
+        let libraryId = optionalString(params.libraryId, "libraryId");
+        if (!libraryId) {
+          const libraryName = requiredString(params.libraryName, "libraryName");
+          const resolved = await provider.searchLibraries({ libraryName, query, fast: params.fast === true, limit: 1 }, signal);
+          libraryId = resolved.results[0]?.id;
+          if (!libraryId) throw new Error(`No library found for '${libraryName}'. Try library_search with a more specific name.`);
+        }
+        const result = await provider.getDocs({ libraryId, query, version: optionalString(params.version, "version"), type: "json", fast: params.fast === true, limit }, signal);
+        return jsonToolResult(result);
+      },
+    });
+  }
+
+  if (startupConfig.apiKeys.exa) {
+    pi.registerTool({
+      name: "code_search",
+      label: "Code Search",
+      description: "Find practical code examples, usage patterns, setup snippets, migrations, and error context.",
+      promptSnippet: "Find real-world code examples, usage patterns, migrations, and error context.",
+      promptGuidelines: ["Use code_search for real-world code examples, GitHub/open-source usage patterns, API syntax examples, setup snippets, migrations, and error messages."],
+      parameters: buildCodeSearchSchema(),
+      async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
+        const params = rawParams as Record<string, any>;
+        const query = requiredString(params.query, "query");
+        const tokensNum = parseTokensNum(params.tokensNum);
+        const provider = createCodeSearchProvider(runtimeConfig(pi, ctx.cwd));
+        const result = await provider.searchCode({ query, tokensNum }, signal);
+        return jsonToolResult(result);
+      },
+    });
+  }
 }
 
 type ProgressKind = "search" | "fetch";
@@ -152,12 +215,39 @@ export function buildFetchSchema(provider: FetchProviderName) {
   return Type.Object(props, { additionalProperties: false });
 }
 
-function buildSearchDescription(provider: SearchProviderName): string {
-  return `Search the web with startup provider '${provider}'. Use query or queries; returns compact results grouped by query. Restart/reload pi after provider changes.`;
+export function buildLibrarySearchSchema() {
+  return Type.Object({
+    libraryName: Type.String({ description: "Library, package, framework, SDK, API, CLI, or product name", minLength: 1, maxLength: 500 }),
+    query: Type.Optional(Type.String({ description: "User task/question used for relevance ranking", minLength: 1, maxLength: 500 })),
+    fast: Type.Optional(Type.Boolean({ description: "Skip LLM reranking for lower latency" })),
+    limit: Type.Optional(int("Maximum libraries to return", 1, MAX_NUM_RESULTS)),
+  }, { additionalProperties: false });
 }
 
-function buildFetchDescription(provider: FetchProviderName): string {
-  return `Fetch URL content with startup provider '${provider}'. Results are cached by URL/options; use offset/limit to read long pages in chunks. Restart/reload pi after provider changes.`;
+export function buildLibraryDocsSchema() {
+  return Type.Object({
+    libraryId: Type.Optional(Type.String({ description: "Canonical library ID, for example /vercel/next.js", minLength: 1, maxLength: 500 })),
+    libraryName: Type.Optional(Type.String({ description: "Library name to resolve when libraryId is not known", minLength: 1, maxLength: 500 })),
+    query: Type.String({ description: "Specific docs question or coding task", minLength: 1, maxLength: 500 }),
+    version: Type.Optional(Type.String({ description: "Optional version/tag to pin, appended as @version", minLength: 1, maxLength: 100 })),
+    fast: Type.Optional(Type.Boolean({ description: "Skip LLM reranking for lower latency" })),
+    limit: Type.Optional(int("Maximum code and info snippets to return", 1, MAX_NUM_RESULTS)),
+  }, { additionalProperties: false });
+}
+
+export function buildCodeSearchSchema() {
+  return Type.Object({
+    query: Type.String({ description: "Code-context query for examples, APIs, setup, migrations, or errors", minLength: 1, maxLength: 2000 }),
+    tokensNum: Type.Optional(Type.Union([Type.Literal("dynamic"), int("Target response tokens", 50, MAX_LIMIT)])),
+  }, { additionalProperties: false });
+}
+
+function buildSearchDescription(_provider: SearchProviderName): string {
+  return "Search the web. Use query or queries; returns compact results grouped by query.";
+}
+
+function buildFetchDescription(_provider: FetchProviderName): string {
+  return "Fetch URL content. Results are cached by URL/options; use offset/limit to read long pages in chunks.";
 }
 
 
@@ -249,10 +339,35 @@ export function buildCacheKey(provider: FetchProviderName, url: string, params: 
   return `${provider}\0${scope}\0${JSON.stringify(affecting)}\0${canonical}`;
 }
 
+function runtimeConfig(pi: ExtensionAPI, cwd: string) {
+  return resolveConfig({ providerSearch: pi.getFlag("web-provider-search"), providerFetch: pi.getFlag("web-provider-fetch") }, cwd);
+}
+
+function jsonToolResult(result: unknown) {
+  const text = truncateText(JSON.stringify(result, null, 2));
+  return { content: [{ type: "text" as const, text }], details: boundedDetails(result) };
+}
+
 function parseInteger(value: unknown, defaultValue: number, name: string, min: number, max: number): number {
   if (value == null) return defaultValue;
   if (typeof value !== "number" || !Number.isInteger(value) || !Number.isFinite(value) || value < min || value > max) throw new Error(`${name} must be a finite integer between ${min} and ${max}.`);
   return value;
+}
+
+function requiredString(value: unknown, name: string): string {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must be a non-empty string.`);
+  return value.trim();
+}
+
+function optionalString(value: unknown, name: string): string | undefined {
+  if (value == null) return undefined;
+  return requiredString(value, name);
+}
+
+function parseTokensNum(value: unknown): "dynamic" | number {
+  if (value == null) return "dynamic";
+  if (value === "dynamic") return "dynamic";
+  return parseInteger(value, 0, "tokensNum", 50, MAX_LIMIT);
 }
 
 function fetchConfigDefaults(provider: FetchProviderName, config?: any): Record<string, unknown> {
@@ -277,9 +392,72 @@ function assertProviderUnchanged(tool: string, startup: string, runtime: string)
 }
 
 function boundedDetails(value: any): unknown {
-  if (value?.queries && Array.isArray(value.queries)) return { provider: value.provider, queries: value.queries.map((q: any) => ({ query: q.query, resultCount: (q.results ?? []).length, results: (q.results ?? []).map((r: any) => ({ title: r.title, url: r.url, siteName: r.siteName, position: r.position })) })) };
-  if (value?.results && Array.isArray(value.results)) return { provider: value.provider, results: value.results.map((r: any) => ({ url: r.url, fetchedUrl: r.fetchedUrl, title: r.title, format: r.format, cached: r.cached, refreshed: r.refreshed, cacheKey: r.cacheKey, range: r.range, error: r.error })) };
+  if (value?.queries && Array.isArray(value.queries)) return searchDetails(value);
+  if (value?.provider === "context7" && value?.results && Array.isArray(value.results)) return librarySearchDetails(value);
+  if (value?.provider === "context7" && value?.codeSnippets && value?.infoSnippets) return libraryDocsDetails(value);
+  if (value?.provider === "exa" && typeof value.response === "string") return codeSearchDetails(value);
+  if (value?.results && Array.isArray(value.results)) return fetchDetails(value);
   return value;
+}
+
+function searchDetails(value: any) {
+  return {
+    provider: value.provider,
+    queries: value.queries.map((q: any) => ({
+      query: q.query,
+      resultCount: (q.results ?? []).length,
+      results: (q.results ?? []).map((r: any) => ({ title: r.title, url: r.url, siteName: r.siteName, position: r.position })),
+    })),
+  };
+}
+
+function librarySearchDetails(value: any) {
+  return {
+    provider: value.provider,
+    libraryName: value.libraryName,
+    resultCount: value.results.length,
+    results: value.results.map((r: any) => ({ id: r.id, title: r.title, state: r.state, trustScore: r.trustScore, versions: r.versions })),
+  };
+}
+
+function libraryDocsDetails(value: any) {
+  const codeSources = value.codeSnippets.map((s: any) => s.codeId);
+  const infoSources = value.infoSnippets.map((s: any) => s.pageId);
+  return {
+    provider: value.provider,
+    libraryId: value.libraryId,
+    query: value.query,
+    codeSnippetCount: value.codeSnippets.length,
+    infoSnippetCount: value.infoSnippets.length,
+    sources: [...codeSources, ...infoSources].filter(Boolean).slice(0, MAX_NUM_RESULTS),
+  };
+}
+
+function codeSearchDetails(value: any) {
+  return {
+    provider: value.provider,
+    query: value.query,
+    resultsCount: value.resultsCount,
+    outputTokens: value.outputTokens,
+    requestId: value.requestId,
+  };
+}
+
+function fetchDetails(value: any) {
+  return {
+    provider: value.provider,
+    results: value.results.map((r: any) => ({
+      url: r.url,
+      fetchedUrl: r.fetchedUrl,
+      title: r.title,
+      format: r.format,
+      cached: r.cached,
+      refreshed: r.refreshed,
+      cacheKey: r.cacheKey,
+      range: r.range,
+      error: r.error,
+    })),
+  };
 }
 
 function createProgress(kind: ProgressKind, provider: string, labels: string[]): WebProgress {

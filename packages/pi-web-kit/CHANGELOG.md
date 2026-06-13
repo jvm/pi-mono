@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Add `library_search` and `library_docs` tools backed by Context7.
+- Add `code_search` backed by Exa Code.
+- Gate optional developer-search tool registration on API key availability.
+
 ## [0.1.6] - 2026-06-06
 
 ### Changed
