@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-13
+
 ### Added
 
 - Add `library_search` and `library_docs` tools backed by Context7.
