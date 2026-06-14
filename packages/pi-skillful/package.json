@@ -1,6 +1,6 @@
 {
   "name": "pi-skillful",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "Pi package with skill invocation and visibility improvements.",
   "type": "module",
   "exports": {
