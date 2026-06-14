@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { SourceInfo } from "@earendil-works/pi-coding-agent";
 import { normalizeSkillName } from "./config.js";
 
 export interface SkillCommandInfo {
@@ -11,12 +12,14 @@ export interface SkillCommandInfo {
 export interface LoadedSkillInfo {
   name: string;
   description: string;
+  sourceInfo: SourceInfo;
 }
 
 interface CommandLike {
   name: string;
   source: string;
   description?: string;
+  sourceInfo: SourceInfo;
 }
 
 export function listLoadedSkills(commands: Iterable<CommandLike>): LoadedSkillInfo[] {
@@ -25,9 +28,13 @@ export function listLoadedSkills(commands: Iterable<CommandLike>): LoadedSkillIn
     if (command.source !== "skill") continue;
     const name = normalizeSkillName(command.name);
     if (!name) continue;
-    byName.set(name, { name, description: command.description ?? "" });
+    byName.set(name, { name, description: command.description ?? "", sourceInfo: command.sourceInfo });
   }
   return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function isTopLevelSkill(skill: { sourceInfo: { origin: SourceInfo["origin"] } }): boolean {
+  return skill.sourceInfo.origin === "top-level";
 }
 
 export function stripFrontmatter(markdown: string): string {

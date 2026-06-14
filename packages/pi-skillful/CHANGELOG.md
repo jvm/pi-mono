@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Skipped Pi package-bundled skills when applying hidden-skill and toggle-slot configuration so `skillful` only affects global and project skills.
+
 ## [0.3.8] - 2026-06-06
 
 ### Changed

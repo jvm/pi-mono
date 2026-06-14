@@ -37,6 +37,8 @@ Hidden skills:
 - remain loaded by Pi;
 - remain available for explicit invocation with `/skill:name`, including inline invocation.
 
+Skills bundled in Pi packages are never affected by `skillful`; only global and project skills can be hidden or toggled.
+
 Configuration is stored under the `skillful` key in Pi settings:
 
 ```json
@@ -60,7 +62,7 @@ Open the menu with:
 /skillful
 ```
 
-The menu lists all loaded skills alphabetically. Toggle a skill off or on in the active scope. Use the Global/Project tabs to choose which settings file to edit. In the Project tab, inherited on/off values are shown normally; project overrides are highlighted. Press `1` through `9` on a selected skill to assign or clear that scope's session toggle slot. Visibility and toggle slots are independent.
+The menu lists configurable skills alphabetically. Toggle a skill off or on in the active scope. Use the Global/Project tabs to choose which settings file to edit. In the Project tab, inherited on/off values are shown normally; project overrides are highlighted. Press `1` through `9` on a selected skill to assign or clear that scope's session toggle slot. Visibility and toggle slots are independent.
 
 Pi's startup `[Skills]` list also highlights hidden skills in the error color (red in the default dark theme).
 
@@ -88,7 +90,7 @@ Configured slots appear on the prompt editor's top border as `N skill-name`. Pro
 
 `toggleModifier` defaults to `"alt"`. Supported values are `"alt"`, `"ctrl"`, `"ctrl+shift"`, `"alt+shift"`, `"ctrl+alt"`, and `"ctrl+alt+shift"`. Change it if your terminal reserves `alt+number` shortcuts.
 
-On app startup, non-hidden skills are active and hidden skills are inactive. Within a running Pi process, `/new` preserves the current toggle state for the new session. Resuming, forking, cloning, reloading, or restarting Pi resets toggle state from settings. Inline `/skill:name` invocation remains explicit and works even when that skill is inactive.
+On app startup, non-hidden skills are active and hidden skills are inactive. Within a running Pi process, `/new` preserves the current toggle state for the new session. Resuming, forking, cloning, reloading, or restarting Pi resets toggle state from settings. Inline `/skill:name` invocation remains explicit and works even when that skill is inactive. Skills bundled in Pi packages are never modified by these toggles.
 
 ## Installation
 

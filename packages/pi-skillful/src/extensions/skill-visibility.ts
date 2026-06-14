@@ -20,7 +20,7 @@ import {
   writeToggleSlots,
 } from "../config.js";
 import { replaceSkillsSection } from "../skill-prompt.js";
-import { listLoadedSkills, type LoadedSkillInfo } from "../skills.js";
+import { isTopLevelSkill, listLoadedSkills, type LoadedSkillInfo } from "../skills.js";
 import { hasActiveSessionSkillToggles, refreshSessionSkillToggles } from "./session-skill-toggles.js";
 const SCOPES: SkillfulScope[] = ["global", "project"];
 const STORE_KEY = Symbol.for("pi-skillful.skillVisibilityStore");
@@ -95,7 +95,7 @@ export default function skillVisibility(pi: ExtensionAPI) {
     if (hidden.size === 0 || !event.systemPromptOptions.skills?.length) return;
 
     const filteredSkills: Skill[] = event.systemPromptOptions.skills.map((skill) =>
-      hidden.has(skill.name) ? { ...skill, disableModelInvocation: true } : skill,
+      isTopLevelSkill(skill) && hidden.has(skill.name) ? { ...skill, disableModelInvocation: true } : skill,
     );
     const systemPrompt = replaceSkillsSection(event.systemPrompt, filteredSkills);
     if (!systemPrompt) return;
@@ -239,7 +239,7 @@ function buildColorizedSkillList(names: string[], hidden: Set<string>, theme: Th
 }
 
 function getSkillItems(pi: ExtensionAPI): SkillListItem[] {
-  return listLoadedSkills(pi.getCommands());
+  return listLoadedSkills(pi.getCommands()).filter(isTopLevelSkill);
 }
 
 class SkillfulVisibilityMenu implements Component {

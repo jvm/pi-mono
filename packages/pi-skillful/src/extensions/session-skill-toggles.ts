@@ -11,7 +11,7 @@ import {
   type SkillToggleSlot,
 } from "../config.js";
 import { replaceSkillsSection } from "../skill-prompt.js";
-import { listLoadedSkills } from "../skills.js";
+import { isTopLevelSkill, listLoadedSkills } from "../skills.js";
 
 const WIDGET_KEY = "pi-skillful-session-toggles";
 const STORE_KEY = Symbol.for("pi-skillful.sessionSkillTogglesStore");
@@ -97,10 +97,9 @@ export default function sessionSkillToggles(pi: ExtensionAPI) {
   pi.on("before_agent_start", (event) => {
     if (state.slots.length === 0 || !event.systemPromptOptions.skills?.length) return;
 
-    const updatedSkills: Skill[] = event.systemPromptOptions.skills.map((skill) => ({
-      ...skill,
-      disableModelInvocation: !isSkillActive(normalizeSkillName(skill.name)),
-    }));
+    const updatedSkills: Skill[] = event.systemPromptOptions.skills.map((skill) =>
+      isTopLevelSkill(skill) ? { ...skill, disableModelInvocation: !isSkillActive(normalizeSkillName(skill.name)) } : skill,
+    );
 
     const systemPrompt = replaceSkillsSection(event.systemPrompt, updatedSkills);
     if (!systemPrompt) return;
@@ -164,7 +163,11 @@ function configuredToggleSlots(
   pi: ExtensionAPI,
   toggleSlots: Partial<Record<SkillToggleSlot, string>>,
 ): ToggleSlotState[] {
-  const loadedSkillNames = new Set(listLoadedSkills(pi.getCommands()).map((skill) => skill.name));
+  const loadedSkillNames = new Set(
+    listLoadedSkills(pi.getCommands())
+      .filter(isTopLevelSkill)
+      .map((skill) => skill.name),
+  );
   return SKILL_TOGGLE_SLOTS.flatMap((slot): ToggleSlotState[] => {
     const skillName = toggleSlots[slot];
     if (!skillName || !loadedSkillNames.has(skillName)) return [];
