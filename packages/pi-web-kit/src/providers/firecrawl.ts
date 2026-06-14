@@ -48,8 +48,8 @@ export class FirecrawlProvider implements SearchProvider, FetchProvider {
           }),
         });
         const d = data.data ?? data;
-        const selected = format === "html" ? d.html : format === "json" ? d.json : d.markdown;
-        const content = typeof selected === "string" ? selected : selected == null ? undefined : JSON.stringify(selected, null, 2);
+        const selected = selectFirecrawlContent(d, format);
+        const content = stringifyContent(selected);
         return { url: d.url ?? url, content, format, title: d.metadata?.title, metadata: d.metadata ?? d };
       } catch (e) {
         return { url, error: e instanceof Error ? e.message : String(e) };
@@ -57,4 +57,20 @@ export class FirecrawlProvider implements SearchProvider, FetchProvider {
     });
     return { provider: "firecrawl" as const, results };
   }
+}
+
+function selectFirecrawlContent(data: any, format: string): unknown {
+  switch (format) {
+    case "html":
+      return data.html;
+    case "json":
+      return data.json;
+    default:
+      return data.markdown;
+  }
+}
+
+function stringifyContent(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  return value == null ? undefined : JSON.stringify(value, null, 2);
 }

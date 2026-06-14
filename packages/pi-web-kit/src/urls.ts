@@ -17,8 +17,12 @@ export function normalizeWebUrl(value: string): string {
 export function canonicalWebUrl(value: string): string {
   const parsed = new URL(normalizeWebUrl(value));
   parsed.hostname = parsed.hostname.toLowerCase();
-  if ((parsed.protocol === "https:" && parsed.port === "443") || (parsed.protocol === "http:" && parsed.port === "80")) parsed.port = "";
+  if (isDefaultPort(parsed)) parsed.port = "";
   return parsed.toString();
+}
+
+function isDefaultPort(url: URL): boolean {
+  return (url.protocol === "https:" && url.port === "443") || (url.protocol === "http:" && url.port === "80");
 }
 
 export function normalizeUrlInput(input: { url?: string; urls?: string[] }, maxCount = MAX_URL_COUNT): string[] {
@@ -34,9 +38,12 @@ export function urlsMatch(a: string | undefined, b: string | undefined): boolean
     const ca = canonicalWebUrl(a);
     const cb = canonicalWebUrl(b);
     if (ca === cb) return true;
-    const trimSlash = (s: string) => s.endsWith("/") ? s.slice(0, -1) : s;
-    return trimSlash(ca) === trimSlash(cb);
+    return trimTrailingSlash(ca) === trimTrailingSlash(cb);
   } catch {
     return a === b;
   }
+}
+
+function trimTrailingSlash(value: string): string {
+  return value.endsWith("/") ? value.slice(0, -1) : value;
 }

@@ -73,10 +73,20 @@ function textFromContent(result: any): string {
 function normalizeSearch(result: any) {
   const structured = result?.structuredContent ?? result?.result ?? result;
   const list = structured.results ?? structured.data ?? structured.items;
-  if (Array.isArray(list)) return list.map((r: any, i: number) => ({ title: r.title, url: r.url, snippet: asSnippet(r.snippet ?? r.text ?? r.summary ?? r.highlights), siteName: r.siteName, position: i + 1 })).filter((r: any) => r.url);
+  if (Array.isArray(list)) return list.map(toSearchResult).filter((r: any) => r.url);
   const text = textFromContent(result);
   const urls = [...text.matchAll(/https?:\/\/[^\s)\]}>"']+/g)].map((m) => m[0]);
   return [...new Set(urls)].map((url, i) => ({ url, snippet: i === 0 ? text.slice(0, 1000) : undefined, position: i + 1 }));
+}
+
+function toSearchResult(r: any, index: number) {
+  return {
+    title: r.title,
+    url: r.url,
+    snippet: asSnippet(r.snippet ?? r.text ?? r.summary ?? r.highlights),
+    siteName: r.siteName,
+    position: index + 1,
+  };
 }
 
 function normalizeFetch(result: any, urls: string[]) {
@@ -84,7 +94,8 @@ function normalizeFetch(result: any, urls: string[]) {
   const list = structured.results ?? structured.data ?? structured.pages;
   if (Array.isArray(list)) return urls.map((url, i) => {
     const r = list.find((x: any) => urlsMatch(x.url, url)) ?? list[i];
-    return r ? { url, title: r.title, content: r.markdown ?? r.text ?? r.content ?? r.html, format: "markdown" as const, metadata: r, error: r.error } : { url, error: "No content returned by Exa MCP." };
+    if (!r) return { url, error: "No content returned by Exa MCP." };
+    return { url, title: r.title, content: r.markdown ?? r.text ?? r.content ?? r.html, format: "markdown" as const, metadata: r, error: r.error };
   });
   const text = textFromContent(result);
   return urls.length <= 1 ? [{ url: urls[0] ?? "", content: text, format: "markdown" as const }] : urls.map((url) => ({ url, content: text, format: "markdown" as const }));

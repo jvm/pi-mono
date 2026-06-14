@@ -22,7 +22,10 @@ export class FetchCache {
   constructor(private opts = { maxEntries: FETCH_CACHE_MAX_ENTRIES, maxBytes: FETCH_CACHE_MAX_BYTES, ttlMs: FETCH_CACHE_TTL_MS }) {}
 
   get totalCachedBytes() { return this.totalBytes; }
-  get size() { this.evictExpired(); return this.entries.size; }
+  get size() {
+    this.evictExpired();
+    return this.entries.size;
+  }
 
   get(key: string, now = Date.now()): CachedPage | undefined {
     const entry = this.entries.get(key);
@@ -47,11 +50,15 @@ export class FetchCache {
     return stored;
   }
 
-  clear() { this.entries.clear(); this.totalBytes = 0; }
+  clear() {
+    this.entries.clear();
+    this.totalBytes = 0;
+  }
 
   private delete(key: string) {
     const old = this.entries.get(key);
-    if (old) this.totalBytes -= old.page.bytes;
+    if (!old) return;
+    this.totalBytes -= old.page.bytes;
     this.entries.delete(key);
   }
 
@@ -65,7 +72,9 @@ export class FetchCache {
   }
 
   private evictExpired(now = Date.now()) {
-    for (const [key, entry] of this.entries) if (now - entry.page.fetchedAt > this.opts.ttlMs) this.delete(key);
+    for (const [key, entry] of this.entries) {
+      if (now - entry.page.fetchedAt > this.opts.ttlMs) this.delete(key);
+    }
   }
 }
 

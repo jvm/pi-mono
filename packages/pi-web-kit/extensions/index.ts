@@ -55,8 +55,7 @@ export default function (pi: ExtensionAPI) {
         emitProgress(onUpdate, progress);
       }
       const result = { provider: config.provider_search, queries: grouped };
-      const text = truncateText(JSON.stringify(result, null, 2));
-      return { content: [{ type: "text", text }], details: boundedDetails(result) };
+      return jsonToolResult(result);
     },
     renderCall(args, theme) {
       return new Text(renderWebCall("search", args as Record<string, any>, theme), 0, 0);
@@ -85,13 +84,10 @@ export default function (pi: ExtensionAPI) {
       assertProviderUnchanged("web_fetch", startupConfig.provider_fetch, config.provider_fetch);
       const progress = createProgress("fetch", config.provider_fetch, urls);
       const result = await fetchWithCache(config.provider_fetch, params, urls, signal, config, (event) => {
-        if (event.status === "current") markProgressCurrent(progress, event.url);
-        else if (event.status === "done") markProgressDone(progress, event.url, event.note);
-        else if (event.status === "error") markProgressError(progress, event.url, event.error);
+        updateFetchProgress(progress, event);
         emitProgress(onUpdate, progress);
       });
-      const text = truncateText(JSON.stringify(result, null, 2));
-      return { content: [{ type: "text", text }], details: boundedDetails(result) };
+      return jsonToolResult(result);
     },
     renderCall(args, theme) {
       return new Text(renderWebCall("fetch", args as Record<string, any>, theme), 0, 0);
@@ -483,6 +479,20 @@ function markProgressError(progress: WebProgress, label: string, error?: string)
   item.status = "error";
   item.error = error;
   progress.completed++;
+}
+
+function updateFetchProgress(progress: WebProgress, event: FetchProgressEvent) {
+  switch (event.status) {
+    case "current":
+      markProgressCurrent(progress, event.url);
+      break;
+    case "done":
+      markProgressDone(progress, event.url, event.note);
+      break;
+    case "error":
+      markProgressError(progress, event.url, event.error);
+      break;
+  }
 }
 
 function emitProgress(onUpdate: ((patch: any) => void) | undefined, progress: WebProgress) {

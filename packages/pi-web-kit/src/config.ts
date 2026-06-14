@@ -5,6 +5,19 @@ import type { FetchProviderName, SearchProviderName, WebKitConfig } from "./type
 
 const SEARCH = ["exa_mcp", "exa", "tinyfish", "brave", "firecrawl"] as const;
 const FETCH = ["exa_mcp", "exa", "tinyfish", "markdown_new", "firecrawl"] as const;
+const DEFAULT_CONFIG: WebKitConfig = {
+  provider_search: "exa_mcp",
+  provider_fetch: "exa_mcp",
+  apiKeys: {},
+  markdownNew: { method: "auto", retainImages: false },
+};
+const PROVIDER_ENV_NAMES = {
+  exa: "EXA_API_KEY",
+  tinyfish: "TINYFISH_API_KEY",
+  brave: "BRAVE_SEARCH_API_KEY",
+  firecrawl: "FIRECRAWL_API_KEY",
+  context7: "CONTEXT7_API_KEY",
+} as const;
 
 type PartialConfig = Partial<Omit<WebKitConfig, "apiKeys" | "markdownNew">> & {
   apiKeys?: Partial<WebKitConfig["apiKeys"]>;
@@ -12,12 +25,7 @@ type PartialConfig = Partial<Omit<WebKitConfig, "apiKeys" | "markdownNew">> & {
 };
 
 export function resolveConfig(flags: { providerSearch?: unknown; providerFetch?: unknown } = {}, cwd = process.cwd(), env = process.env): WebKitConfig {
-  let cfg: WebKitConfig = {
-    provider_search: "exa_mcp",
-    provider_fetch: "exa_mcp",
-    apiKeys: {},
-    markdownNew: { method: "auto", retainImages: false },
-  };
+  let cfg = DEFAULT_CONFIG;
   cfg = merge(cfg, {
     provider_search: env.PI_WEB_KIT_PROVIDER_SEARCH as SearchProviderName | undefined,
     provider_fetch: env.PI_WEB_KIT_PROVIDER_FETCH as FetchProviderName | undefined,
@@ -31,7 +39,8 @@ export function resolveConfig(flags: { providerSearch?: unknown; providerFetch?:
   });
   const home = env.HOME ?? homedir();
   for (const path of [join(home, ".pi/agent/pi-web-kit.json"), join(cwd, ".pi-web-kit.json")]) {
-    try { cfg = merge(cfg, JSON.parse(readFileSync(path, "utf8")) as PartialConfig); } catch (e: any) { if (e?.code !== "ENOENT") throw e; }
+    const fileConfig = readConfigFile(path);
+    if (fileConfig) cfg = merge(cfg, fileConfig);
   }
   cfg = merge(cfg, {
     provider_search: flags.providerSearch as SearchProviderName | undefined,
@@ -64,7 +73,14 @@ export function validateFetchProvider(name: string): asserts name is FetchProvid
   if (!FETCH.includes(name as FetchProviderName)) throw new Error(`Unknown fetch provider '${name}'. Expected one of: ${FETCH.join(", ")}.`);
 }
 
-const PROVIDER_ENV_NAMES = { exa: "EXA_API_KEY", tinyfish: "TINYFISH_API_KEY", brave: "BRAVE_SEARCH_API_KEY", firecrawl: "FIRECRAWL_API_KEY", context7: "CONTEXT7_API_KEY" } as const;
+function readConfigFile(path: string): PartialConfig | undefined {
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as PartialConfig;
+  } catch (e: any) {
+    if (e?.code !== "ENOENT") throw e;
+    return undefined;
+  }
+}
 
 export function requireKey(config: WebKitConfig, provider: "exa" | "tinyfish" | "brave" | "firecrawl" | "context7"): string {
   const key = config.apiKeys[provider];

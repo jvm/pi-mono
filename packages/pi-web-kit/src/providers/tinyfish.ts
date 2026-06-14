@@ -34,7 +34,11 @@ export class TinyFishProvider implements SearchProvider, FetchProvider {
       const r = list.find((x: any) => (x.url ?? x.source_url) === url) ?? list[i];
       if (!r) return { url, error: "No content returned by TinyFish." };
       const content = r.text ?? r.content ?? r.markdown ?? r.html;
-      return { url, content: typeof content === "string" ? content : JSON.stringify(content, null, 2), format: input.format ?? r.format ?? "markdown", title: r.title, metadata: r, error: r.error };
+      return { url, content: stringifyContent(content), format: input.format ?? r.format ?? "markdown", title: r.title, metadata: r, error: r.error };
     }) };
   }
+}
+
+function stringifyContent(value: unknown): string | undefined {
+  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
 }

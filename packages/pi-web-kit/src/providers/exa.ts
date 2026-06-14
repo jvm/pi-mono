@@ -9,6 +9,10 @@ export class ExaProvider implements SearchProvider, FetchProvider {
   private key: string;
   constructor(private config: WebKitConfig) { this.key = requireKey(config, "exa"); }
 
+  private headers() {
+    return { "content-type": "application/json", "x-api-key": this.key };
+  }
+
   async search(input: SearchInput, signal?: AbortSignal) {
     const body = {
       query: input.query,
@@ -25,7 +29,7 @@ export class ExaProvider implements SearchProvider, FetchProvider {
     };
     const data = await requestJson<any>("https://api.exa.ai/search", {
       method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": this.key },
+      headers: this.headers(),
       body: JSON.stringify(body),
       signal,
       timeoutMs: 30000,
@@ -48,7 +52,7 @@ export class ExaProvider implements SearchProvider, FetchProvider {
     if (urls.length === 0) return { provider: "exa", results: [] };
     const data = await requestJson<any>("https://api.exa.ai/contents", {
       method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": this.key },
+      headers: this.headers(),
       body: JSON.stringify({ urls, text: true, highlights: false }),
       signal,
       timeoutMs: 45000,
@@ -65,7 +69,7 @@ export class ExaProvider implements SearchProvider, FetchProvider {
   async searchCode(input: ExaCodeInput, signal?: AbortSignal): Promise<ExaCodeResult> {
     const data = await requestJson<any>("https://api.exa.ai/context", {
       method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": this.key },
+      headers: this.headers(),
       body: JSON.stringify({
         query: input.query,
         tokensNum: input.tokensNum ?? "dynamic",

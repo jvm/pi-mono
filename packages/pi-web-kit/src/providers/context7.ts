@@ -2,7 +2,7 @@ import { requestJson } from "../http.js";
 import type { Context7ContextInput, Context7DocsResult, Context7LibrarySearchInput, Context7LibrarySearchResult, WebKitConfig } from "../types.js";
 import { requireKey } from "../config.js";
 
-const BASE_URL = "https://context7.com/api/v2";
+const BASE_URL = "https://context7.com/api/v2/";
 
 export class Context7Provider {
   private key: string;
@@ -12,7 +12,7 @@ export class Context7Provider {
     const query = input.query ?? input.libraryName;
     const params = new URLSearchParams({ libraryName: input.libraryName, query });
     addFastParam(params, input.fast);
-    const data = await requestJson<any>(`${BASE_URL}/libs/search?${params}`, {
+    const data = await requestJson<any>(buildApiUrl("libs/search", params), {
       headers: this.headers(),
       signal,
       timeoutMs: 30_000,
@@ -31,7 +31,7 @@ export class Context7Provider {
     const libraryId = withVersion(input.libraryId, input.version);
     const params = new URLSearchParams({ libraryId, query: input.query, type: input.type ?? "json" });
     addFastParam(params, input.fast);
-    const data = await requestJson<any>(`${BASE_URL}/context?${params}`, {
+    const data = await requestJson<any>(buildApiUrl("context", params), {
       headers: this.headers(),
       signal,
       timeoutMs: 45_000,
@@ -54,6 +54,12 @@ export class Context7Provider {
 
 function addFastParam(params: URLSearchParams, fast?: boolean) {
   if (fast != null) params.set("fast", String(fast));
+}
+
+function buildApiUrl(pathname: "libs/search" | "context", params: URLSearchParams): string {
+  const url = new URL(pathname, BASE_URL);
+  for (const [key, value] of params) url.searchParams.set(key, value);
+  return url.toString();
 }
 
 function toLibraryResult(r: any) {
