@@ -51,9 +51,9 @@
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.78.0",
-    "@types/node": "^25.6.2",
-    "typebox": "^1.1.39",
+    "@earendil-works/pi-coding-agent": "^0.78.1",
+    "@types/node": "^25.9.2",
+    "typebox": "^1.2.2",
     "typescript": "^6.0.3"
   },
   "publishConfig": {
