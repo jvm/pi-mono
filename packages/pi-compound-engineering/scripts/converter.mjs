@@ -15,7 +15,7 @@
 
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { pipeline } from "node:stream/promises";
 
@@ -95,7 +95,7 @@ const CE_PLATFORM = "pi";
  *
  * @param {string} name
  */
-function sanitizePathName(name) {
+export function sanitizePathName(name) {
 	return name.replace(/:/g, "-");
 }
 
@@ -108,7 +108,6 @@ function sanitizePathName(name) {
  * @param {string} target
  */
 async function copyFilePreservingMode(source, target) {
-	const { chmod } = await import("node:fs/promises");
 	const sourceStat = await stat(source);
 	await copyFile(source, target);
 	await chmod(target, sourceStat.mode & 0o777);
@@ -140,7 +139,7 @@ async function copyFilePreservingMode(source, target) {
  * @param {string} raw
  * @returns {{ data: Record<string, any>, body: string, startIndex: number, endIndex: number }}
  */
-function parseFrontmatter(raw) {
+export function parseFrontmatter(raw) {
 	const lines = raw.split(/\r?\n/);
 	if (lines.length === 0 || lines[0].trim() !== "---") {
 		return { data: {}, body: raw, startIndex: -1, endIndex: -1 };
@@ -170,7 +169,7 @@ function parseFrontmatter(raw) {
  * @param {string} yaml
  * @returns {Record<string, any>}
  */
-function parseSimpleYaml(yaml) {
+export function parseSimpleYaml(yaml) {
 	const data = {};
 	const lines = yaml.split(/\r?\n/);
 	let i = 0;
@@ -234,7 +233,7 @@ function parseSimpleYaml(yaml) {
 	return data;
 }
 
-function splitTopLevelCommas(str) {
+export function splitTopLevelCommas(str) {
 	const result = [];
 	let depth = 0;
 	let buf = "";
@@ -264,7 +263,7 @@ function splitTopLevelCommas(str) {
 	return result;
 }
 
-function unquoteScalar(value) {
+export function unquoteScalar(value) {
 	const trimmed = value.trim();
 	if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
 		const inner = trimmed.slice(1, -1);
@@ -330,7 +329,7 @@ function formatScalar(value) {
 /**
  * @param {string} value
  */
-function normalizeName(value) {
+export function normalizeName(value) {
 	const trimmed = value.trim();
 	if (!trimmed) return "item";
 	const normalized = trimmed
@@ -350,7 +349,7 @@ function normalizeName(value) {
  * @param {string} value
  * @param {number} maxLength
  */
-function sanitizeDescription(value, maxLength = PI_DESCRIPTION_MAX_LENGTH) {
+export function sanitizeDescription(value, maxLength = PI_DESCRIPTION_MAX_LENGTH) {
 	const normalized = value.replace(/\s+/g, " ").trim();
 	if (normalized.length <= maxLength) return normalized;
 	const ellipsis = "...";
@@ -643,10 +642,20 @@ export async function buildThirdPartyNotices(ceRoot, ceVersion, result) {
 	lines.push("");
 	lines.push("Agents:");
 	lines.push("");
+	// PiAgent only carries the normalized `name`, not the original
+	// upstream filename. Look up the actual source file by reading the
+	// upstream agents dir and matching the normalized name back to the
+	// raw filename (e.g. an upstream file named "CE API Contract
+	// Reviewer.md" normalizes to "ce-api-contract-reviewer.md" and the
+	// notices must point at the real upstream file, not the
+	// normalized one).
+	const upstreamAgentFiles = await readdir(join(ceRoot, "agents"));
 	for (const agent of result.agents) {
-		// We don't have sourcePath on PiAgent; resolve via the agent name.
-		const candidate = join(ceRoot, "agents", `${agent.name}.md`);
-		lines.push(`  ${relative(ceRoot, candidate)}`);
+		const upstreamName = upstreamAgentFiles.find(
+			(file) => file.endsWith(".md") && normalizeName(file.slice(0, -3)) === agent.name,
+		);
+		const sourceName = upstreamName ?? `${agent.name}.md`;
+		lines.push(`  ${relative(ceRoot, join(ceRoot, "agents", sourceName))}`);
 	}
 	lines.push("");
 	return lines.join("\n");

@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { upsertAgentsBlock } from "../src/agents-block.js";
-import { isInstallComplete, maybeWarnAboutDependencies } from "../src/dependency-check.js";
+import { isInstallComplete, maybeWarnAboutDependencies, runDependencyCheck } from "../src/dependency-check.js";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import { registerCeStatusCommand } from "../src/status-command.js";
 
@@ -14,12 +14,17 @@ export default function piCompoundEngineering(pi: ExtensionAPI) {
 	// The dependency check and the AGENTS.md block are deferred to
 	// `session_start` so we have a live `ExtensionContext` (and a cwd).
 	pi.on("session_start", async (_event, ctx) => {
-		// Only write the AGENTS.md block when the install is complete. If the
-		// install is incomplete, the skipped-postinstall warning is more
-		// useful than appending a block pointing at packages that the user
-		// has not yet installed.
+		// The AGENTS.md block is informational about the two peer
+		// packages this extension recommends (pi-subagents, pi-ask-user).
+		// Only write the block when the install is complete AND at least
+		// one of the peer packages is missing — otherwise the block is
+		// noise the user didn't ask for. The skipped-postinstall
+		// warning below still covers the "install didn't run" case.
 		if (isInstallComplete()) {
-			upsertAgentsBlock(ctx.cwd);
+			const result = runDependencyCheck(pi);
+			if (!result.subagent.available || !result.askUser.available) {
+				upsertAgentsBlock(ctx.cwd);
+			}
 		}
 		maybeWarnAboutDependencies(pi, ctx);
 	});

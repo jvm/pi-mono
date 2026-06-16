@@ -260,12 +260,20 @@ async function extractTarball(tarballPath, stagingDir) {
  * @param {string} pluginsDir
  * @param {string} stagingDir
  * @param {string} ceVersion
- * @returns {Promise<string>} the path to the converter's output dir
+ * @returns {Promise<{ outputDir: string, skillCount: number, agentCount: number }>}
+ *   The path to the converter's output dir plus the actual skill and
+ *   agent counts from the converter result, so the post-conversion
+ *   log can report the real numbers (instead of a hardcoded literal
+ *   that silently drifts when upstream CE adds or removes a skill).
  */
 async function runConverter(pluginsDir, stagingDir, ceVersion) {
 	const outputDir = join(stagingDir, "output");
-	await convert(pluginsDir, outputDir, ceVersion);
-	return outputDir;
+	const result = await convert(pluginsDir, outputDir, ceVersion);
+	return {
+		outputDir,
+		skillCount: result.skills.length,
+		agentCount: result.agents.length,
+	};
 }
 
 /**
@@ -381,7 +389,7 @@ async function main() {
 
 	const { pluginsDir, extractedRoot } = await extractTarball(tarballPath, stagingDir);
 
-	const outputDir = await runConverter(pluginsDir, stagingDir, version);
+	const { outputDir, skillCount, agentCount } = await runConverter(pluginsDir, stagingDir, version);
 
 	try {
 		await verifyStructure(outputDir);
@@ -404,7 +412,7 @@ async function main() {
 	await rm(extractedRoot, { recursive: true, force: true });
 	await rm(tarballPath, { force: true });
 
-	log(`Staged 38 skills, 43 agents from compound-engineering-plugin@${version} (sha256:${sha256.slice(0, 16)}…)`);
+	log(`Staged ${skillCount} skills, ${agentCount} agents from compound-engineering-plugin@${version} (sha256:${sha256.slice(0, 16)}…)`);
 }
 
 main().catch((err) => {

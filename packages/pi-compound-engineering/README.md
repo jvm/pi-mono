@@ -133,6 +133,8 @@ Requirements:
 - npm
 - `tar` binary (macOS, Linux, WSL)
 
+Windows is **not supported** out of the box. The preinstall shells out to `tar` to extract the upstream tarball, and Node 20's `tar` shim has different flag behavior on Windows. Use WSL or a Linux VM.
+
 ```bash
 npm install
 npm run check
