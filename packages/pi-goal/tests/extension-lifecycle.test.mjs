@@ -95,6 +95,19 @@ test("provider 429 transitions active goal to usage_limited", async () => {
   assert.match(ctx.ui.statuses.get("pi-goal"), /usage limits/);
 });
 
+test("provider 429 notifies the agent so it can wrap up", async () => {
+  const pi = makePi();
+  piGoal(pi);
+  const ctx = makeCtx();
+  await pi.commands.get("goal").handler("ship", ctx);
+  await pi.handlers.get("after_provider_response")[0]({ type: "after_provider_response", status: 429, headers: {} }, ctx);
+  const sent = pi.messages.at(-1).message;
+  assert.match(sent.content, /provider_limit/);
+  assert.equal(sent.display, true);
+  assert.equal(sent.details.kind, "provider_limit");
+  assert.equal(pi.messages.at(-1).options.triggerTurn, true);
+});
+
 test("assistant usage-limit error transitions active goal to usage_limited", async () => {
   const pi = makePi();
   piGoal(pi);
@@ -127,4 +140,64 @@ test("session_shutdown persists active elapsed time and clears UI", async () => 
   assert.equal(pi.entries.at(-1).data.status, "active");
   assert.equal(ctx.ui.statuses.get("pi-goal"), undefined);
   assert.equal(ctx.ui.widgets.get("pi-goal"), undefined);
+});
+
+test("budget exceeded transitions active goal to budget_limited and notifies the agent", async () => {
+  const pi = makePi();
+  piGoal(pi);
+  const ctx = makeCtx();
+  await pi.commands.get("goal").handler("--budget 100 ship feature", ctx);
+  const beforeNotify = pi.messages.length;
+  const branch = [
+    { type: "message", id: "a1", timestamp: new Date().toISOString(), message: { role: "assistant", usage: { totalTokens: 250 } } },
+  ];
+  ctx.sessionManager.getBranch = () => branch;
+  await pi.handlers.get("message_end")[0]({ type: "message_end", message: { role: "assistant", usage: { totalTokens: 250 } } }, ctx);
+  assert.equal(pi.entries.at(-1).data.status, "budget_limited");
+  assert.match(ctx.ui.notifications.at(-1).message, /budget reached/i);
+  assert.equal(pi.messages.length, beforeNotify + 1, "agent should receive a wrap-up message on budget overflow");
+  const sent = pi.messages.at(-1).message;
+  assert.equal(sent.display, true);
+  assert.match(sent.content, /budget_exceeded/);
+  assert.match(sent.content, /100/);
+  assert.match(sent.content, /250/);
+  assert.match(sent.content, /update_goal/);
+  assert.equal(sent.details.kind, "budget_exceeded");
+  assert.equal(sent.details.tokensUsed, 250);
+  assert.equal(sent.details.tokenBudget, 100);
+  assert.equal(pi.messages.at(-1).options.triggerTurn, true);
+  assert.equal(ctx.ui.statuses.get("pi-goal"), "Goal unmet (250/100)");
+});
+
+test("budget exceeded at turn_end and agent_end also notifies the agent", async () => {
+  const pi = makePi();
+  piGoal(pi);
+  const ctx = makeCtx();
+  await pi.commands.get("goal").handler("--budget 50 ship feature", ctx);
+  const beforeNotify = pi.messages.length;
+  const branch = [
+    { type: "message", id: "a1", timestamp: new Date().toISOString(), message: { role: "assistant", usage: { totalTokens: 200 } } },
+  ];
+  ctx.sessionManager.getBranch = () => branch;
+  await pi.handlers.get("turn_end")[0]({ type: "turn_end" }, ctx);
+  assert.equal(pi.entries.at(-1).data.status, "budget_limited");
+  assert.equal(pi.messages.length, beforeNotify + 1, "agent should receive exactly one wrap-up message");
+  assert.match(pi.messages.at(-1).message.content, /budget_exceeded/);
+  // Subsequent turn_end calls must not stack up additional wrap-up messages
+  // because the goal is no longer active.
+  await pi.handlers.get("turn_end")[0]({ type: "turn_end" }, ctx);
+  assert.equal(pi.messages.length, beforeNotify + 1, "subsequent turn_end events must not re-notify the agent");
+});
+
+test("budget overflow notification is not sent when no assistant usage has been accounted", async () => {
+  const pi = makePi();
+  piGoal(pi);
+  const ctx = makeCtx();
+  await pi.commands.get("goal").handler("--budget 100 ship feature", ctx);
+  const beforeNotify = pi.messages.length;
+  // No assistant entries after the goal, so the budget cannot be exceeded
+  // by any new accounting run.
+  await pi.handlers.get("message_end")[0]({ type: "message_end", message: { role: "user", content: "ok" } }, ctx);
+  assert.equal(pi.messages.length, beforeNotify, "agent should not be notified when the budget is not exceeded");
+  assert.equal(pi.entries.find((e) => e.data.kind === "status" && e.data.status === "budget_limited"), undefined);
 });

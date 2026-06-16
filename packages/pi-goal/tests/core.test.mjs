@@ -107,3 +107,17 @@ test("prompt JSON-encodes objective to prevent delimiter injection", () => {
   assert.equal(/<objective_json><\/objective_json>/.test(prompt), false, "objective delimiters should not be injectable");
   assert.equal((prompt.match(/<status>/g) ?? []).length, 1);
 });
+
+test("prompt for budget_limited reason tells the model to wrap up and call update_goal", () => {
+  const create = createGoalMutation("ship it", 1000);
+  const goal = reconstructGoalState([{ type: "custom", customType: "pi-goal", id: "1", data: create }]);
+  // Simulate a goal that has been marked budget_limited with overrun usage.
+  const limited = { ...goal, status: "budget_limited", tokensUsed: 5000 };
+  const prompt = buildGoalContextMessage(limited, "budget_limited");
+  assert.match(prompt, /reason="budget_limited"/);
+  assert.match(prompt, /BUDGET EXCEEDED/);
+  assert.match(prompt, /1000/);
+  assert.match(prompt, /5000/);
+  assert.match(prompt, /Stop work immediately/);
+  assert.match(prompt, /update_goal/);
+});

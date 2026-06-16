@@ -33,8 +33,31 @@ export default function piGoal(pi: ExtensionAPI) {
     if (!goal || goal.status !== "active") scheduler.clear();
   }
 
+  // Send a visible message to the model so it can react to a terminal
+  // status transition (budget exhausted, provider limit hit) instead of
+  // silently continuing to spend tokens on work that is about to be cut
+  // off. The scheduler has already been cleared at this point, so this
+  // is the model's only chance to learn about the transition before the
+  // user notices.
+  function notifyAgentOfTerminalTransition(
+    ctx: ExtensionContext,
+    content: string,
+    details: Record<string, unknown>,
+  ): void {
+    pi.sendMessage(
+      {
+        customType: GOAL_EVENT_TYPE,
+        content,
+        display: true,
+        details: { ...details, piGoalVersion: PI_GOAL_VERSION },
+      },
+      { triggerTurn: true, deliverAs: ctx.isIdle() ? "steer" : "followUp" },
+    );
+  }
+
   function pauseForProviderLimit(ctx: ExtensionContext, classification: ProviderLimitClassification): void {
     if (!goal || goal.status !== "active" || !classification.pause) return;
+    const snapshot = goal;
     const time = realizedTimeUsed(goal);
     const limited = statusMutation(goal, "usage_limited", time, undefined, transitionMeta("provider-limit", goal, time, nowIso(), {
       providerLimit: {
@@ -50,6 +73,20 @@ export default function piGoal(pi: ExtensionAPI) {
     ctx.ui.notify(`Goal paused because the provider hit a usage/rate limit${suffix}.`, "warning");
     updateGoalUi(ctx, goal);
     scheduler.clear();
+    notifyAgentOfTerminalTransition(
+      ctx,
+      `<provider_limit>\nYour persistent Pi goal has been paused because the provider hit a usage/rate limit${suffix}. The goal is in the "usage_limited" state. Do not do any more work that would use additional tokens. Use /goal resume to continue after the limit resets, or call update_goal with status "complete" or "blocked" to finalize the goal now.\n</provider_limit>`,
+      {
+        kind: "provider_limit",
+        goalId: snapshot.goalId,
+        providerLimit: {
+          kind: classification.kind,
+          reason: classification.reason,
+          resetHint: classification.resetHint,
+          retryAfterSeconds: classification.retryAfterSeconds,
+        },
+      },
+    );
   }
 
   function accountAndEnforceBudget(ctx: ExtensionContext): void {
@@ -58,12 +95,23 @@ export default function piGoal(pi: ExtensionAPI) {
     if (result.mutation) appendGoalMutation(pi, result.mutation);
     goal = result.goal;
     if (goal.status === "active" && isBudgetExceeded(goal)) {
+      const snapshot = goal;
       const time = realizedTimeUsed(goal);
       const limited = statusMutation(goal, "budget_limited", time, undefined, transitionMeta("budget", goal, time, nowIso()));
       appendGoalMutation(pi, limited);
       goal = applyGoalMutation(goal, limited);
       ctx.ui.notify("Goal token budget reached.", "warning");
       scheduler.clear();
+      notifyAgentOfTerminalTransition(
+        ctx,
+        `<budget_exceeded>\nYour persistent Pi goal's token budget of ${snapshot.tokenBudget} has been reached (used ${snapshot.tokensUsed} tokens). Stop work immediately to avoid burning more tokens. If all requirements are satisfied, call update_goal with status "complete". If the goal cannot be completed, call update_goal with status "blocked". Do not do any more work that would use additional tokens.\n</budget_exceeded>`,
+        {
+          kind: "budget_exceeded",
+          goalId: snapshot.goalId,
+          tokensUsed: snapshot.tokensUsed,
+          tokenBudget: snapshot.tokenBudget,
+        },
+      );
     }
     updateGoalUi(ctx, goal);
   }

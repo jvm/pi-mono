@@ -44,7 +44,7 @@ When an active goal is idle, the extension injects a hidden `pi-goal-context` me
 
 The footer and optional editor widget show status, elapsed active time, token usage, and budget.
 
-Provider usage-limit handling pauses active goals when Pi exposes HTTP 429 responses or assistant error messages that indicate subscription, quota, billing, balance, or repeated provider failures. This prevents automatic continuation from retrying indefinitely after provider limits such as 5-hour subscription caps.
+Provider usage-limit handling pauses active goals when Pi exposes HTTP 429 responses or assistant error messages that indicate subscription, quota, billing, balance, or repeated provider failures. This prevents automatic continuation from retrying indefinitely after provider limits such as 5-hour subscription caps. When the budget is exhausted or a provider limit is detected, a visible `pi-goal-event` message is also delivered to the model so it can stop work and call `update_goal` to finalize the goal instead of continuing to spend tokens on a turn that has effectively been cut off.
 
 ## Examples
 
@@ -83,13 +83,13 @@ Environment flags:
 ## Troubleshooting
 
 - If continuation does not start, run `/goal status` and confirm the goal is `active`.
-- If a goal stops unexpectedly, check whether it reached its token budget or the provider returned a rate/usage limit. Usage-limit pauses may include a provider reset hint when one is available.
+- If a goal stops unexpectedly, check whether it reached its token budget or the provider returned a rate/usage limit. Usage-limit pauses may include a provider reset hint when one is available. A budget-exhausted or rate-limited goal is also surfaced to the model as a `pi-goal-event` in the conversation so it can call `update_goal`; if the model never receives that, the goal stays in `budget_limited` until you run `/goal resume` or `/goal clear`.
 - If context appears stale after tree navigation or reload, run `/goal status`; branch state is reconstructed from the active branch.
 - In print/JSON modes, commands and tools work, but interactive confirmations/editors are unavailable.
 
 ## Limitations
 
-- Token budget is enforced after finalized assistant usage is visible; v1 cannot hard-stop mid-turn.
+- Token budget is enforced after finalized assistant usage is visible; v1 cannot hard-stop mid-turn, but the model is notified as soon as the overrun is detected so it can stop further work in the same or next turn.
 - Usage-limit handling is best-effort via HTTP responses and assistant error messages; provider transports vary in how much structured limit information they expose.
 - Automatic continuation is session-local, not a background daemon.
 
