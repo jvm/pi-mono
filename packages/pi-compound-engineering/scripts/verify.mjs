@@ -83,6 +83,7 @@ async function downloadTarball(url, target) {
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 	try {
+		// codeql[js/file-access-to-http] `target` is the local destination file path, not the URL; only `url` is fetched.
 		const response = await fetch(url, { signal: controller.signal });
 		if (!response.ok) {
 			throw new Error(`HTTP ${response.status} ${response.statusText}`);

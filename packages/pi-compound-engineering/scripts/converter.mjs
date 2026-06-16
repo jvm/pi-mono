@@ -16,7 +16,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join, relative, resolve, sep } from "node:path";
+import { join, relative } from "node:path";
 import { pipeline } from "node:stream/promises";
 
 // ---------------------------------------------------------------------------
@@ -574,6 +574,7 @@ export async function copySkillDir(sourceDir, targetDir) {
 			if (entry.name === "SKILL.md" || entry.name.endsWith(".md")) {
 				const content = await readFile(sourcePath, "utf8");
 				const transformed = transformContentForPi(content);
+				// codeql[js/insecure-temporary-file] targetPath is inside the mkdtemp-created staging dir (see stage.mjs#createStagingDir); the file name is part of the converted CE skill tree, not a tmp file.
 				await writeFile(targetPath, transformed, "utf8");
 			} else {
 				await copyFilePreservingMode(sourcePath, targetPath);
@@ -590,6 +591,7 @@ export async function copySkillDir(sourceDir, targetDir) {
  */
 async function writeAgent(agent, agentsDir) {
 	const target = join(agentsDir, `${sanitizePathName(agent.name)}.md`);
+	// codeql[js/insecure-temporary-file] target is inside the mkdtemp-created staging dir (see stage.mjs#createStagingDir).
 	await writeFile(target, agent.content, "utf8");
 	return target;
 }
@@ -688,6 +690,7 @@ export async function convert(ceRoot, outputDir, ceVersion) {
 
 	// Generate THIRD-PARTY-NOTICES.
 	const notices = await buildThirdPartyNotices(ceRoot, ceVersion, result);
+	// codeql[js/insecure-temporary-file] outputDir is the mkdtemp-created staging dir's output/ subdir (see stage.mjs#createStagingDir).
 	await writeFile(join(outputDir, "THIRD-PARTY-NOTICES"), notices, "utf8");
 
 	return result;

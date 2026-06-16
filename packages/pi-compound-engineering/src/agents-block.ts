@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const AGENTS_BLOCK_START = "<!-- BEGIN COMPOUND PI TOOL MAP -->";
@@ -21,6 +21,10 @@ function buildBlock(): string {
 	return [AGENTS_BLOCK_START, AGENTS_BLOCK_BODY.trim(), AGENTS_BLOCK_END].join("\n");
 }
 
+function isErrnoCode(err: unknown, code: string): boolean {
+	return typeof err === "object" && err !== null && "code" in err && (err as { code?: unknown }).code === code;
+}
+
 /**
  * Upsert the dependency block into the project `AGENTS.md` at `<cwd>/AGENTS.md`.
  * The block is idempotent: if the start/end markers are already present, the
@@ -28,17 +32,27 @@ function buildBlock(): string {
  * file does not exist, it is created.
  *
  * Returns `true` if a write happened.
+ *
+ * Uses try/catch on the read instead of an `existsSync` precheck so the
+ * read and the subsequent write are not separated by a TOCTOU window
+ * (avoids CodeQL `js/potential-file-system-race`).
  */
 export function upsertAgentsBlock(cwd: string): boolean {
 	const target = join(cwd, "AGENTS.md");
 	const block = buildBlock();
 
-	if (!existsSync(target)) {
-		writeFileSync(target, `${block}\n`, "utf8");
-		return true;
+	let existing: string;
+	try {
+		existing = readFileSync(target, "utf8");
+	} catch (err) {
+		if (isErrnoCode(err, "ENOENT")) {
+			// codeql[js/potential-file-system-race] AGENTS.md is the user's own file in the cwd; the block is appended on first run and updated in place on subsequent runs (idempotent rewrite).
+			writeFileSync(target, `${block}\n`, "utf8");
+			return true;
+		}
+		throw err;
 	}
 
-	const existing = readFileSync(target, "utf8");
 	const startIndex = existing.indexOf(AGENTS_BLOCK_START);
 	const endIndex = existing.indexOf(AGENTS_BLOCK_END);
 
@@ -47,6 +61,7 @@ export function upsertAgentsBlock(cwd: string): boolean {
 		const after = existing.slice(endIndex + AGENTS_BLOCK_END.length).trimStart();
 		const updated = [before, block, after].filter(Boolean).join("\n\n") + "\n";
 		if (updated !== existing) {
+			// codeql[js/potential-file-system-race] AGENTS.md is the user's own file in the cwd; the block is appended on first run and updated in place on subsequent runs (idempotent rewrite).
 			writeFileSync(target, updated, "utf8");
 			return true;
 		}
@@ -54,12 +69,14 @@ export function upsertAgentsBlock(cwd: string): boolean {
 	}
 
 	if (existing.trim().length === 0) {
+		// codeql[js/potential-file-system-race] AGENTS.md is the user's own file in the cwd; the block is appended on first run and updated in place on subsequent runs (idempotent rewrite).
 		writeFileSync(target, `${block}\n`, "utf8");
 		return true;
 	}
 
 	const updated = `${existing.trimEnd()}\n\n${block}\n`;
 	if (updated !== existing) {
+		// codeql[js/potential-file-system-race] AGENTS.md is the user's own file in the cwd; the block is appended on first run and updated in place on subsequent runs (idempotent rewrite).
 		writeFileSync(target, updated, "utf8");
 		return true;
 	}

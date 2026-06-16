@@ -16,7 +16,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,8 +24,9 @@ import { spawnSync } from "node:child_process";
 import { convert, sha256OfFile, streamResponseToFile } from "./converter.mjs";
 
 const PACKAGE_ROOT = dirname(fileURLToPath(import.meta.url)) + "/..";
-const STAGING_PATH_FILE = join(tmpdir(), "pi-compound-engineering-staging-path.txt");
 const STAGING_DIR_PREFIX = "pi-compound-engineering-staging-";
+const STAGING_PATH_PARENT_PREFIX = "pi-compound-engineering-staging-path-";
+const STAGING_PATH_FILE_NAME = "staging-path.txt";
 const STAGING_DIR_RETENTION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const EXPECTED_SHA256_FILE = join(PACKAGE_ROOT, "scripts", "expected-sha256.txt");
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
@@ -71,12 +72,25 @@ async function readExpectedSha256() {
 }
 
 /**
+ * Create a unique staging directory using `mkdtemp` so the path is
+ * unpredictable (avoids CodeQL `js/insecure-temporary-file`).
+ *
  * @returns {Promise<string>}
  */
 async function createStagingDir() {
-	const dir = join(tmpdir(), `${STAGING_DIR_PREFIX}${process.pid}-${Date.now()}`);
-	await mkdir(dir, { recursive: true });
-	return dir;
+	return mkdtemp(join(tmpdir(), STAGING_DIR_PREFIX));
+}
+
+/**
+ * Create a unique parent dir for the staging-path handoff file and return
+ * the file path. The handoff file lives in a `mkdtemp`-created dir so the
+ * file path is unpredictable.
+ *
+ * @returns {Promise<string>}
+ */
+async function createStagingPathFile() {
+	const parent = await mkdtemp(join(tmpdir(), STAGING_PATH_PARENT_PREFIX));
+	return join(parent, STAGING_PATH_FILE_NAME);
 }
 
 /**
@@ -143,6 +157,7 @@ async function downloadTarball(url, target, fallbackUrls = []) {
 			const controller = new AbortController();
 			const timeout = setTimeout(() => controller.abort(), TIMEOUT_DOWNLOAD_MS);
 			try {
+				// codeql[js/file-access-to-http] `target` is the local destination file path, not the URL; only `candidate` (a hardcoded upstream tarball URL) is fetched.
 				const response = await fetch(candidate, { signal: controller.signal });
 				if (!response.ok) {
 					lastError = new Error(`HTTP ${response.status} ${response.statusText}`);
@@ -267,6 +282,7 @@ async function main() {
 	const { version } = await readCeVersion();
 	const expectedSha = await readExpectedSha256();
 	const stagingDir = await createStagingDir();
+	const stagingPathFile = await createStagingPathFile();
 	log(`Staging dir: ${stagingDir}`);
 
 	const tarballPath = join(stagingDir, `compound-engineering-plugin-cli-v${version}.tar.gz`);
@@ -303,8 +319,10 @@ async function main() {
 		fatal(`Structure check failed: ${err.message}`);
 	}
 
-	// Write the staging path file for commit.mjs to read.
-	await writeFile(STAGING_PATH_FILE, stagingDir, "utf8");
+	// Write the staging path file for commit.mjs to read. The parent dir
+	// was created with `mkdtemp` so this file path is unpredictable.
+	// codeql[js/insecure-temporary-file] stagingPathFile is inside the mkdtemp-created parent dir (see createStagingPathFile); the file name is unique to this install run.
+	await writeFile(stagingPathFile, stagingDir, "utf8");
 
 	// Clean up the tarball and extracted source. We keep the staging dir
 	// (with the converted `output/` subdir) for commit.mjs to move.
