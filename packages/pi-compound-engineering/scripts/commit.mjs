@@ -24,7 +24,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,6 +41,29 @@ function log(message) {
 
 function warn(message) {
 	process.stderr.write(`[pi-compound-engineering] WARN: ${message}\n`);
+}
+
+/**
+ * Move `src` to `dest`. On the happy path this is `fs.rename`, which is
+ * atomic. If `src` and `dest` are on different filesystems `rename`
+ * fails with `EXDEV`; fall back to a recursive copy + remove so the
+ * install works on systems where the staging dir (under the user's
+ * home) is on a different mount than the npm package directory.
+ *
+ * @param {string} src
+ * @param {string} dest
+ */
+async function moveAcrossFilesystems(src, dest) {
+	try {
+		await rename(src, dest);
+	} catch (err) {
+		if (err && /** @type {any} */ (err).code === "EXDEV") {
+			await cp(src, dest, { recursive: true });
+			await rm(src, { recursive: true, force: true });
+		} else {
+			throw err;
+		}
+	}
 }
 
 /**
@@ -135,15 +158,15 @@ async function main() {
 	try {
 		if (existsSync(stagingNotices)) {
 			await backupIfExists(productionNotices, backupNotices);
-			await rename(stagingNotices, productionNotices);
+			await moveAcrossFilesystems(stagingNotices, productionNotices);
 		}
 		if (existsSync(stagingSkills)) {
 			await backupIfExists(productionSkillsDir, backupSkills);
-			await rename(stagingSkills, productionSkillsDir);
+			await moveAcrossFilesystems(stagingSkills, productionSkillsDir);
 		}
 		if (existsSync(stagingAgents)) {
 			await backupIfExists(productionAgentsDir, backupAgents);
-			await rename(stagingAgents, productionAgentsDir);
+			await moveAcrossFilesystems(stagingAgents, productionAgentsDir);
 		}
 	} catch (err) {
 		warn(`Failed to commit staged content: ${err?.message ?? err}`);

@@ -21,7 +21,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -173,7 +173,14 @@ async function downloadTarball(url, destFile, fallbackUrls = []) {
 /**
  * @param {string} tarballPath
  * @param {string} stagingDir
- * @returns {Promise<string>} the path to the extracted compound-engineering dir
+ * @returns {Promise<{ pluginsDir: string, extractedRoot: string }>}
+ *   `pluginsDir` is the path to the extracted
+ *   `plugins/compound-engineering/` dir. `extractedRoot` is the top-level
+ *   dir created by `tar -xzf` (e.g. `compound-engineering-plugin-<sha>/`)
+ *   so the caller can remove it explicitly without re-scanning the
+ *   staging dir (which also contains the `output/` subdir created by
+ *   the converter and could be returned first by an unordered
+ *   `readdir`).
  */
 async function extractTarball(tarballPath, stagingDir) {
 	const result = spawnSync("tar", ["-xzf", tarballPath, "-C", stagingDir], {
@@ -190,11 +197,12 @@ async function extractTarball(tarballPath, stagingDir) {
 	if (!topLevel) {
 		throw new Error("Extracted tarball has no top-level directory");
 	}
-	const pluginsDir = join(stagingDir, topLevel.name, "plugins", "compound-engineering");
+	const extractedRoot = join(stagingDir, topLevel.name);
+	const pluginsDir = join(extractedRoot, "plugins", "compound-engineering");
 	if (!existsSync(pluginsDir)) {
 		throw new Error(`Extracted tarball is missing expected path: ${pluginsDir}`);
 	}
-	return pluginsDir;
+	return { pluginsDir, extractedRoot };
 }
 
 /**
@@ -280,11 +288,22 @@ async function main() {
 	log(`Staging dir: ${stagingDir}`);
 
 	const tarballPath = join(stagingDir, `compound-engineering-plugin-cli-v${version}.tar.gz`);
-	try {
-		await downloadTarball(tarballUrl(version), tarballPath);
-	} catch (err) {
-		await rm(stagingDir, { recursive: true, force: true });
-		fatal(`Download failed: ${err.message}`);
+	const localTarball = process.env.CE_TARBALL_PATH;
+	if (localTarball) {
+		log(`Using local tarball from CE_TARBALL_PATH: ${localTarball}`);
+		try {
+			await copyFile(localTarball, tarballPath);
+		} catch (err) {
+			await rm(stagingDir, { recursive: true, force: true });
+			fatal(`Failed to copy local tarball from ${localTarball}: ${err.message}`);
+		}
+	} else {
+		try {
+			await downloadTarball(tarballUrl(version), tarballPath);
+		} catch (err) {
+			await rm(stagingDir, { recursive: true, force: true });
+			fatal(`Download failed: ${err.message}`);
+		}
 	}
 
 	const { sha256, ok } = await verifySha256(tarballPath, expectedSha);
@@ -302,7 +321,7 @@ async function main() {
 	}
 	log(`SHA256 verified: ${sha256.slice(0, 16)}…`);
 
-	const pluginsDir = await extractTarball(tarballPath, stagingDir);
+	const { pluginsDir, extractedRoot } = await extractTarball(tarballPath, stagingDir);
 
 	const outputDir = await runConverter(pluginsDir, stagingDir, version);
 
@@ -318,12 +337,13 @@ async function main() {
 	// `js/insecure-temporary-file` rule does not flag this write.
 	await writeFile(STAGING_PATH_FILE, stagingDir, "utf8");
 
-	// Clean up the tarball and extracted source. We keep the staging dir
-	// (with the converted `output/` subdir) for commit.mjs to move.
-	const extractedTop = (await readdir(stagingDir, { withFileTypes: true })).find((e) => e.isDirectory());
-	if (extractedTop) {
-		await rm(join(stagingDir, extractedTop.name), { recursive: true, force: true });
-	}
+	// Clean up the tarball and the extracted source. We use the
+	// explicit `extractedRoot` returned by `extractTarball` rather than
+	// re-scanning the staging dir, because by this point the staging
+	// dir also contains the `output/` subdir produced by the converter
+	// and an unordered `readdir` could return `output` first and let
+	// us delete the wrong tree.
+	await rm(extractedRoot, { recursive: true, force: true });
 	await rm(tarballPath, { force: true });
 
 	log(`Staged 38 skills, 43 agents from compound-engineering-plugin@${version} (sha256:${sha256.slice(0, 16)}…)`);
