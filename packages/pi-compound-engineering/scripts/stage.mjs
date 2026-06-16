@@ -62,6 +62,10 @@ function log(message) {
 	process.stderr.write(`[pi-compound-engineering] ${message}\n`);
 }
 
+function warn(message) {
+	process.stderr.write(`[pi-compound-engineering] WARN: ${message}\n`);
+}
+
 function fatal(message) {
 	log(`ERROR: ${message}`);
 	process.exit(1);
@@ -368,7 +372,18 @@ async function main() {
 			await downloadTarball(tarballUrl(version), tarballPath);
 		} catch (err) {
 			await rm(stagingDir, { recursive: true, force: true });
-			fatal(`Download failed: ${err.message}`);
+			// A network/transport failure (offline, no DNS, no egress,
+			// rate limit, etc.) is an *environment* problem, not a data
+			// problem. Unlike a SHA mismatch or a bad extraction, this
+			// should NOT abort the entire workspace `npm ci` — every
+			// other package in the monorepo should still be able to
+			// install. Downgrade to a warning, exit 0, and rely on
+			// the existing skipped-postinstall warning to surface the
+			// recovery instructions on the next Pi launch.
+			warn(`Download failed: ${err.message}`);
+			warn("`skills/` and `agents/` will remain empty until this package is reinstalled with network access or `CE_TARBALL_PATH` set.");
+			warn("Recovery: `pi install npm:pi-compound-engineering` (with network or `CE_TARBALL_PATH=<path>`).");
+			return;
 		}
 	}
 
