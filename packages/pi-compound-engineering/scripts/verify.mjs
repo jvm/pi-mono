@@ -19,8 +19,8 @@
  */
 
 import { createWriteStream, existsSync } from "node:fs";
-import { mkdir, readFile, readdir, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -28,7 +28,8 @@ import { pipeline } from "node:stream/promises";
 import { convert, sha256OfFile } from "./converter.mjs";
 
 const PACKAGE_ROOT = dirname(fileURLToPath(import.meta.url)) + "/..";
-const STAGING_PREFIX = "pi-compound-engineering-verify-";
+const STAGING_BASE_DIR = join(homedir(), ".pi-compound-engineering-staging");
+const STAGING_PREFIX = "verify-";
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
 let passed = 0;
@@ -148,8 +149,8 @@ async function main() {
 	pass(`expected SHA256 = ${expectedSha.slice(0, 16)}…`);
 
 	section("Fetch + extract");
-	const stagingDir = join(tmpdir(), `${STAGING_PREFIX}${process.pid}-${Date.now()}`);
-	await mkdir(stagingDir, { recursive: true });
+	await mkdir(STAGING_BASE_DIR, { recursive: true });
+	const stagingDir = await mkdtemp(join(STAGING_BASE_DIR, STAGING_PREFIX));
 
 	const tarballPath = join(stagingDir, "ce.tar.gz");
 	const url = `https://codeload.github.com/EveryInc/compound-engineering-plugin/tar.gz/refs/tags/cli-v${ceVersion.version}`;
