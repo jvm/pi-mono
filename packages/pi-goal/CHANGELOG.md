@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.9 - 2026-06-16
+
 ### Fixed
 
 - Notify the model when a goal transitions to `budget_limited` or `usage_limited` so it can stop work and call `update_goal` instead of silently continuing to spend tokens after the budget is exhausted or the provider hits a rate limit. Previously the model was only ever informed via a UI notification that it could not see, leaving the current turn to keep running for additional assistant entries and allowing `update_goal` to mark the goal `complete` long after the budget had been blown.
