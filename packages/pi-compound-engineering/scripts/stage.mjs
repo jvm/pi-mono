@@ -37,6 +37,26 @@ const EXPECTED_SHA256_FILE = join(PACKAGE_ROOT, "scripts", "expected-sha256.txt"
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const TIMEOUT_DOWNLOAD_MS = 60_000;
 const TIMEOUT_EXTRACT_MS = 30_000;
+// Common CI environment variables. Mirrors the same set used by
+// `src/install-telemetry.ts` so the offline/CI guard and the telemetry
+// opt-out agree on what counts as "a CI environment".
+const CI_ENVIRONMENT_VARIABLES = [
+	"CI",
+	"GITHUB_ACTIONS",
+	"GITLAB_CI",
+	"CIRCLECI",
+	"TRAVIS",
+	"JENKINS_URL",
+	"BUILDKITE",
+	"APPVEYOR",
+	"DRONE",
+	"TEAMCITY_VERSION",
+	"NETLIFY",
+	"VERCEL",
+	"CODESPACES",
+	"BITBUCKET_BUILD_NUMBER",
+	"TF_BUILD",
+];
 
 function log(message) {
 	process.stderr.write(`[pi-compound-engineering] ${message}\n`);
@@ -45,6 +65,37 @@ function log(message) {
 function fatal(message) {
 	log(`ERROR: ${message}`);
 	process.exit(1);
+}
+
+function isTruthyEnvFlag(value) {
+	if (!value) return false;
+	return value === "1" || value.toLowerCase() === "true" || value.toLowerCase() === "yes";
+}
+
+function isPresentEnvFlag(value) {
+	if (!value) return false;
+	const normalized = value.toLowerCase();
+	return normalized !== "0" && normalized !== "false" && normalized !== "no";
+}
+
+/**
+ * `true` when the preinstall should be skipped because the host looks
+ * like an offline or CI environment AND the user has not explicitly
+ * opted in via `CE_TARBALL_PATH`. The skipped-postinstall warning that
+ * fires on the next Pi launch tells the user how to recover
+ * (reinstall with network access or with `CE_TARBALL_PATH` set).
+ *
+ * Returning `true` here means the install succeeds with an empty
+ * `skills/` + `agents/` dir instead of `fatal()`-ing the entire
+ * workspace install for offline contributors and CI without egress.
+ */
+function isOfflineEnv() {
+	if (process.env.CE_TARBALL_PATH) return false;
+	if (isTruthyEnvFlag(process.env.PI_OFFLINE)) return true;
+	for (const name of CI_ENVIRONMENT_VARIABLES) {
+		if (isPresentEnvFlag(process.env[name])) return true;
+	}
+	return false;
 }
 
 /**
@@ -281,6 +332,13 @@ async function verifyStructure(outputDir) {
 
 async function main() {
 	await cleanupStaleStagingDirs();
+
+	if (isOfflineEnv()) {
+		log("Offline/CI mode detected; skipping tarball fetch and conversion.");
+		log("`skills/` and `agents/` will remain empty until this package is reinstalled with network access or `CE_TARBALL_PATH` set.");
+		log("Recovery: `pi install npm:pi-compound-engineering` (with network or `CE_TARBALL_PATH=<path>`).");
+		return;
+	}
 
 	const { version } = await readCeVersion();
 	const expectedSha = await readExpectedSha256();

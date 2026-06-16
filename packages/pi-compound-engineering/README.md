@@ -119,6 +119,10 @@ Set the `CE_TARBALL_PATH` environment variable to a local path of the upstream t
 CE_TARBALL_PATH=/path/to/compound-engineering-plugin.tar.gz pi install npm:pi-compound-engineering
 ```
 
+### CI / air-gapped installs
+
+The preinstall is a no-op when no `CE_TARBALL_PATH` is set **and** the environment looks like CI (`CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, `CIRCLECI`, `TRAVIS`, `JENKINS_URL`, `BUILDKITE`, `APPVEYOR`, `DRONE`, `TEAMCITY_VERSION`, `NETLIFY`, `VERCEL`, `CODESPACES`, `BITBUCKET_BUILD_NUMBER`, `TF_BUILD`) or `PI_OFFLINE=1` is set. In that case the lifecycle completes successfully with an empty `skills/` + `agents/` dir, the install no longer aborts the whole workspace `npm ci`, and the skipped-postinstall warning fires on the next Pi launch with the recovery instruction. Force a network attempt by unsetting the relevant env var and reinstalling.
+
 ## Development
 
 This package is source-distributed. Pi loads the TypeScript extensions directly.
