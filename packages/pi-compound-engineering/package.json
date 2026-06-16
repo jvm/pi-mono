@@ -1,0 +1,79 @@
+{
+  "name": "pi-compound-engineering",
+  "version": "3.13.0",
+  "description": "Compound Engineering for Pi: brainstorm, plan, work, review, and compound.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Jose Mocito",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "compound-engineering",
+    "every",
+    "code-review",
+    "brainstorm",
+    "plan",
+    "workflow",
+    "knowledge-management"
+  ],
+  "files": [
+    "index.ts",
+    "extensions",
+    "src",
+    "scripts",
+    "NOTICE",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md"
+  ],
+  "scripts": {
+    "preinstall": "node scripts/stage.mjs",
+    "postinstall": "node scripts/commit.mjs",
+    "check": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.mjs",
+    "verify": "node scripts/verify.mjs",
+    "stage": "node scripts/stage.mjs",
+    "commit": "node scripts/commit.mjs",
+    "pack:dry-run": "npm pack --dry-run"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.78.0",
+    "@types/node": "^25.6.2",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jvm/pi-mono.git",
+    "directory": "packages/pi-compound-engineering"
+  },
+  "bugs": {
+    "url": "https://github.com/jvm/pi-mono/issues"
+  },
+  "homepage": "https://github.com/jvm/pi-mono/tree/main/packages/pi-compound-engineering#readme"
+}

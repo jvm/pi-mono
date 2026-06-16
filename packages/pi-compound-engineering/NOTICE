@@ -1,0 +1,18 @@
+pi-compound-engineering
+Copyright 2026 Jose Mocito
+
+This product includes software developed at
+Jose Mocito (https://github.com/jvm/pi-mono).
+
+This product fetches and converts content from Every Inc.'s
+compound-engineering-plugin at install time. The original plugin is
+Copyright 2025 Every Inc. and Kieran Klaassen, and is licensed under
+the MIT License.
+
+Source: https://github.com/EveryInc/compound-engineering-plugin
+
+The converted content is not committed to this repository; it is
+generated at install time by the package's preinstall and postinstall
+scripts. See THIRD-PARTY-NOTICES in your Pi install directory (for
+example, ~/.pi/agent/npm/pi-compound-engineering/) for the full
+inventory of converted files and their upstream paths.
