@@ -78,12 +78,11 @@ async function readExpectedSha() {
 	return SHA256_PATTERN.test(trimmed) ? trimmed : null;
 }
 
-async function downloadTarball(url, target) {
+async function downloadTarball(url, destFile) {
 	const TIMEOUT_MS = 60_000;
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 	try {
-		// codeql[js/file-access-to-http] `target` is the local destination file path, not the URL; only `url` is fetched.
 		const response = await fetch(url, { signal: controller.signal });
 		if (!response.ok) {
 			throw new Error(`HTTP ${response.status} ${response.statusText}`);
@@ -91,7 +90,7 @@ async function downloadTarball(url, target) {
 		if (!response.body) {
 			throw new Error("Response body is empty");
 		}
-		await pipeline(/** @type {NodeJS.ReadableStream} */ (response.body), createWriteStream(target));
+		await pipeline(/** @type {NodeJS.ReadableStream} */ (response.body), createWriteStream(destFile));
 	} finally {
 		clearTimeout(timeout);
 	}

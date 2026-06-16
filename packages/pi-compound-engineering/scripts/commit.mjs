@@ -25,13 +25,13 @@
 
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rename, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PACKAGE_ROOT = dirname(fileURLToPath(import.meta.url)) + "/..";
-const STAGING_PATH_PARENT_PREFIX = "pi-compound-engineering-staging-path-";
-const STAGING_PATH_FILE_NAME = "staging-path.txt";
+const STAGING_BASE_DIR = join(homedir(), ".pi-compound-engineering-staging");
+const STAGING_PATH_FILE = join(STAGING_BASE_DIR, "staging-path.txt");
 const RECOVERY_INSTRUCTION =
 	"Re-run `pi install npm:pi-compound-engineering` (without --ignore-scripts) and restart Pi.";
 
@@ -44,65 +44,34 @@ function warn(message) {
 }
 
 /**
- * Locate the most recent staging-path handoff file from the matching
- * preinstall run. The handoff file lives in a `mkdtemp`-created parent
- * dir, so the parent dir name is unpredictable. We scan `tmpdir()` for
- * any subdir matching the prefix and pick the most recently modified one.
+ * Read the staging path left behind by the matching preinstall run.
+ * The handoff file lives at a fixed path under
+ * `~/.pi-compound-engineering-staging/` (not under `os.tmpdir()`) so
+ * the CodeQL `js/insecure-temporary-file` rule does not flag the read
+ * or the write.
  *
- * @returns {Promise<{ pathFile: string, parentDir: string } | null>}
+ * @returns {Promise<string | null>}
  */
-async function locateStagingPathFile() {
-	let entries;
-	try {
-		entries = await readdir(tmpdir(), { withFileTypes: true });
-	} catch {
-		return null;
-	}
-	const candidates = entries.filter(
-		(e) => e.isDirectory() && e.name.startsWith(STAGING_PATH_PARENT_PREFIX),
-	);
-	if (candidates.length === 0) return null;
-
-	const withMtime = await Promise.all(
-		candidates.map(async (entry) => {
-			const parentDir = join(tmpdir(), entry.name);
-			try {
-				const st = await stat(parentDir);
-				return { parentDir, mtimeMs: st.mtimeMs };
-			} catch {
-				return null;
-			}
-		}),
-	);
-	const valid = withMtime.filter((v) => v !== null);
-	if (valid.length === 0) return null;
-	valid.sort((a, b) => b.mtimeMs - a.mtimeMs);
-	const parentDir = valid[0].parentDir;
-	return { pathFile: join(parentDir, STAGING_PATH_FILE_NAME), parentDir };
-}
-
 async function readStagingPath() {
-	const located = await locateStagingPathFile();
-	if (!located) return null;
+	if (!existsSync(STAGING_PATH_FILE)) return null;
 	try {
-		const raw = await readFile(located.pathFile, "utf8");
+		const raw = await readFile(STAGING_PATH_FILE, "utf8");
 		const trimmed = raw.trim();
-		return { stagingDir: trimmed.length > 0 ? trimmed : null, ...located };
+		return trimmed.length > 0 ? trimmed : null;
 	} catch {
 		return null;
 	}
 }
 
 async function main() {
-	const located = await readStagingPath();
-	if (!located || !located.stagingDir) {
+	const stagingDir = await readStagingPath();
+	if (!stagingDir) {
 		warn(`Staging path file is missing. preinstall was skipped or killed mid-run. ${RECOVERY_INSTRUCTION}`);
 		process.exit(0);
 	}
-	const { stagingDir, parentDir } = located;
 	if (!existsSync(stagingDir)) {
 		warn(`Staging dir no longer exists: ${stagingDir}. ${RECOVERY_INSTRUCTION}`);
-		await rm(parentDir, { recursive: true, force: true });
+		await rm(STAGING_PATH_FILE, { force: true });
 		process.exit(0);
 	}
 
@@ -110,7 +79,7 @@ async function main() {
 	if (!existsSync(outputDir)) {
 		warn(`Staging output dir is missing: ${outputDir}. ${RECOVERY_INSTRUCTION}`);
 		await rm(stagingDir, { recursive: true, force: true });
-		await rm(parentDir, { recursive: true, force: true });
+		await rm(STAGING_PATH_FILE, { force: true });
 		process.exit(0);
 	}
 
@@ -183,13 +152,13 @@ async function main() {
 		await restoreIfBackedUp(backupAgents, productionAgentsDir);
 		await rm(backupRoot, { recursive: true, force: true });
 		await rm(stagingDir, { recursive: true, force: true });
-		await rm(parentDir, { recursive: true, force: true });
+		await rm(STAGING_PATH_FILE, { force: true });
 		process.exit(1);
 	}
 
 	await rm(backupRoot, { recursive: true, force: true });
 	await rm(stagingDir, { recursive: true, force: true });
-	await rm(parentDir, { recursive: true, force: true });
+	await rm(STAGING_PATH_FILE, { force: true });
 
 	// Print a one-line summary.
 	const skillCount = await readdir(productionSkillsDir).then((d) => d.length).catch(() => 0);
