@@ -8,6 +8,8 @@
 
 - `packages/*`: installable/distributable Pi packages. Each package owns its `package.json`, README, Pi manifest, tests, and npm publish metadata.
 - `docs/`: shared project documentation, when needed.
+- `docs/solutions/`: documented solutions to past problems (bugs, best practices, workflow patterns), organized by category with YAML frontmatter (`module`, `tags`, `problem_type`). Relevant when implementing or debugging in documented areas.
+- `CONCEPTS.md`: shared domain vocabulary (entities, named processes, status concepts). Relevant when orienting to the codebase or discussing project-specific terms.
 - `examples/`: examples or fixtures, when needed.
 - `scripts/`: shared automation, when needed.
 - `templates/`: starter templates for future Pi artifacts, when needed.
@@ -236,3 +238,4 @@ npm run validate
 ## Git
 
 Keep commits focused and avoid unrelated file churn.
+
