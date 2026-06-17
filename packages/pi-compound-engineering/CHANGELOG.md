@@ -9,6 +9,10 @@ The package version tracks the upstream [`compound-engineering`](https://github.
 
 ## [Unreleased]
 
+### Changed
+
+- Added Pi runtime guidance for resolving bundled CE skill resources (for example, `/ce-setup`'s `skills/ce-setup/scripts/check-health`) without rewriting upstream skill content.
+
 ## [3.13.0] - 2026-06-15
 
 ### Added

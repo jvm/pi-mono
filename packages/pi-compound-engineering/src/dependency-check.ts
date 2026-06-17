@@ -83,14 +83,16 @@ const warnedPostinstallSessions = new Set<string>();
  * `skills/` and `agents/` directories regardless of which directory the
  * user invoked the command from.
  */
-export function getPackageInstallDir(): string {
+const PACKAGE_INSTALL_DIR = (() => {
 	try {
-		const moduleUrl = import.meta.url;
-		const modulePath = fileURLToPath(moduleUrl);
-		return dirname(dirname(modulePath));
+		return dirname(dirname(fileURLToPath(import.meta.url)));
 	} catch {
 		return process.cwd();
 	}
+})();
+
+export function getPackageInstallDir(): string {
+	return PACKAGE_INSTALL_DIR;
 }
 
 /**

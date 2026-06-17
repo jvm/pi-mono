@@ -14,6 +14,7 @@
 - **`/ce-status`** — a slash command that reports the synced CE version, skill/agent counts, and which peer packages are detected.
 - **One-shot dependency warnings** — gentle notifications on first session start when peer packages are missing.
 - **Skipped-postinstall warning** — fires when the `skills/` and `agents/` directories are empty (the `--ignore-scripts` failure mode) and tells you exactly how to recover.
+- **Skill resource guidance** — adds Pi runtime context so bundled CE skill resources like `scripts/` and `references/` resolve under `skills/<skill-name>/...` without rewriting upstream skill content.
 
 The exact skill and agent list is visible in Pi's startup `[Skills]` list after install.
 
@@ -98,6 +99,8 @@ pi-mono repo (this package)
 The two-phase `preinstall` + `postinstall` design gives npm-native update safety: if `preinstall` fails (network, SHA, converter bug, structure check), npm aborts the install/update and the previous version remains untouched.
 
 The converter (`scripts/converter.mjs`) is a pure-Node ESM port of the upstream CE-to-Pi converter. It has no npm dependencies — it runs with `node` alone, which is critical because the install-time scripts cannot rely on a working `node_modules/`.
+
+At runtime, the extension adds a small Pi-only system prompt note explaining how to resolve bundled CE skill resources for any CE skill. If a CE skill says to use `scripts/<file>`, `references/<file>`, or `assets/<file>`, Pi agents should interpret that as `skills/<skill-name>/scripts/<file>`, `skills/<skill-name>/references/<file>`, or `skills/<skill-name>/assets/<file>`. The runtime note also includes the current package install directory so shell commands can use absolute paths under `skills/<skill-name>/...` and avoid probing Claude-specific paths such as `plugin.json` or package-root `scripts/<file>`. This is extension guidance only — the package does not rewrite upstream skill instructions for this resource-resolution fix.
 
 ## Troubleshooting
 
