@@ -86,7 +86,7 @@ The package is the **glue**, not the artifact. The committed source is small (~3
 
 This is by design: see `README.md` for the rationale. The implementation rules:
 
-1. **No in-tree modifications of CE content.** The only file in the package that contains CE-derived logic is `scripts/converter.mjs`, and it is a translation layer, not a content fork. Pi-specific workarounds belong upstream in CE (preferred) or in the converter's regex transforms (acceptable when upstreaming is blocked).
+1. **No in-tree modifications of CE content.** The only file in the package that contains CE-derived logic is `scripts/converter.mjs`, and it is a translation layer, not a content fork. Pi-specific workarounds belong upstream in CE (preferred). For portability gaps that can be solved at runtime (for example, helping Pi agents resolve bundled skill `scripts/` or `references/`), prefer extension-provided context over converter text rewrites. Use converter transforms only when runtime guidance cannot solve the issue and upstreaming is blocked.
 
 2. **SHA256 pin is a supply-chain guard.** `scripts/expected-sha256.txt` is the contract that ensures every install pulls the same artifact. Update it only after reviewing the upstream release notes — never in bulk, never in CI.
 

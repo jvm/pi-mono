@@ -19,7 +19,7 @@
  */
 
 import { createWriteStream, existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -214,6 +214,23 @@ async function main() {
 			} else {
 				fail(`missing required skill: ${required}`);
 			}
+		}
+
+		const setupHealthScript = join(outputDir, "skills", "ce-setup", "scripts", "check-health");
+		try {
+			const setupHealthStat = await stat(setupHealthScript);
+			if (setupHealthStat.isFile()) {
+				pass("ce-setup bundled check-health script is present");
+			} else {
+				fail("ce-setup bundled check-health path is not a file", setupHealthScript);
+			}
+			if ((setupHealthStat.mode & 0o111) !== 0) {
+				pass("ce-setup bundled check-health script is executable");
+			} else {
+				fail("ce-setup bundled check-health script is not executable", setupHealthScript);
+			}
+		} catch (err) {
+			fail("ce-setup bundled check-health script is missing", err?.message ?? String(err));
 		}
 
 		const requiredAgents = [
