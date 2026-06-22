@@ -425,6 +425,19 @@ export function transformContentForPi(body, options = {}) {
 			if (refPath.startsWith(`skills/${skillName}/`)) return _match;
 			return `\`skills/${skillName}/${refPath}\``;
 		});
+
+		// Skill-local shell invocations: `bash scripts/check-health` -> `bash skills/<skill>/scripts/check-health`.
+		// Pi executes shell commands from the project cwd, so un-backtick bare
+		// `scripts/...` invocations fail. Only rewrite on lines that are a shell
+		// command (after a known command prefix: bash, sh, ./, node, python3, etc.)
+		// to avoid hitting prose mentions. Restricted to `scripts/` (not
+		// `references/` or `assets/`) to keep the false-positive surface narrow;
+		// the backtick pass above already covers inline refs.
+		const commandPrefixPattern = /^(\s*)(bash|sh|\.\/|node|python3)(\s+)((?:scripts|references)\/[A-Za-z0-9_./-]+)/gm;
+		result = result.replace(commandPrefixPattern, (match, indent, cmd, space, refPath) => {
+			if (refPath.startsWith(`skills/${skillName}/`)) return match;
+			return `${indent}${cmd}${space}skills/${skillName}/${refPath}`;
+		});
 	}
 
 	return result;

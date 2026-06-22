@@ -276,12 +276,46 @@ async function main() {
 				}
 			}
 		}
-		if (brokenRefs.length === 0) {
-			pass(`all ${resourceRefCount} skill resource refs resolve on disk`);
+
+		// Shell-command resource guard: every `bash|sh|node|python3 scripts/X` line in
+		// a converted SKILL.md must point at a path that exists on disk. Pi runs
+		// shell commands from the project cwd, so un-backtick bare invocations of
+		// `scripts/X` would ENOENT unless the user's repo happens to contain a
+		// same-named script. The converter rewrites these to `skills/<skill>/scripts/X`.
+		const commandRefPattern = /(?:^|\n)(\s*)(bash|sh|node|python3)(\s+)skills\/(ce-[a-z0-9-]+)\/((?:scripts|references)\/[A-Za-z0-9_./-]+)/g;
+		let commandRefCount = 0;
+		const brokenCommandRefs = [];
+		for (const skillName of skills) {
+			const skillFile = join(outputDir, "skills", skillName, "SKILL.md");
+			let content;
+			try {
+				content = await readFile(skillFile, "utf8");
+			} catch {
+				continue;
+			}
+			const refs = [...content.matchAll(commandRefPattern)];
+			for (const match of refs) {
+				const indent = match[1];
+				const cmd = match[2];
+				const refSkill = match[4];
+				const refPath = match[5];
+				const resolved = join(outputDir, "skills", refSkill, refPath);
+				try {
+					await access(resolved);
+					commandRefCount++;
+				} catch {
+					brokenCommandRefs.push(`${skillName}: ${indent}${cmd} skills/${refSkill}/${refPath} -> ${resolved}`);
+				}
+			}
+		}
+		const totalResolved = resourceRefCount + commandRefCount;
+		if (brokenRefs.length === 0 && brokenCommandRefs.length === 0) {
+			pass(`all ${totalResolved} skill resource refs resolve on disk (${resourceRefCount} inline, ${commandRefCount} shell-command)`);
 		} else {
+			const all = [...brokenRefs, ...brokenCommandRefs];
 			fail(
-				`${brokenRefs.length} skill resource ref(s) do not resolve`,
-				brokenRefs.slice(0, 5).join("\n  "),
+				`${all.length} skill resource ref(s) do not resolve`,
+				all.slice(0, 5).join("\n  "),
 			);
 		}
 
