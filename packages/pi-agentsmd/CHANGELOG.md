@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Sync init prompt with upstream Codex to refuse overwriting an existing AGENTS.md (resolves #12)
+
 ## [0.1.1] - 2026-06-08
 
 ### Fixed
