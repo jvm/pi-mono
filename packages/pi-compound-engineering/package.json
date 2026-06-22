@@ -1,6 +1,6 @@
 {
   "name": "pi-compound-engineering",
-  "version": "3.13.0",
+  "version": "3.13.1",
   "description": "Compound Engineering for Pi: brainstorm, plan, work, review, and compound.",
   "type": "module",
   "license": "MIT",
@@ -14,7 +14,12 @@
     ],
     "skills": [
       "./skills"
-    ]
+    ],
+    "subagents": {
+      "agents": [
+        "./agents"
+      ]
+    }
   },
   "keywords": [
     "pi-package",
@@ -56,7 +61,7 @@
     "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.78.0",
+    "@earendil-works/pi-coding-agent": "^0.79.8",
     "@types/node": "^25.6.2",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"

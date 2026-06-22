@@ -19,7 +19,7 @@
  */
 
 import { createWriteStream, existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -244,6 +244,45 @@ async function main() {
 			} else {
 				fail(`missing required agent: ${required}`);
 			}
+		}
+
+		// Resource-resolution guard: every backtick-wrapped skill resource
+		// ref in a converted SKILL.md must resolve on disk. The converter rewrites
+		// upstream `references/foo.md` to `skills/<skill>/references/foo.md` so it
+		// resolves against the package-root base Pi injects. A broken ref here
+		// means the converter rewrite (or an upstream change) would ENOENT at
+		// runtime. See R5/R6 in the plan.
+		const resourceRefPattern = /`skills\/(ce-[a-z0-9-]+)\/((?:references|scripts|assets)\/[A-Za-z0-9_./-]+)`/g;
+		let resourceRefCount = 0;
+		const brokenRefs = [];
+		for (const skillName of skills) {
+			const skillFile = join(outputDir, "skills", skillName, "SKILL.md");
+			let content;
+			try {
+				content = await readFile(skillFile, "utf8");
+			} catch {
+				continue;
+			}
+			const refs = [...content.matchAll(resourceRefPattern)];
+			for (const match of refs) {
+				const refSkill = match[1];
+				const refPath = match[2];
+				const resolved = join(outputDir, "skills", refSkill, refPath);
+				try {
+					await access(resolved);
+					resourceRefCount++;
+				} catch {
+					brokenRefs.push(`${skillName}: \`skills/${refSkill}/${refPath}\` -> ${resolved}`);
+				}
+			}
+		}
+		if (brokenRefs.length === 0) {
+			pass(`all ${resourceRefCount} skill resource refs resolve on disk`);
+		} else {
+			fail(
+				`${brokenRefs.length} skill resource ref(s) do not resolve`,
+				brokenRefs.slice(0, 5).join("\n  "),
+			);
 		}
 
 		const planContent = await readFile(join(outputDir, "skills", "ce-plan", "SKILL.md"), "utf8");

@@ -10,11 +10,11 @@
 ## Features
 
 - **`ce-*` skills** — the full set of upstream CE skills: planning, code review, work execution, brainstorming, debugging, sessions, worktrees, and more.
-- **`ce-*` agents** — the full set of upstream CE reviewer and analyst personas.
+- **`ce-*` agents** — the full set of upstream CE reviewer and analyst personas, registered as first-class Pi subagents (visible in `subagent action:list`). Conditional personas (those an orchestrating skill selects based on diff context) are included; invoking one outside its trigger produces a no-op review rather than corruption, so the `ce-` prefix and the persona description are the only guards.
 - **`/ce-status`** — a slash command that reports the synced CE version, skill/agent counts, and which peer packages are detected.
 - **One-shot dependency warnings** — gentle notifications on first session start when peer packages are missing.
 - **Skipped-postinstall warning** — fires when the `skills/` and `agents/` directories are empty (the `--ignore-scripts` failure mode) and tells you exactly how to recover.
-- **Skill resource guidance** — adds Pi runtime context so bundled CE skill resources like `scripts/` and `references/` resolve under `skills/<skill-name>/...` without rewriting upstream skill content.
+- **Skill resource paths** — bundled CE skill resources like `scripts/`, `references/`, and `assets/` are rewritten at conversion time to resolve under `skills/<skill-name>/...`, matching the package-root base path Pi injects for package-sourced skills. No runtime guidance is needed.
 
 The exact skill and agent list is visible in Pi's startup `[Skills]` list after install.
 
@@ -100,7 +100,7 @@ The two-phase `preinstall` + `postinstall` design gives npm-native update safety
 
 The converter (`scripts/converter.mjs`) is a pure-Node ESM port of the upstream CE-to-Pi converter. It has no npm dependencies — it runs with `node` alone, which is critical because the install-time scripts cannot rely on a working `node_modules/`.
 
-At runtime, the extension adds a small Pi-only system prompt note explaining how to resolve bundled CE skill resources for any CE skill. If a CE skill says to use `scripts/<file>`, `references/<file>`, or `assets/<file>`, Pi agents should interpret that as `skills/<skill-name>/scripts/<file>`, `skills/<skill-name>/references/<file>`, or `skills/<skill-name>/assets/<file>`. The runtime note also includes the current package install directory so shell commands can use absolute paths under `skills/<skill-name>/...` and avoid probing Claude-specific paths such as `plugin.json` or package-root `scripts/<file>`. This is extension guidance only — the package does not rewrite upstream skill instructions for this resource-resolution fix.
+At conversion time, the converter rewrites each skill's backtick-wrapped `references/`, `scripts/`, and `assets/` paths to `skills/<skill-name>/...` so they resolve against the package-root base path Pi injects for package-sourced skills. `npm run verify` asserts every rewritten ref resolves on disk. The package manifest also declares a `subagents.agents` entry so the `ce-*` personas register as first-class Pi subagents.
 
 ## Troubleshooting
 
