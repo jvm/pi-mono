@@ -1,8 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { upsertAgentsBlock } from "../src/agents-block.js";
-import { getPackageInstallDir, isInstallComplete, maybeWarnAboutDependencies, runDependencyCheck } from "../src/dependency-check.js";
+import { isInstallComplete, maybeWarnAboutDependencies, runDependencyCheck } from "../src/dependency-check.js";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
-import { appendCeSkillResourceGuidance, shouldAppendCeSkillResourceGuidance } from "../src/skill-resource-guidance.js";
 import { registerCeStatusCommand } from "../src/status-command.js";
 
 export default function piCompoundEngineering(pi: ExtensionAPI) {
@@ -11,17 +10,6 @@ export default function piCompoundEngineering(pi: ExtensionAPI) {
 	// Register /ce-status first so it is always available, even when the
 	// install is incomplete (e.g. `--ignore-scripts` was used).
 	registerCeStatusCommand(pi);
-
-	// CE skills are authored as portable Agent Skills and may reference
-	// skill-local resources like `scripts/check-health`. Pi executes shell
-	// commands from the project cwd, so provide package-level resolution
-	// guidance at agent-start time without rewriting upstream skill content.
-	pi.on("before_agent_start", async (event) => {
-		if (!shouldAppendCeSkillResourceGuidance(event.prompt, event.systemPromptOptions.skills)) return;
-		return {
-			systemPrompt: appendCeSkillResourceGuidance(event.systemPrompt, getPackageInstallDir()),
-		};
-	});
 
 	// The dependency check and the AGENTS.md block are deferred to
 	// `session_start` so we have a live `ExtensionContext` (and a cwd).

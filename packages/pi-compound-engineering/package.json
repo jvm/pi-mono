@@ -1,6 +1,6 @@
 {
   "name": "pi-compound-engineering",
-  "version": "3.13.0",
+  "version": "3.13.1",
   "description": "Compound Engineering for Pi: brainstorm, plan, work, review, and compound.",
   "type": "module",
   "license": "MIT",
@@ -14,7 +14,12 @@
     ],
     "skills": [
       "./skills"
-    ]
+    ],
+    "subagents": {
+      "agents": [
+        "./agents"
+      ]
+    }
   },
   "keywords": [
     "pi-package",

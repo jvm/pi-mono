@@ -12,7 +12,7 @@
  * install time. This file is the API surface for the extension and the
  * structure check.
  */
-export const CE_VERSION = "3.13.0";
+export const CE_VERSION = "3.13.1";
 
 /**
  * Expected counts after conversion for the pinned CE version.

@@ -362,9 +362,18 @@ export function sanitizeDescription(value, maxLength = PI_DESCRIPTION_MAX_LENGTH
 // ---------------------------------------------------------------------------
 
 /**
+ * Apply Pi-specific text transformations to a skill or agent body.
+ *
  * @param {string} body
+ * @param {object} [options]
+ * @param {string} [options.skillName] - Sanitized skill directory name. When
+ *   provided, backtick-wrapped `references/`, `scripts/`, and `assets/` paths
+ *   are prefixed with `skills/<skillName>/` so they resolve against the
+ *   package-root base path Pi injects for package-sourced skills. Omit for
+ *   agent bodies (no resource rewrite) or any non-skill caller.
  */
-export function transformContentForPi(body) {
+export function transformContentForPi(body, options = {}) {
+	const { skillName } = options;
 	let result = body;
 
 	// Task repo-research-analyst(feature_description) or Task compound-engineering:research:repo-research-analyst(args)
@@ -402,6 +411,34 @@ export function transformContentForPi(body) {
 		const withoutPrefix = name.startsWith("prompts:") ? name.slice("prompts:".length) : name;
 		return `/${normalizeName(withoutPrefix)}`;
 	});
+
+	// Skill-local resource paths: `references/foo.md` -> `skills/<skill>/references/foo.md`.
+	// Pi injects the package root as the base path for package-sourced skills, so
+	// the bare relative paths upstream CE writes resolve one level too high.
+	// Rewrite backtick-wrapped refs so they resolve on the first read attempt
+	// with no model inference. Only backtick-wrapped paths are rewritten: real
+	// resource refs are consistently backtick-wrapped, and this avoids touching
+	// prose mentions, vendored man-page text, or paths inside fenced code blocks.
+	if (skillName) {
+		const resourceRefPattern = /`((?:references|scripts|assets)\/[A-Za-z0-9_./-]+)`/g;
+		result = result.replace(resourceRefPattern, (_match, refPath) => {
+			if (refPath.startsWith(`skills/${skillName}/`)) return _match;
+			return `\`skills/${skillName}/${refPath}\``;
+		});
+
+		// Skill-local shell invocations: `bash scripts/check-health` -> `bash skills/<skill>/scripts/check-health`.
+		// Pi executes shell commands from the project cwd, so un-backtick bare
+		// `scripts/...` invocations fail. Only rewrite on lines that are a shell
+		// command (after a known command prefix: bash, sh, ./, node, python3, etc.)
+		// to avoid hitting prose mentions. Restricted to `scripts/` (not
+		// `references/` or `assets/`) to keep the false-positive surface narrow;
+		// the backtick pass above already covers inline refs.
+		const commandPrefixPattern = /^(\s*)(bash|sh|\.\/|node|python3)(\s+)((?:scripts|references)\/[A-Za-z0-9_./-]+)/gm;
+		result = result.replace(commandPrefixPattern, (match, indent, cmd, space, refPath) => {
+			if (refPath.startsWith(`skills/${skillName}/`)) return match;
+			return `${indent}${cmd}${space}skills/${skillName}/${refPath}`;
+		});
+	}
 
 	return result;
 }
@@ -560,19 +597,24 @@ function convertAgent(agent) {
  *
  * @param {string} sourceDir
  * @param {string} targetDir
+ * @param {string} [skillName] - Sanitized skill name for resource-path
+ *   rewriting in `SKILL.md` and nested `.md` files. Derived from `targetDir`
+ *   when omitted at the top level; left undefined in recursive calls so
+ *   nested `.md` files inherit the top-level skill name rather than the
+ *   subdirectory name.
  */
-export async function copySkillDir(sourceDir, targetDir) {
+export async function copySkillDir(sourceDir, targetDir, skillName) {
 	await mkdir(targetDir, { recursive: true });
 	const entries = await readdir(sourceDir, { withFileTypes: true });
 	for (const entry of entries) {
 		const sourcePath = join(sourceDir, entry.name);
 		const targetPath = join(targetDir, entry.name);
 		if (entry.isDirectory()) {
-			await copySkillDir(sourcePath, targetPath);
+			await copySkillDir(sourcePath, targetPath, skillName);
 		} else if (entry.isFile()) {
 			if (entry.name === "SKILL.md" || entry.name.endsWith(".md")) {
 				const content = await readFile(sourcePath, "utf8");
-				const transformed = transformContentForPi(content);
+				const transformed = transformContentForPi(content, { skillName });
 				await writeFile(targetPath, transformed, "utf8");
 			} else {
 				await copyFilePreservingMode(sourcePath, targetPath);
@@ -688,7 +730,7 @@ export async function convert(ceRoot, outputDir, ceVersion) {
 
 	for (const skill of result.skills) {
 		const targetDir = join(skillsDir, sanitizePathName(skill.name));
-		await copySkillDir(skill.sourceDir, targetDir);
+		await copySkillDir(skill.sourceDir, targetDir, sanitizePathName(skill.name));
 	}
 
 	for (const agent of result.agents) {

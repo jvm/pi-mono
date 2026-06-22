@@ -9,9 +9,23 @@ The package version tracks the upstream [`compound-engineering`](https://github.
 
 ## [Unreleased]
 
+### Added
+
+- Converter resource-path rewrite: bundled CE skill resources (`references/`, `scripts/`, `assets/`) are rewritten at conversion time to resolve against the package-root base path Pi injects, so they resolve on the first read attempt with no model inference.
+- Persona agents registered as first-class Pi subagents via a `subagents` manifest entry; all 43 appear in `subagent action:list`. Conditional personas (those selected by orchestrating skills based on diff context) are included — invoking one outside its trigger produces a no-op review rather than corruption, so the `ce-` prefix and the persona description are the only guards. Revisit if `pi-subagents` adds a native hide-from-list flag.
+- `npm run verify` resource-resolution guard: fails when any converted skill resource ref would not resolve on disk.
+
+### Removed
+
+- Pi runtime guidance for resolving bundled CE skill resources (`src/skill-resource-guidance.ts` and the `before_agent_start` hook); the converter rewrite supersedes it.
+
+## [3.13.1] - 2026-06-22
+
+Mirrors [`compound-engineering-plugin` v3.13.1](https://github.com/EveryInc/compound-engineering-plugin/releases/tag/cli-v3.13.1) for Pi. Upstream 3.13.1 is a single `ce-proof` bugfix (HITL review loop replaced by one-way publish, #957); skill and agent counts are unchanged at 38 and 43.
+
 ### Changed
 
-- Added Pi runtime guidance for resolving bundled CE skill resources (for example, `/ce-setup`'s `skills/ce-setup/scripts/check-health`) without rewriting upstream skill content.
+- Updated SHA256 pin (`scripts/expected-sha256.txt`) for the `cli-v3.13.1` upstream tarball.
 
 ## [3.13.0] - 2026-06-15
 
