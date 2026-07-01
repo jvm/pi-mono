@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.3.11 - 2026-07-01
+
 ## 0.3.9 - 2026-06-14
 
 All notable changes to this project will be documented in this file.
