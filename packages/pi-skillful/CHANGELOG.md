@@ -8,6 +8,15 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-07-01
+
+### Fixed
+
+- Color hidden skills in the startup `[Skills]` list on `@earendil-works/pi-coding-agent` 0.80+. The 0.80 release moved the loaded-resources container out of `chatContainer`, so the existing prototype patch walked the wrong container and the red/dim colorization no longer applied. The patch now also walks `loadedResourcesContainer`, where 0.80 actually renders the `[Skills]` section.
+- Bumped dev dependency range to `^0.80.0` to match the new floor.
+
+## [0.3.9] - 2026-06-14
+
 ### Fixed
 
 - Skipped Pi package-bundled skills when applying hidden-skill and toggle-slot configuration so `skillful` only affects global and project skills.
