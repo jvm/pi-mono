@@ -1,6 +1,6 @@
 {
   "name": "pi-skillful",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Pi package with skill invocation and visibility improvements.",
   "type": "module",
   "exports": {
@@ -45,8 +45,8 @@
     "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.79.3",
-    "@earendil-works/pi-tui": "^0.79.3",
+    "@earendil-works/pi-coding-agent": "^0.80.0",
+    "@earendil-works/pi-tui": "^0.80.0",
     "@types/node": "^25.9.3",
     "typescript": "^6.0.3"
   },

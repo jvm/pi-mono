@@ -42,7 +42,7 @@ interface BoxLike {
 }
 
 interface InteractiveModeLike {
-  chatContainer?: BoxLike;
+  loadedResourcesContainer?: BoxLike;
   showLoadedResources?: (options?: unknown) => void;
   session?: { resourceLoader?: { getSkills: () => { skills: Skill[]; diagnostics: unknown[] } } };
   sessionManager?: { getCwd?: () => string };
@@ -202,7 +202,7 @@ function installStartupSkillListPatch(): void {
       return result;
     };
 
-    const childrenBefore = this.chatContainer?.children.length ?? 0;
+    const childrenBefore = this.loadedResourcesContainer?.children.length ?? 0;
 
     try {
       original.call(this, options);
@@ -210,17 +210,18 @@ function installStartupSkillListPatch(): void {
       loader.getSkills = originalGetSkills;
     }
 
-    if (rawSkillNames.length === 0 || !cwd || !this.chatContainer) return;
+    if (rawSkillNames.length === 0 || !cwd || !this.loadedResourcesContainer) return;
 
-    const children = this.chatContainer.children;
+    const children = this.loadedResourcesContainer.children;
     for (let i = childrenBefore; i < children.length; i++) {
       const child = children[i] as ExpandableTextLike | undefined;
       if (!child || typeof child.getCollapsedText !== "function") continue;
       const collapsed = child.getCollapsedText();
       if (!collapsed.includes("[Skills]")) continue;
 
-      child.getCollapsedText = () => buildColorizedSkillList(rawSkillNames, store.lastHiddenSkills, store.theme);
-      child.setText(child.getCollapsedText());
+      const colorized = buildColorizedSkillList(rawSkillNames, store.lastHiddenSkills, store.theme);
+      child.getCollapsedText = () => colorized;
+      child.setText(colorized);
       break;
     }
   };
