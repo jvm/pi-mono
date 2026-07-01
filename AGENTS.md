@@ -233,6 +233,101 @@ Security hardening is enforced in GitHub Actions with TruffleHog secret scanning
 npm run validate
 ```
 
-## Git
+## Git and PR workflow
+
+Use feature branches and PRs for all repo changes. Do not commit directly to `main`.
+
+Before committing, check branch and status:
+
+```bash
+git status --short
+git branch --show-current
+```
+
+If changes are on `main`, create a feature branch before staging:
+
+```bash
+git switch -c fix/<short-description>
+```
 
 Keep commits focused and avoid unrelated file churn.
+
+When asked to "commit and push", "ship this", or "open a PR":
+
+1. Commit the scoped changes.
+2. Push the feature branch.
+3. Open the PR with `gh pr create`.
+4. Monitor PR checks until pass/fail is known.
+
+Do not stop at a PR creation link unless the user explicitly asks not to open the PR.
+
+Before pushing or opening a PR, sync with `main`:
+
+```bash
+git fetch origin main
+git rebase origin/main
+```
+
+After an amend or rebase, push with:
+
+```bash
+git push --force-with-lease
+```
+
+### Dependency and lockfile changes
+
+This repo uses the root workspace lockfile. Any change to a package version or workspace dependency in `packages/*/package.json` must update the root `package-lock.json`.
+
+Prefer scoped lock refreshes:
+
+```bash
+npm install -w packages/<package-name> --package-lock-only --no-audit --no-fund
+```
+
+Before PR, verify at least:
+
+```bash
+npm run -w packages/<package-name> check
+npm ci --dry-run
+git diff --stat
+```
+
+### CI failures
+
+When CI fails, inspect the failed job logs and confirm the failure belongs to the current PR head SHA before rerunning anything:
+
+```bash
+gh pr checks <pr-number>
+gh pr view <pr-number> --json headRefOid
+git rev-parse HEAD
+gh run view <run-id> --log-failed
+```
+
+Prefer fixing, rebasing onto `origin/main`, and pushing the corrected branch over rerunning stale checks or adding no-op commits.
+
+### After merge
+
+After the user merges a PR:
+
+```bash
+git fetch origin main
+git switch main
+git pull --ff-only
+git status --short
+```
+
+Delete the local feature branch after verifying the change landed on `main`. For squash merges, `git branch -d` may fail; `git branch -D <branch>` is allowed only after verifying the merged change is present on `main`.
+
+<!-- BEGIN COMPOUND PI TOOL MAP -->
+## Compound Engineering (Pi compatibility)
+
+This block is added by the pi-compound-engineering package.
+
+Pi extensions used by skills shipped by this package:
+- Required for full functionality: `pi-subagents` (by nicobailon) provides the `subagent` tool used by ce-compound, ce-code-review, ce-plan, ce-compound-refresh, and other parallel-agent skills.
+- Recommended: `pi-ask-user` (by edlsh) provides the `ask_user` tool; skills fall back to numbered options in chat when it is missing.
+
+Install with:
+  pi install npm:pi-subagents
+  pi install npm:pi-ask-user
+<!-- END COMPOUND PI TOOL MAP -->

@@ -4,15 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-From the monorepo root:
-
-```bash
-npm install           # install all workspace deps
-npm run check         # type-check all packages (tsc --noEmit)
-npm test              # run all workspace tests
-npm run pack:dry-run  # verify published package contents for all packages
-npm run validate      # check + test + security:audit + pack:dry-run
-```
+Root-level commands (`npm install`, `check`, `test`, `pack:dry-run`, `validate`) and the git/PR workflow are in AGENTS.md — follow that.
 
 Target a single workspace:
 
@@ -83,20 +75,8 @@ Tests use `node:test` and `node:assert/strict` in `.test.mjs` files. Run via `no
 - ESM TypeScript, `"type": "module"`, `"target": "ES2022"`, `"module": "NodeNext"`.
 - 2-space indentation, LF line endings, explicit `.js` import specifiers for local TypeScript modules (e.g. `import { foo } from "./foo.js"` resolves to `foo.ts` at runtime).
 - New reusable logic belongs in `src/`; Pi API wiring belongs in `extensions/index.ts`; root `index.ts` stays a thin re-export.
-- `CLAUDE.md` files are only created by Claude Code. Do not create them in package directories unless working in that package. Other agents use `AGENTS.md`.
+- `CLAUDE.md` files are only created by Claude Code, and never in package directories (see AGENTS.md). Other agents use `AGENTS.md`.
 
 ## Publishing
 
-Each package is published independently. The root is private and must not be published.
-
-```bash
-npm publish --workspace packages/<name>
-```
-
-Release tags follow the form `<package-name>@<version>` (e.g. `pi-web-kit@0.1.5`). When working in Pi, use the project-local `/release-package <name> <version>` command — it validates, tags, pushes, and creates the GitHub release.
-
-Before publishing, verify package contents:
-
-```bash
-npm run pack:dry-run --workspace packages/<name>
-```
+Publishing steps, release tag format, and the `/release-package` command are in AGENTS.md — follow that.
