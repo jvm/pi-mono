@@ -1,12 +1,18 @@
 # Changelog
 
-## 0.2.1 - 2026-06-14
-
 All notable changes to this project will be documented in this file.
 
 This project follows the spirit of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and uses semantic versioning for releases.
 
 ## [Unreleased]
+
+## [0.2.2] - 2026-07-01
+
+### Changed
+
+- Update Pi core development dependencies for Pi 0.80 compatibility.
+
+## [0.2.1] - 2026-06-14
 
 ## [0.2.0] - 2026-06-13
 

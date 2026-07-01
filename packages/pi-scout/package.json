@@ -1,6 +1,6 @@
 {
   "name": "pi-scout",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Register local reference codebases for Pi agent exploration.",
   "type": "module",
   "license": "MIT",

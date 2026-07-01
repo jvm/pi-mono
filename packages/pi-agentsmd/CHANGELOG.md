@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-07-01
+
+### Changed
+
+- Update Pi core development dependency for Pi 0.80 compatibility.
+
 ### Fixed
 
 - Sync init prompt with upstream Codex to refuse overwriting an existing AGENTS.md (resolves #12)

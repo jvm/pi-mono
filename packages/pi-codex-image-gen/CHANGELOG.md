@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-07-01
+
+### Changed
+
+- Update Pi core development dependencies for Pi 0.80 compatibility.
+
 ## [0.1.10] - 2026-06-06
 
 ### Changed

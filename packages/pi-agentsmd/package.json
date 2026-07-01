@@ -1,6 +1,6 @@
 {
   "name": "pi-agentsmd",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Generate AGENTS.md contributor guides for Pi repositories.",
   "type": "module",
   "license": "MIT",

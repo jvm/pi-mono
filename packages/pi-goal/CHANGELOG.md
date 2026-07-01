@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.10 - 2026-07-01
+
+### Changed
+
+- Update Pi core development dependencies for Pi 0.80 compatibility.
+
 ## 0.1.9 - 2026-06-16
 
 ### Fixed
