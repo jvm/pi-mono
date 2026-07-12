@@ -80,8 +80,8 @@ const warnedPostinstallSessions = new Set<string>();
 /**
  * The package's install dir, computed from the current module URL. Used by
  * the skipped-postinstall check and by `/ce-status` to find the synced
- * `skills/` and `agents/` directories regardless of which directory the
- * user invoked the command from.
+ * `skills/` directory regardless of which directory the user invoked the
+ * command from.
  */
 const PACKAGE_INSTALL_DIR = (() => {
 	try {
@@ -96,18 +96,16 @@ export function getPackageInstallDir(): string {
 }
 
 /**
- * Check whether the install dir has a populated `skills/` and `agents/`.
- * Both must exist and contain at least one entry for the install to be
- * considered complete.
+ * Check whether the install dir has a populated `skills/` directory. Upstream
+ * v3.14.0+ is intentionally skills-only, so agents are not an install
+ * completeness requirement.
  */
 export function isInstallComplete(installDir: string = getPackageInstallDir()): boolean {
 	const skillsDir = join(installDir, "skills");
-	const agentsDir = join(installDir, "agents");
-	if (!existsSync(skillsDir) || !existsSync(agentsDir)) return false;
+	if (!existsSync(skillsDir)) return false;
 	try {
 		const skills = readdirSync(skillsDir);
-		const agents = readdirSync(agentsDir);
-		return skills.length > 0 && agents.length > 0;
+		return skills.length > 0;
 	} catch {
 		return false;
 	}

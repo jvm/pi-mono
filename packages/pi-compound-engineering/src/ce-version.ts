@@ -3,7 +3,7 @@
  *
  * The package version is **identical** to the upstream CE `compound-engineering`
  * component version, as recorded in CE's
- * `.github/.release-please-manifest.json` (`plugins/compound-engineering`).
+ * `.github/.release-please-manifest.json` (the root-native `compound-engineering` component).
  * Users reading the upstream changelog or release notes can match the version
  * they have installed with a one-to-one mapping.
  *
@@ -12,30 +12,28 @@
  * install time. This file is the API surface for the extension and the
  * structure check.
  */
-export const CE_VERSION = "3.13.1";
+export const CE_VERSION = "3.19.0";
 
 /**
  * Expected counts after conversion for the pinned CE version.
  *
  * The structure check (`scripts/verify.mjs`) asserts these match the
- * upstream tarball. A new CE release that adds or removes skills/agents
- * must bump these constants in lockstep with `CE_VERSION`.
+ * upstream tarball. A new CE release that changes the skill inventory must
+ * bump this constant in lockstep with `CE_VERSION`.
  *
- * Note: the upstream tarball ships 39 skills, but `ce-update` is gated
- * to `ce_platforms: [claude]` only (it depends on the Claude Code
- * plugin-harness cache layout) and is excluded by the converter's
- * platform filter. 38 skills land in the Pi install dir.
+ * Upstream v3.19.0 is a root-native, skills-only plugin. Its 29 skills
+ * are available on Pi; former standalone agents now live as skill-local
+ * prompt assets and are intentionally not registered as Pi subagents.
  */
-export const EXPECTED_SKILL_COUNT = 38;
-export const EXPECTED_AGENT_COUNT = 43;
+export const EXPECTED_SKILL_COUNT = 29;
 
 /**
  * The upstream CE release tag for the pinned CE version.
- * `cli-v` is the prefix the Every maintainers use; see
- * https://github.com/EveryInc/compound-engineering-plugin/releases.
+ * v3.14.0+ uses the `compound-engineering-v` prefix. The former `cli-v`
+ * alias stopped receiving releases after v3.13.1.
  */
 export function getCeReleaseTag(version: string = CE_VERSION): string {
-	return `cli-v${version}`;
+	return `compound-engineering-v${version}`;
 }
 
 /**

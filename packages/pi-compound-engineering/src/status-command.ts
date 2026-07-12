@@ -34,15 +34,13 @@ function formatPeerLine(label: string, detection: ToolDetection): string {
 
 /**
  * Render the `/ce-status` output as a plain text report. The report
- * includes the synced CE version, the local skill/agent counts, the
- * detection status of `pi-subagents` and `pi-ask-user`, and the upstream
- * repo URL.
+ * includes the synced CE version, local skill count, peer-package detection,
+ * and the upstream repo URL.
  */
 export function buildCeStatusReport(pi: ExtensionAPI, cwd: string): string {
 	const installDir = getPackageInstallDir();
 	const check = runDependencyCheck(pi);
 	const skillCount = countEntries(join(installDir, "skills"));
-	const agentCount = countEntries(join(installDir, "agents"));
 	const installStatus = isInstallComplete(installDir)
 		? "complete"
 		: "incomplete (postinstall was skipped or failed)";
@@ -56,7 +54,6 @@ export function buildCeStatusReport(pi: ExtensionAPI, cwd: string): string {
 		"Install",
 		`  Status: ${installStatus}`,
 		`  Skills: ${skillCount}`,
-		`  Agents: ${agentCount}`,
 		"",
 		"Peer packages",
 		formatPeerLine("pi-subagents (subagent tool)", check.subagent),
@@ -70,7 +67,7 @@ export function buildCeStatusReport(pi: ExtensionAPI, cwd: string): string {
 
 export function registerCeStatusCommand(pi: ExtensionAPI): void {
 	pi.registerCommand("ce-status", {
-		description: "Show the synced CE version, skill/agent counts, and peer-package detection",
+		description: "Show the synced CE version, skill count, and peer-package detection",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			const report = buildCeStatusReport(pi, ctx.cwd);
 			await ctx.ui.editor("pi-compound-engineering status", report);

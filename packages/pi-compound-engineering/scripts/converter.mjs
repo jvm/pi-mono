@@ -2,10 +2,10 @@
 // @ts-check
 /**
  * Pure-Node port of Every Inc.'s `compound-engineering-plugin` CE-to-Pi
- * converter. Mirrors the logic in upstream `src/converters/claude-to-pi.ts`
- * and `src/targets/pi.ts` so that installing `pi-compound-engineering` over
- * a fresh checkout of CE 3.13.0 produces the same `skills/` and `agents/`
- * trees that the upstream Bun CLI would.
+ * converter. Mirrors the relevant skill handling in upstream
+ * `src/converters/claude-to-pi.ts` so that installing
+ * `pi-compound-engineering` over a root-native CE release produces the
+ * same skills-only surface that upstream ships for Pi.
  *
  * This file is plain ESM JavaScript with JSDoc annotations — no transpile
  * step, no npm dependencies. It is invoked by `scripts/stage.mjs` during
@@ -30,19 +30,9 @@ import { pipeline } from "node:stream/promises";
  *   description?: string,
  *   author?: { name?: string, email?: string, url?: string } | string,
  *   keywords?: string[],
- *   agents?: string | string[],
  *   commands?: string | string[],
  *   skills?: string | string[],
  * }} ClaudeManifest
- *
- * @typedef {{
- *   name: string,
- *   description?: string,
- *   capabilities?: string[],
- *   model?: string,
- *   body: string,
- *   sourcePath: string,
- * }} ClaudeAgent
  *
  * @typedef {{
  *   name: string,
@@ -55,15 +45,8 @@ import { pipeline } from "node:stream/promises";
  * @typedef {{
  *   root: string,
  *   manifest: ClaudeManifest,
- *   agents: ClaudeAgent[],
  *   skills: ClaudeSkill[],
  * }} ClaudePlugin
- *
- * @typedef {{
- *   name: string,
- *   description: string,
- *   content: string,
- * }} PiAgent
  *
  * @typedef {{
  *   name: string,
@@ -73,7 +56,6 @@ import { pipeline } from "node:stream/promises";
  * @typedef {{
  *   pluginName: string,
  *   skills: PiSkillSource[],
- *   agents: PiAgent[],
  * }} ConvertResult
  */
 
@@ -362,7 +344,7 @@ export function sanitizeDescription(value, maxLength = PI_DESCRIPTION_MAX_LENGTH
 // ---------------------------------------------------------------------------
 
 /**
- * Apply Pi-specific text transformations to a skill or agent body.
+ * Apply Pi-specific text transformations to skill content.
  *
  * @param {string} body
  * @param {object} [options]
@@ -370,7 +352,7 @@ export function sanitizeDescription(value, maxLength = PI_DESCRIPTION_MAX_LENGTH
  *   provided, backtick-wrapped `references/`, `scripts/`, and `assets/` paths
  *   are prefixed with `skills/<skillName>/` so they resolve against the
  *   package-root base path Pi injects for package-sourced skills. Omit for
- *   agent bodies (no resource rewrite) or any non-skill caller.
+ *   callers that do not have skill-local resources.
  */
 export function transformContentForPi(body, options = {}) {
 	const { skillName } = options;
@@ -448,7 +430,7 @@ export function transformContentForPi(body, options = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * @param {string} ceRoot Path to `plugins/compound-engineering/`
+ * @param {string} ceRoot Path to the root-native upstream plugin
  * @returns {Promise<ClaudePlugin>}
  */
 export async function parseClaudePlugin(ceRoot) {
@@ -457,11 +439,11 @@ export async function parseClaudePlugin(ceRoot) {
 	const manifest = JSON.parse(manifestRaw);
 
 	const skillsDir = join(ceRoot, "skills");
-	const agentsDir = join(ceRoot, "agents");
+	const skills = await parseSkills(skillsDir);
 
-	const [skills, agents] = await Promise.all([parseSkills(skillsDir), parseAgents(agentsDir)]);
-
-	return { root: ceRoot, manifest, skills, agents };
+	// CE v3.14.0+ packages specialist prompts under each owning skill's
+	// references/ directory, so this package emits only the upstream skills.
+	return { root: ceRoot, manifest, skills };
 }
 
 /**
@@ -503,36 +485,6 @@ async function parseSkills(skillsDir) {
 }
 
 /**
- * @param {string} agentsDir
- * @returns {Promise<ClaudeAgent[]>}
- */
-async function parseAgents(agentsDir) {
-	let entries;
-	try {
-		entries = await readdir(agentsDir, { withFileTypes: true });
-	} catch (err) {
-		if (err && /** @type {any} */ (err).code === "ENOENT") return [];
-		throw err;
-	}
-	const agents = [];
-	for (const entry of entries) {
-		if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-		const sourcePath = join(agentsDir, entry.name);
-		const raw = await readFile(sourcePath, "utf8");
-		const { data, body } = parseFrontmatter(raw);
-		const name = typeof data.name === "string" ? data.name : entry.name.replace(/\.md$/, "");
-		agents.push({
-			name,
-			description: typeof data.description === "string" ? data.description : undefined,
-			model: typeof data.model === "string" ? data.model : undefined,
-			body,
-			sourcePath,
-		});
-	}
-	return agents;
-}
-
-/**
  * Filter skills to those available on a given platform. Skills without a
  * `ce_platforms` field are available everywhere.
  *
@@ -559,30 +511,6 @@ export function convertClaudeToPi(plugin) {
 			name: skill.name,
 			sourceDir: skill.sourceDir,
 		})),
-		agents: plugin.agents.map(convertAgent),
-	};
-}
-
-/**
- * @param {ClaudeAgent} agent
- * @returns {PiAgent}
- */
-function convertAgent(agent) {
-	const name = normalizeName(agent.name);
-	const description = sanitizeDescription(
-		agent.description ?? `Converted from Claude agent ${agent.name}`,
-	);
-	const frontmatter = {
-		name,
-		description,
-	};
-	const body = agent.body.trim().length > 0
-		? agent.body.trim()
-		: `Instructions converted from the ${agent.name} agent.`;
-	return {
-		name,
-		description,
-		content: formatFrontmatter(frontmatter, body),
 	};
 }
 
@@ -624,18 +552,6 @@ export async function copySkillDir(sourceDir, targetDir, skillName) {
 }
 
 /**
- * Write a single agent as a `.md` file with the converted content.
- *
- * @param {PiAgent} agent
- * @param {string} agentsDir
- */
-async function writeAgent(agent, agentsDir) {
-	const target = join(agentsDir, `${sanitizePathName(agent.name)}.md`);
-	await writeFile(target, agent.content, "utf8");
-	return target;
-}
-
-/**
  * Build the THIRD-PARTY-NOTICES content for the install. Lists every
  * converted file with its upstream source path.
  *
@@ -650,8 +566,8 @@ export async function buildThirdPartyNotices(ceRoot, ceVersion, result) {
 	lines.push("=========================================");
 	lines.push("");
 	lines.push(`Synced from Every Inc.'s compound-engineering-plugin v${ceVersion}.`);
-	lines.push(`Upstream: https://github.com/EveryInc/compound-engineering-plugin/tree/cli-v${ceVersion}`);
-	lines.push(`Upstream tarball: https://codeload.github.com/EveryInc/compound-engineering-plugin/tar.gz/refs/tags/cli-v${ceVersion}`);
+	lines.push(`Upstream: https://github.com/EveryInc/compound-engineering-plugin/tree/compound-engineering-v${ceVersion}`);
+	lines.push(`Upstream tarball: https://codeload.github.com/EveryInc/compound-engineering-plugin/tar.gz/refs/tags/compound-engineering-v${ceVersion}`);
 	lines.push("");
 	lines.push("Every Inc. and Kieran Klaassen retain copyright to the original");
 	lines.push("content. The plugin is licensed under the MIT License. See the");
@@ -660,7 +576,7 @@ export async function buildThirdPartyNotices(ceRoot, ceVersion, result) {
 	lines.push("");
 	lines.push("The files below were generated by scripts/converter.mjs at install time");
 	lines.push("from the upstream tarball. Source paths are relative to the upstream");
-	lines.push("`plugins/compound-engineering/` directory.");
+	lines.push("root-native plugin directory.");
 	lines.push("");
 	lines.push("Skills (one SKILL.md per entry; references/ and assets/ copied verbatim):");
 	lines.push("");
@@ -682,23 +598,9 @@ export async function buildThirdPartyNotices(ceRoot, ceVersion, result) {
 		}
 	}
 	lines.push("");
-	lines.push("Agents:");
+	lines.push("Specialist prompts:");
 	lines.push("");
-	// PiAgent only carries the normalized `name`, not the original
-	// upstream filename. Look up the actual source file by reading the
-	// upstream agents dir and matching the normalized name back to the
-	// raw filename (e.g. an upstream file named "CE API Contract
-	// Reviewer.md" normalizes to "ce-api-contract-reviewer.md" and the
-	// notices must point at the real upstream file, not the
-	// normalized one).
-	const upstreamAgentFiles = await readdir(join(ceRoot, "agents"));
-	for (const agent of result.agents) {
-		const upstreamName = upstreamAgentFiles.find(
-			(file) => file.endsWith(".md") && normalizeName(file.slice(0, -3)) === agent.name,
-		);
-		const sourceName = upstreamName ?? `${agent.name}.md`;
-		lines.push(`  ${relative(ceRoot, join(ceRoot, "agents", sourceName))}`);
-	}
+	lines.push("  Included as skill-local references by upstream v3.14.0+.");
 	lines.push("");
 	return lines.join("\n");
 }
@@ -711,7 +613,6 @@ export async function buildThirdPartyNotices(ceRoot, ceVersion, result) {
  * Convert the upstream CE plugin at `ceRoot` and write the result to
  * `outputDir`. Produces:
  *   - <outputDir>/skills/<name>/SKILL.md
- *   - <outputDir>/agents/<name>.md
  *   - <outputDir>/THIRD-PARTY-NOTICES
  *
  * @param {string} ceRoot
@@ -724,17 +625,11 @@ export async function convert(ceRoot, outputDir, ceVersion) {
 	const result = convertClaudeToPi(plugin);
 
 	const skillsDir = join(outputDir, "skills");
-	const agentsDir = join(outputDir, "agents");
 	await mkdir(skillsDir, { recursive: true });
-	await mkdir(agentsDir, { recursive: true });
 
 	for (const skill of result.skills) {
 		const targetDir = join(skillsDir, sanitizePathName(skill.name));
 		await copySkillDir(skill.sourceDir, targetDir, sanitizePathName(skill.name));
-	}
-
-	for (const agent of result.agents) {
-		await writeAgent(agent, agentsDir);
 	}
 
 	// Generate THIRD-PARTY-NOTICES.

@@ -1,6 +1,6 @@
 # Repository Guidelines
 
-`pi-compound-engineering` ships Every Inc.'s [compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin) (CE) for Pi. The package is a **recipe-only** loader: it commits the glue code (extension, telemetry, dependency detection, `/ce-status` command) and a pure-Node port of the upstream CE-to-Pi converter. At `npm install` time, a `preinstall` script fetches the pinned CE release from GitHub, verifies its SHA256, runs the converter, and stages the resulting `skills/` and `agents/` in a temp dir. A `postinstall` script then commits the staged content into the package's install directory.
+`pi-compound-engineering` ships Every Inc.'s [compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin) (CE) for Pi. The package is a **recipe-only** loader: it commits the glue code (extension, telemetry, dependency detection, `/ce-status` command) and a pure-Node port of the upstream CE-to-Pi converter. At `npm install` time, a `preinstall` script fetches the pinned CE release from GitHub, verifies its SHA256, and stages the resulting `skills/` in a temp dir. A `postinstall` script then commits the staged content into the package's install directory.
 
 The package tracks the upstream `compound-engineering` component version exactly (e.g. CE `3.13.0` → `pi-compound-engineering@3.13.0`) so a user can read the upstream changelog and know what they have.
 
@@ -19,9 +19,9 @@ packages/pi-compound-engineering/
 │   ├── status-command.ts          # /ce-status slash command
 │   └── index.ts                   # Public API surface
 ├── scripts/
-│   ├── stage.mjs                  # preinstall: download + verify + convert
+│   ├── stage.mjs                  # preinstall: download + verify + stage root-native skills
 │   ├── commit.mjs                 # postinstall: move staging to install dir
-│   ├── converter.mjs              # pure-Node port of CE's claude-to-pi.ts
+│   ├── converter.mjs              # pure-Node CE skill copier + Pi path adapter
 │   ├── verify.mjs                 # structure check (counts + content)
 │   └── expected-sha256.txt        # SHA256 of the pinned CE release tarball
 ├── package.json                   # has "preinstall" and "postinstall"
@@ -37,7 +37,7 @@ packages/pi-compound-engineering/
 └── SECURITY.md
 ```
 
-There are **no committed `skills/` or `agents/` directories**. They are generated at install time by the `postinstall` script and live in the install directory only. Both directories are gitignored.
+There is **no committed `skills/` directory**. It is generated at install time by the `postinstall` script and lives in the install directory only. It is gitignored. CE v3.14.0+ is intentionally skills-only: specialist behavior is packaged as skill-local prompt assets, not registered standalone agents.
 
 `PLAN.md` is gitignored as a transient planning artifact. It is **not** part of the package's working state and is deleted after the implementation is confirmed (see "Updating the upstream pin" in `CONTRIBUTING.md` for the workflow that consumes it).
 
@@ -72,7 +72,7 @@ pi install npm:pi-ask-user
 pi
 ```
 
-Then run `/ce-status` inside Pi and check the `[Skills]` list for the 39 `ce-*` entries.
+Then run `/ce-status` inside Pi and check the `[Skills]` list for the 29 `ce-*` entries.
 
 ## Coding Style & Naming Conventions
 
@@ -82,7 +82,7 @@ The `scripts/*.mjs` files are plain JavaScript with JSDoc annotations for IDE he
 
 ## The Recipe-Only Model
 
-The package is the **glue**, not the artifact. The committed source is small (~30 KB of TypeScript plus ~400 lines of pure-Node conversion code). The 38 skills and 43 agents are not in the npm tarball; they are produced at install time from the upstream CE release.
+The package is the **glue**, not the artifact. The committed source is small TypeScript plus a pure-Node conversion adapter. The upstream skills are not in the npm tarball; they are produced at install time from the upstream CE release.
 
 This is by design: see `README.md` for the rationale. The implementation rules:
 
@@ -96,15 +96,15 @@ This is by design: see `README.md` for the rationale. The implementation rules:
 
 ## Updating the Upstream Pin
 
-When CE upstream tags a new release (e.g. `cli-v3.14.0`):
+When CE upstream tags a new release (e.g. `compound-engineering-v3.19.0`):
 
 1. Bump `CE_VERSION` in `src/ce-version.ts` **and** the `"version"` field in `package.json` to the new upstream version string. The version of `pi-compound-engineering` is identical to the upstream CE component version; the dual write is the lockstep contract.
 2. Compute the new SHA256 locally:
    ```bash
-   curl -sL "https://codeload.github.com/EveryInc/compound-engineering-plugin/tar.gz/refs/tags/cli-v<NEW_VERSION>" | sha256sum
+   curl -sL "https://codeload.github.com/EveryInc/compound-engineering-plugin/tar.gz/refs/tags/compound-engineering-v<NEW_VERSION>" | sha256sum
    ```
 3. Replace the contents of `scripts/expected-sha256.txt` with the new SHA.
-4. Run `npm run verify` locally to confirm the fetch + convert works end-to-end. If counts have changed (CE added/removed skills or agents), update the expected counts in `src/ce-version.ts`.
+4. Run `npm run verify` locally to confirm the fetch + conversion works end-to-end. If the skill count has changed, update the expected count in `src/ce-version.ts`.
 5. Add a `CHANGELOG.md` entry under a new `## [<version>] - <date>` heading, summarising the upstream changes.
 6. Commit (small diff: `src/ce-version.ts`, `package.json`, `scripts/expected-sha256.txt`, `CHANGELOG.md`).
 7. Open a PR to `main`. CI runs `verify` against the upstream tag.
@@ -114,11 +114,11 @@ When CE upstream tags a new release (e.g. `cli-v3.14.0`):
 
 There is no dedicated test suite. The CI guard is `npm run verify`:
 
-- It runs `stage.mjs` into a temp dir, producing a fresh `skills/`, `agents/`, and `THIRD-PARTY-NOTICES`.
-- It asserts the expected counts (38 skills, 43 agents for v3.13.0).
-- It asserts representative content (`skills/ce-plan/SKILL.md`, `agents/ce-correctness-reviewer.md`, etc.).
-- It probes the text transformations: `Run subagent with agent=` (proves the `Task` → `Run subagent` rewrite ran) and `the platform's task-tracking primitive` (proves the `TaskCreate`/`TodoWrite` rewrite ran).
-- It asserts the agent frontmatter is minimal (no `model:`, `tools:`, or `color:`).
+- It independently downloads and converts the pinned tarball into a temp dir, producing fresh `skills/` and `THIRD-PARTY-NOTICES`.
+- It asserts the expected count (29 skills for v3.19.0).
+- It asserts representative skills and new functionality (`ce-pov`, `ce-explain`, `ce-sweep`).
+- It verifies every rewritten skill-local resource reference resolves on disk.
+- It verifies `ce-plan` includes its architecture specialist as a skill-local prompt asset and that no standalone agents are emitted.
 
 A failure in any of these checks means the recipe is broken (converter port regression, upstream restructure, or SHA pin pointing to a different artifact). The CI step surfaces the failure with the exact check that failed.
 

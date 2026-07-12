@@ -25,7 +25,7 @@ pi install npm:pi-ask-user
 pi
 ```
 
-Then run `/ce-status` inside Pi and verify the `[Skills]` list shows 39 `ce-*` entries.
+Then run `/ce-status` inside Pi and verify the `[Skills]` list shows 29 `ce-*` entries.
 
 To exercise the install-time scripts in isolation:
 
@@ -52,15 +52,15 @@ Before opening a pull request:
 
 ## Updating the upstream pin
 
-This is the most common contribution. When CE upstream tags a new release (e.g. `cli-v3.14.0`):
+This is the most common contribution. When CE upstream tags a new release (e.g. `compound-engineering-v3.19.0`):
 
 1. Bump `CE_VERSION` in `src/ce-version.ts` **and** the `"version"` field in `package.json` to the new upstream version string. The version of `pi-compound-engineering` is identical to the upstream CE component version; the dual write is the lockstep contract.
 2. Compute the new SHA256 locally:
    ```bash
-   curl -sL "https://codeload.github.com/EveryInc/compound-engineering-plugin/tar.gz/refs/tags/cli-v<NEW_VERSION>" | sha256sum
+   curl -sL "https://codeload.github.com/EveryInc/compound-engineering-plugin/tar.gz/refs/tags/compound-engineering-v<NEW_VERSION>" | sha256sum
    ```
 3. Replace the contents of `scripts/expected-sha256.txt` with the new SHA.
-4. Run `npm run verify` locally to confirm the fetch + convert works end-to-end. If counts have changed (CE added/removed skills or agents), update the expected counts in `src/ce-version.ts`.
+4. Run `npm run verify` locally to confirm the fetch + conversion works end-to-end. If the skill count changed, update the expected count in `src/ce-version.ts`.
 5. Add a `CHANGELOG.md` entry under a new `## [<version>] - <date>` heading, summarising the upstream changes.
 6. Commit (small diff: `src/ce-version.ts`, `package.json`, `scripts/expected-sha256.txt`, `CHANGELOG.md`).
 7. Open a PR to `main`. CI runs `verify` against the upstream tag.

@@ -90,7 +90,7 @@ function isPresentEnvFlag(value) {
  * (reinstall with network access or with `CE_TARBALL_PATH` set).
  *
  * Returning `true` here means the install succeeds with an empty
- * `skills/` + `agents/` dir instead of `fatal()`-ing the entire
+ * `skills/` dir instead of `fatal()`-ing the entire
  * workspace install for offline contributors and CI without egress.
  */
 function isOfflineEnv() {
@@ -180,7 +180,7 @@ async function cleanupStaleStagingDirs() {
  * @returns {string}
  */
 function tarballUrl(version) {
-	return `https://codeload.github.com/EveryInc/compound-engineering-plugin/tar.gz/refs/tags/cli-v${version}`;
+	return `https://codeload.github.com/EveryInc/compound-engineering-plugin/tar.gz/refs/tags/compound-engineering-v${version}`;
 }
 
 /**
@@ -228,14 +228,10 @@ async function downloadTarball(url, destFile, fallbackUrls = []) {
 /**
  * @param {string} tarballPath
  * @param {string} stagingDir
- * @returns {Promise<{ pluginsDir: string, extractedRoot: string }>}
- *   `pluginsDir` is the path to the extracted
- *   `plugins/compound-engineering/` dir. `extractedRoot` is the top-level
- *   dir created by `tar -xzf` (e.g. `compound-engineering-plugin-<sha>/`)
- *   so the caller can remove it explicitly without re-scanning the
- *   staging dir (which also contains the `output/` subdir created by
- *   the converter and could be returned first by an unordered
- *   `readdir`).
+ * @returns {Promise<{ pluginRoot: string, extractedRoot: string }>}
+ *   `pluginRoot` is the extracted root-native plugin directory.
+ *   `extractedRoot` is also returned so the caller can remove it explicitly
+ *   without re-scanning the staging dir, which also contains `output/`.
  */
 async function extractTarball(tarballPath, stagingDir) {
 	const result = spawnSync("tar", ["-xzf", tarballPath, "-C", stagingDir], {
@@ -245,38 +241,36 @@ async function extractTarball(tarballPath, stagingDir) {
 	if (result.status !== 0) {
 		throw new Error(`tar extraction failed with exit code ${result.status ?? "unknown"}`);
 	}
-	// The tarball extracts to a top-level dir like
-	// `compound-engineering-plugin-<sha>/plugins/compound-engineering/`.
+	// v3.14.0+ releases are root-native: skills and `.claude-plugin/plugin.json`
+	// live directly in the tarball's top-level directory.
 	const entries = await readdir(stagingDir, { withFileTypes: true });
 	const topLevel = entries.find((e) => e.isDirectory());
 	if (!topLevel) {
 		throw new Error("Extracted tarball has no top-level directory");
 	}
 	const extractedRoot = join(stagingDir, topLevel.name);
-	const pluginsDir = join(extractedRoot, "plugins", "compound-engineering");
-	if (!existsSync(pluginsDir)) {
-		throw new Error(`Extracted tarball is missing expected path: ${pluginsDir}`);
+	const pluginManifest = join(extractedRoot, ".claude-plugin", "plugin.json");
+	if (!existsSync(pluginManifest)) {
+		throw new Error(`Extracted tarball is missing expected root plugin manifest: ${pluginManifest}`);
 	}
-	return { pluginsDir, extractedRoot };
+	return { pluginRoot: extractedRoot, extractedRoot };
 }
 
 /**
- * @param {string} pluginsDir
+ * @param {string} pluginRoot
  * @param {string} stagingDir
  * @param {string} ceVersion
- * @returns {Promise<{ outputDir: string, skillCount: number, agentCount: number }>}
- *   The path to the converter's output dir plus the actual skill and
- *   agent counts from the converter result, so the post-conversion
- *   log can report the real numbers (instead of a hardcoded literal
- *   that silently drifts when upstream CE adds or removes a skill).
+ * @returns {Promise<{ outputDir: string, skillCount: number }>}
+ *   The path to the converter's output dir plus the actual skill count, so
+ *   the post-conversion log reports the real number rather than a hardcoded
+ *   literal that silently drifts when upstream changes the skill inventory.
  */
-async function runConverter(pluginsDir, stagingDir, ceVersion) {
+async function runConverter(pluginRoot, stagingDir, ceVersion) {
 	const outputDir = join(stagingDir, "output");
-	const result = await convert(pluginsDir, outputDir, ceVersion);
+	const result = await convert(pluginRoot, outputDir, ceVersion);
 	return {
 		outputDir,
 		skillCount: result.skills.length,
-		agentCount: result.agents.length,
 	};
 }
 
@@ -286,59 +280,26 @@ async function runConverter(pluginsDir, stagingDir, ceVersion) {
  */
 async function verifyStructure(outputDir) {
 	const skillsDir = join(outputDir, "skills");
-	const agentsDir = join(outputDir, "agents");
 	const noticesPath = join(outputDir, "THIRD-PARTY-NOTICES");
 
 	if (!existsSync(skillsDir)) throw new Error(`Missing skills dir: ${skillsDir}`);
-	if (!existsSync(agentsDir)) throw new Error(`Missing agents dir: ${agentsDir}`);
 	if (!existsSync(noticesPath)) throw new Error(`Missing THIRD-PARTY-NOTICES: ${noticesPath}`);
 
 	const skills = await readdir(skillsDir);
-	const agents = await readdir(agentsDir);
 
-	const requiredSkills = ["ce-plan", "ce-code-review", "ce-compound", "ce-brainstorm"];
+	const requiredSkills = ["ce-plan", "ce-code-review", "ce-compound", "ce-brainstorm", "ce-pov", "ce-explain", "ce-sweep"];
 	for (const required of requiredSkills) {
 		if (!skills.includes(required)) {
 			throw new Error(`Missing required skill: ${required}`);
 		}
 	}
 
-	const requiredAgents = [
-		"ce-correctness-reviewer.md",
-		"ce-security-reviewer.md",
-		"ce-architecture-strategist.md",
-	];
-	for (const required of requiredAgents) {
-		if (!agents.includes(required)) {
-			throw new Error(`Missing required agent: ${required}`);
-		}
-	}
-
-	// Probe the text transformations.
-	const planPath = join(skillsDir, "ce-plan", "SKILL.md");
-	const planContent = await readFile(planPath, "utf8");
-	if (!planContent.includes("Run subagent with agent=")) {
-		throw new Error("ce-plan/SKILL.md is missing the `Run subagent with agent=` rewrite");
-	}
-	// Probe the task-tracking primitive rewrite on ce-work (which uses
-	// TaskCreate/TaskUpdate; ce-plan does not).
-	const workPath = join(skillsDir, "ce-work", "SKILL.md");
-	const workContent = await readFile(workPath, "utf8");
-	if (!workContent.includes("the platform's task-tracking primitive")) {
-		throw new Error("ce-work/SKILL.md is missing the `the platform's task-tracking primitive` rewrite");
-	}
-
-	// Probe the agent frontmatter.
-	const agentPath = join(agentsDir, "ce-correctness-reviewer.md");
-	const fm = (await readFile(agentPath, "utf8")).split("---")[1] ?? "";
-	if (/\bmodel:\s/m.test(fm)) {
-		throw new Error("ce-correctness-reviewer.md frontmatter still contains a `model:` field");
-	}
-	if (/\btools:\s/m.test(fm)) {
-		throw new Error("ce-correctness-reviewer.md frontmatter still contains a `tools:` field");
-	}
-	if (/\bcolor:\s/m.test(fm)) {
-		throw new Error("ce-correctness-reviewer.md frontmatter still contains a `color:` field");
+	// Upstream v3.14.0+ packages specialist behavior as skill-local prompt
+	// assets instead of standalone agents. Confirm a representative asset is
+	// present so a partial conversion cannot silently lose that behavior.
+	const planPersona = join(skillsDir, "ce-plan", "references", "agents", "architecture-strategist.md");
+	if (!existsSync(planPersona)) {
+		throw new Error(`ce-plan is missing its skill-local architecture strategist: ${planPersona}`);
 	}
 }
 
@@ -347,7 +308,7 @@ async function main() {
 
 	if (isOfflineEnv()) {
 		log("Offline/CI mode detected; skipping tarball fetch and conversion.");
-		log("`skills/` and `agents/` will remain empty until this package is reinstalled with network access or `CE_TARBALL_PATH` set.");
+		log("`skills/` will remain empty until this package is reinstalled with network access or `CE_TARBALL_PATH` set.");
 		log("Recovery: `pi install npm:pi-compound-engineering` (with network or `CE_TARBALL_PATH=<path>`).");
 		return;
 	}
@@ -357,7 +318,7 @@ async function main() {
 	const stagingDir = await createStagingDir();
 	log(`Staging dir: ${stagingDir}`);
 
-	const tarballPath = join(stagingDir, `compound-engineering-plugin-cli-v${version}.tar.gz`);
+	const tarballPath = join(stagingDir, `compound-engineering-plugin-v${version}.tar.gz`);
 	const localTarball = process.env.CE_TARBALL_PATH;
 	if (localTarball) {
 		log(`Using local tarball from CE_TARBALL_PATH: ${localTarball}`);
@@ -381,7 +342,7 @@ async function main() {
 			// the existing skipped-postinstall warning to surface the
 			// recovery instructions on the next Pi launch.
 			warn(`Download failed: ${err.message}`);
-			warn("`skills/` and `agents/` will remain empty until this package is reinstalled with network access or `CE_TARBALL_PATH` set.");
+			warn("`skills/` will remain empty until this package is reinstalled with network access or `CE_TARBALL_PATH` set.");
 			warn("Recovery: `pi install npm:pi-compound-engineering` (with network or `CE_TARBALL_PATH=<path>`).");
 			return;
 		}
@@ -402,9 +363,9 @@ async function main() {
 	}
 	log(`SHA256 verified: ${sha256.slice(0, 16)}…`);
 
-	const { pluginsDir, extractedRoot } = await extractTarball(tarballPath, stagingDir);
+	const { pluginRoot, extractedRoot } = await extractTarball(tarballPath, stagingDir);
 
-	const { outputDir, skillCount, agentCount } = await runConverter(pluginsDir, stagingDir, version);
+	const { outputDir, skillCount } = await runConverter(pluginRoot, stagingDir, version);
 
 	try {
 		await verifyStructure(outputDir);
@@ -427,7 +388,7 @@ async function main() {
 	await rm(extractedRoot, { recursive: true, force: true });
 	await rm(tarballPath, { force: true });
 
-	log(`Staged ${skillCount} skills, ${agentCount} agents from compound-engineering-plugin@${version} (sha256:${sha256.slice(0, 16)}…)`);
+	log(`Staged ${skillCount} skills from compound-engineering-plugin@${version} (sha256:${sha256.slice(0, 16)}…)`);
 }
 
 main().catch((err) => {

@@ -63,11 +63,9 @@ async function readCeVersionTs() {
 	const raw = await readFile(ceVersionPath, "utf8");
 	const versionMatch = raw.match(/export const CE_VERSION\s*=\s*"([^"]+)"/);
 	const skillMatch = raw.match(/export const EXPECTED_SKILL_COUNT\s*=\s*(\d+)/);
-	const agentMatch = raw.match(/export const EXPECTED_AGENT_COUNT\s*=\s*(\d+)/);
 	return {
 		version: versionMatch?.[1] ?? null,
 		skillCount: skillMatch ? Number(skillMatch[1]) : null,
-		agentCount: agentMatch ? Number(agentMatch[1]) : null,
 	};
 }
 
@@ -111,7 +109,7 @@ async function findExtractedRoot(stagingDir) {
 	const entries = await readdir(stagingDir, { withFileTypes: true });
 	const top = entries.find((e) => e.isDirectory());
 	if (!top) throw new Error("Extracted tarball has no top-level directory");
-	return join(stagingDir, top.name, "plugins", "compound-engineering");
+	return join(stagingDir, top.name);
 }
 
 async function main() {
@@ -136,11 +134,6 @@ async function main() {
 	} else {
 		fail("EXPECTED_SKILL_COUNT missing or invalid in src/ce-version.ts");
 	}
-	if (ceVersion.agentCount !== null && ceVersion.agentCount > 0) {
-		pass(`EXPECTED_AGENT_COUNT = ${ceVersion.agentCount}`);
-	} else {
-		fail("EXPECTED_AGENT_COUNT missing or invalid in src/ce-version.ts");
-	}
 
 	if (!expectedSha) {
 		fail("scripts/expected-sha256.txt is missing or malformed");
@@ -153,7 +146,7 @@ async function main() {
 	const stagingDir = await mkdtemp(join(STAGING_BASE_DIR, STAGING_PREFIX));
 
 	const tarballPath = join(stagingDir, "ce.tar.gz");
-	const url = `https://codeload.github.com/EveryInc/compound-engineering-plugin/tar.gz/refs/tags/cli-v${ceVersion.version}`;
+	const url = `https://codeload.github.com/EveryInc/compound-engineering-plugin/tar.gz/refs/tags/compound-engineering-v${ceVersion.version}`;
 	try {
 		await downloadTarball(url, tarballPath);
 		pass(`downloaded ${url}`);
@@ -180,9 +173,9 @@ async function main() {
 	let pluginsDir;
 	try {
 		pluginsDir = await findExtractedRoot(stagingDir);
-		pass(`found plugins dir: ${pluginsDir}`);
+		pass(`found root-native plugin dir: ${pluginsDir}`);
 	} catch (err) {
-		fail("could not locate plugins/compound-engineering", err?.message ?? String(err));
+		fail("could not locate root-native plugin directory", err?.message ?? String(err));
 		process.exit(1);
 	}
 
@@ -193,7 +186,7 @@ async function main() {
 		pass("converter returned");
 
 		const skills = await readdir(join(outputDir, "skills"));
-		const agents = await readdir(join(outputDir, "agents"));
+		const agentsDir = join(outputDir, "agents");
 		const notices = await readFile(join(outputDir, "THIRD-PARTY-NOTICES"), "utf8");
 
 		if (skills.length === ceVersion.skillCount) {
@@ -201,13 +194,8 @@ async function main() {
 		} else {
 			fail("skill count mismatch", `expected ${ceVersion.skillCount}, got ${skills.length}`);
 		}
-		if (agents.length === ceVersion.agentCount) {
-			pass(`agent count = ${agents.length} (expected ${ceVersion.agentCount})`);
-		} else {
-			fail("agent count mismatch", `expected ${ceVersion.agentCount}, got ${agents.length}`);
-		}
 
-		const requiredSkills = ["ce-plan", "ce-code-review", "ce-compound", "ce-brainstorm"];
+		const requiredSkills = ["ce-plan", "ce-code-review", "ce-compound", "ce-brainstorm", "ce-pov", "ce-explain", "ce-sweep"];
 		for (const required of requiredSkills) {
 			if (skills.includes(required)) {
 				pass(`skill present: ${required}`);
@@ -233,17 +221,10 @@ async function main() {
 			fail("ce-setup bundled check-health script is missing", err?.message ?? String(err));
 		}
 
-		const requiredAgents = [
-			"ce-correctness-reviewer.md",
-			"ce-security-reviewer.md",
-			"ce-architecture-strategist.md",
-		];
-		for (const required of requiredAgents) {
-			if (agents.includes(required)) {
-				pass(`agent present: ${required}`);
-			} else {
-				fail(`missing required agent: ${required}`);
-			}
+		if (!existsSync(agentsDir)) {
+			pass("no standalone agents emitted (upstream is skills-only)");
+		} else {
+			fail("standalone agents directory was emitted", agentsDir);
 		}
 
 		// Resource-resolution guard: every backtick-wrapped skill resource
@@ -319,29 +300,13 @@ async function main() {
 			);
 		}
 
-		const planContent = await readFile(join(outputDir, "skills", "ce-plan", "SKILL.md"), "utf8");
-		if (planContent.includes("Run subagent with agent=")) {
-			pass("ce-plan/SKILL.md has the `Run subagent with agent=` rewrite");
-		} else {
-			fail("ce-plan/SKILL.md is missing the `Run subagent with agent=` rewrite");
+		const planPersona = join(outputDir, "skills", "ce-plan", "references", "agents", "architecture-strategist.md");
+		try {
+			await access(planPersona);
+			pass("ce-plan bundles its architecture strategist as a skill-local prompt asset");
+		} catch (err) {
+			fail("ce-plan skill-local architecture strategist is missing", err?.message ?? String(err));
 		}
-		// Probe the task-tracking primitive rewrite on ce-work (which uses
-		// TaskCreate/TaskUpdate; ce-plan does not).
-		const workContent = await readFile(join(outputDir, "skills", "ce-work", "SKILL.md"), "utf8");
-		if (workContent.includes("the platform's task-tracking primitive")) {
-			pass("ce-work/SKILL.md has the `the platform's task-tracking primitive` rewrite");
-		} else {
-			fail("ce-work/SKILL.md is missing the `the platform's task-tracking primitive` rewrite");
-		}
-
-		const agentContent = await readFile(join(outputDir, "agents", "ce-correctness-reviewer.md"), "utf8");
-		const fm = agentContent.split("---")[1] ?? "";
-		if (!/\bmodel:\s/m.test(fm)) pass("ce-correctness-reviewer.md has no `model:` frontmatter field");
-		else fail("ce-correctness-reviewer.md still has a `model:` frontmatter field");
-		if (!/\btools:\s/m.test(fm)) pass("ce-correctness-reviewer.md has no `tools:` frontmatter field");
-		else fail("ce-correctness-reviewer.md still has a `tools:` frontmatter field");
-		if (!/\bcolor:\s/m.test(fm)) pass("ce-correctness-reviewer.md has no `color:` frontmatter field");
-		else fail("ce-correctness-reviewer.md still has a `color:` frontmatter field");
 
 		if (notices.length > 0) {
 			pass(`THIRD-PARTY-NOTICES generated (${notices.length} bytes)`);
