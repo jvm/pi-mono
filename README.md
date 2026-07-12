@@ -6,7 +6,9 @@ Monorepo for Pi-related projects: installable Pi packages, skills, prompt templa
 
 | Package | Description |
 | --- | --- |
+| [pi-agentsmd](./packages/pi-agentsmd) | Generate AGENTS.md contributor guides for Pi repositories. |
 | [pi-codex-image-gen](./packages/pi-codex-image-gen) | Image generation for Pi using the ChatGPT Images 2.0 model. |
+| [pi-compound-engineering](./packages/pi-compound-engineering) | Compound Engineering for Pi: brainstorm, plan, work, review, and compound. |
 | [pi-goal](./packages/pi-goal) | Persistent long-running goals for Pi. |
 | [pi-insomnia](./packages/pi-insomnia) | Prevent macOS idle sleep while Pi agents are working. |
 | [pi-scout](./packages/pi-scout) | Register local reference codebases for Pi agent exploration. |
@@ -66,20 +68,20 @@ The monorepo root is private and is not intended to be published.
 GitHub release publishing uses package-specific tags in the form `<package>@<version>`:
 
 ```bash
-git tag pi-web-kit@0.1.5
-git push origin main pi-web-kit@0.1.5
-gh release create pi-web-kit@0.1.5 --title "pi-web-kit@0.1.5" --notes "..."
+git tag pi-web-kit@0.2.2
+git push origin main pi-web-kit@0.2.2
+gh release create pi-web-kit@0.2.2 --title "pi-web-kit@0.2.2" --notes "..."
 ```
 
-Scoped package tags are also supported, for example `@mocito/pi-goal@0.1.0`.
+Scoped package tags are also supported, for example `@mocito/pi-goal@0.1.10`.
 
 The publish workflow dynamically resolves `packages/<package-slug>/package.json`, validates that the tag version matches the selected package's `package.json` version, then runs `npm publish --workspace packages/<package-slug> --provenance --access public`.
 
 When working in Pi, the project-local `/release-package` command discovers publishable workspaces from `packages/*/package.json`, performs the validation, prints the exact commands it will run, asks for confirmation, then tags, pushes, and creates the GitHub release without invoking the agent:
 
 ```text
-/release-package pi-web-kit 0.1.5
-/release-package @mocito/pi-goal 0.1.0
+/release-package pi-web-kit 0.2.2
+/release-package @mocito/pi-goal 0.1.10
 ```
 
 ## License

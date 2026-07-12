@@ -64,7 +64,7 @@ Every publishable package implements `src/install-telemetry.ts` and calls `repor
 
 ### Peer dependencies
 
-Pi core packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-tui`, `typebox`) are `peerDependencies` with `"*"` range and `devDependencies` with a pinned range (e.g. `"^0.75.4"`) for local type-checking. Keep pinned versions synchronized across all packages.
+Pi core packages (`@earendil-works/pi-coding-agent`, `@earendil-works/pi-ai`, `@earendil-works/pi-tui`, `typebox`) are `peerDependencies` with `"*"` range and `devDependencies` with a pinned range (e.g. `"^0.80.0"` at time of writing) for local type-checking. Keep pinned versions synchronized across all packages.
 
 ### Tests
 
