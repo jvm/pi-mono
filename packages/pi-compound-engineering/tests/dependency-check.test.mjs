@@ -27,7 +27,10 @@ test("missing generated skills warns once with npm 12 recovery steps", () => {
 	const pi = makePi();
 	const ctx = makeContext(notifications);
 
-	const missingInstallDir = "/tmp/pi-compound-engineering-missing-skills";
+	// Simulate a global install dir with an empty/missing skills dir.
+	const missingInstallDir = "/home/user/.pi/agent/npm/node_modules/pi-compound-engineering";
+	const expectedPrefix = "/home/user/.pi/agent/npm";
+
 	maybeWarnAboutDependencies(pi, ctx, missingInstallDir);
 	maybeWarnAboutDependencies(pi, ctx, missingInstallDir);
 
@@ -36,4 +39,11 @@ test("missing generated skills warns once with npm 12 recovery steps", () => {
 	assert.match(notifications[0].message, /npm 12\+ blocks unapproved dependency scripts/);
 	assert.match(notifications[0].message, /npm install-scripts approve pi-compound-engineering/);
 	assert.match(notifications[0].message, /npm rebuild pi-compound-engineering/);
+	// The prefix must be derived from the install dir so project-local
+	// installs get the correct `.pi/npm` prefix instead of the global default.
+	assert.match(notifications[0].message, new RegExp(`--prefix ${escapeRegex(expectedPrefix)}`));
 });
+
+function escapeRegex(s) {
+	return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

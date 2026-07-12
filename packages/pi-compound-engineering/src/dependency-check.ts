@@ -65,8 +65,18 @@ const SUBAGENT_WARNING =
 const ASK_USER_WARNING =
 	"pi-compound-engineering: pi-ask-user is not installed. Interactive skills (ce-plan, ce-brainstorm, ce-debug, ce-compound, ce-worktree, ce-promote, ce-sessions, ce-ideate) will fall back to numbered options in chat. Install with: pi install npm:pi-ask-user";
 
-const POSTINSTALL_SKIPPED_WARNING =
-	"pi-compound-engineering: install scripts did not run, so CE skills are not installed. npm 12+ blocks unapproved dependency scripts: run `npm install-scripts approve pi-compound-engineering --prefix ~/.pi/agent/npm`, then `npm rebuild pi-compound-engineering --prefix ~/.pi/agent/npm`; otherwise, ensure scripts are enabled and rebuild the package. Restart Pi afterward.";
+/**
+ * Build the skipped-install warning with the correct npm `--prefix` for the
+ * actual install location. The package install dir is
+ * `<npm-root>/node_modules/pi-compound-engineering`, so two `dirname` levels
+ * up yields the npm root (`~/.pi/agent/npm` for global, `.pi/npm` for
+ * project-local). Deriving the prefix here keeps the recovery command correct
+ * for both global and `pi install -l` installs.
+ */
+function buildPostinstallWarning(installDir: string): string {
+	const npmPrefix = dirname(dirname(installDir));
+	return `pi-compound-engineering: install scripts did not run, so CE skills are not installed. npm 12+ blocks unapproved dependency scripts: run \`npm install-scripts approve pi-compound-engineering --prefix ${npmPrefix}\`, then \`npm rebuild pi-compound-engineering --prefix ${npmPrefix}\`; otherwise, ensure scripts are enabled and rebuild the package. Restart Pi afterward.`;
+}
 
 /**
  * Per-session dedupe sets for the three one-shot warnings. Module-scope
@@ -137,7 +147,7 @@ export function maybeWarnAboutDependencies(
 
 	if (!isInstallComplete(installDir) && !warnedPostinstallSessions.has(sessionId)) {
 		warnedPostinstallSessions.add(sessionId);
-		ctx.ui.notify(POSTINSTALL_SKIPPED_WARNING, "warning");
+		ctx.ui.notify(buildPostinstallWarning(installDir), "warning");
 	}
 }
 
