@@ -10,6 +10,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve configured hidden skills at session start. Skillful no longer treats a temporarily incomplete loaded-skill list as authoritative and removes global or project visibility settings.
+
 ## [0.3.10] - 2026-07-01
 
 ### Fixed

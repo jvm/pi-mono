@@ -53,6 +53,7 @@
   "scripts": {
     "check": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
+    "test": "rm -rf .test-dist && tsc --noEmit false --outDir .test-dist && node --test tests/*.test.mjs",
     "pack:dry-run": "npm pack --dry-run"
   },
   "publishConfig": {
