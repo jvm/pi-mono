@@ -83,8 +83,9 @@ interface SettingsListSelectionView {
 export default function skillVisibility(pi: ExtensionAPI) {
   installStartupSkillListPatch();
 
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", async (_event, ctx) => {
     store.theme = ctx.ui.theme;
+    await refreshHiddenSkillCache(ctx.cwd);
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
