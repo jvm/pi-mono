@@ -2,21 +2,21 @@
 
 > Compound Engineering for Pi: brainstorm, plan, work, review, and compound.
 
-`pi-compound-engineering` brings [Every Inc.'s `compound-engineering-plugin`](https://github.com/EveryInc/compound-engineering-plugin) to [Pi](https://pi.dev). It mirrors the upstream plugin's `ce-*` skills and agents so you can use the same compound engineering workflow in Pi that the CE team uses in Claude Code and Codex.
+`pi-compound-engineering` brings [Every Inc.'s `compound-engineering-plugin`](https://github.com/EveryInc/compound-engineering-plugin) to [Pi](https://pi.dev). It mirrors the upstream plugin's `ce-*` skills so you can use the same compound engineering workflow in Pi that the CE team uses in Claude Code and Codex.
 
 > [!WARNING]
 > Pi packages can execute arbitrary code through extensions. Review package source before installing any third-party Pi package.
 
 ## Features
 
-- **`ce-*` skills** — the full set of upstream CE skills: planning, code review, work execution, brainstorming, debugging, sessions, worktrees, and more.
-- **`ce-*` agents** — the full set of upstream CE reviewer and analyst personas, registered as first-class Pi subagents (visible in `subagent action:list`). Conditional personas (those an orchestrating skill selects based on diff context) are included; invoking one outside its trigger produces a no-op review rather than corruption, so the `ce-` prefix and the persona description are the only guards.
-- **`/ce-status`** — a slash command that reports the synced CE version, skill/agent counts, and which peer packages are detected.
+- **`ce-*` skills** — the full set of upstream CE skills: planning, code review, work execution, brainstorming, debugging, strategy, product pulse, and more.
+- **Skills-only upstream alignment** — CE v3.14.0+ packages specialist prompts inside their owning skills. Pi follows that model and keeps the installed surface aligned with upstream.
+- **`/ce-status`** — a slash command that reports the synced CE version, skill count, and detected peer packages.
 - **One-shot dependency warnings** — gentle notifications on first session start when peer packages are missing.
-- **Skipped-postinstall warning** — fires when the `skills/` and `agents/` directories are empty (the `--ignore-scripts` failure mode) and tells you exactly how to recover.
+- **Skipped-postinstall warning** — fires when the `skills/` directory is empty (the `--ignore-scripts` failure mode) and tells you exactly how to recover.
 - **Skill resource paths** — bundled CE skill resources like `scripts/`, `references/`, and `assets/` are rewritten at conversion time to resolve under `skills/<skill-name>/...`, matching the package-root base path Pi injects for package-sourced skills. No runtime guidance is needed.
 
-The exact skill and agent list is visible in Pi's startup `[Skills]` list after install.
+The exact skill list is visible in Pi's startup `[Skills]` list after install.
 
 ## Installation
 
@@ -57,9 +57,9 @@ Skills are available on the next Pi launch. The `tar` binary is required (univer
 
 ## Usage
 
-The `ce-*` skills and agents are available in any Pi session after install. The exact list is visible in the startup `[Skills]` list.
+The `ce-*` skills are available in any Pi session after install. The exact list is visible in the startup `[Skills]` list. Specialist prompts are loaded from their owning skill when a workflow needs them.
 
-Run `/ce-status` to see the synced CE version, skill/agent counts, and peer-package detection.
+Run `/ce-status` to see the synced CE version, skill count, and peer-package detection.
 
 If `pi-subagents` or `pi-ask-user` is missing, the extension emits a one-shot warning on first session start telling you how to install it. The package is fully usable without them; the skill bodies already contain fallback text (inline execution, numbered options in chat).
 
@@ -74,25 +74,24 @@ Both are first-class Pi packages with their own release cadence. The package is 
 
 ## How it works
 
-This package is a **recipe-only** loader. The `skills/` and `agents/` directories are not in the npm tarball; they are produced at install time from the upstream CE release.
+This package is a **recipe-only** loader. The `skills/` directory is not in the npm tarball; it is produced at install time from the upstream CE release. CE v3.14.0+ is intentionally skills-only.
 
 ```
 pi-mono repo (this package)
   ├── src/                         # TypeScript: extension, telemetry, etc.
   ├── scripts/
-  │   ├── stage.mjs                # preinstall: download + verify + convert to staging
+  │   ├── stage.mjs                # preinstall: download + verify + stage root-native skills
   │   ├── commit.mjs               # postinstall: move staging to final install dir
-  │   ├── converter.mjs            # pure-Node port of CE's claude-to-pi.ts
+  │   ├── converter.mjs            # pure-Node CE skill copier + Pi path adapter
   │   ├── verify.mjs               # structure check (counts + representative content)
   │   └── expected-sha256.txt      # SHA256 of the pinned CE release tarball
   ├── package.json                 # "preinstall" + "postinstall" lifecycle
-  └── (no committed skills/ or agents/ — generated at install time)
+  └── (no committed skills/ — generated at install time)
 
   User machine, at `pi install` time
   ├── ~/.pi/agent/npm/pi-compound-engineering/   # the install dir
   │   ├── src/, scripts/, package.json           # what was in the tarball
   │   ├── skills/                                # GENERATED by postinstall
-  │   ├── agents/                                # GENERATED by postinstall
   │   └── THIRD-PARTY-NOTICES                    # GENERATED by postinstall
 ```
 
@@ -100,11 +99,11 @@ The two-phase `preinstall` + `postinstall` design gives npm-native update safety
 
 The converter (`scripts/converter.mjs`) is a pure-Node ESM port of the upstream CE-to-Pi converter. It has no npm dependencies — it runs with `node` alone, which is critical because the install-time scripts cannot rely on a working `node_modules/`.
 
-At conversion time, the converter rewrites each skill's backtick-wrapped `references/`, `scripts/`, and `assets/` paths to `skills/<skill-name>/...` so they resolve against the package-root base path Pi injects for package-sourced skills. `npm run verify` asserts every rewritten ref resolves on disk. The package manifest also declares a `subagents.agents` entry so the `ce-*` personas register as first-class Pi subagents.
+At conversion time, the converter rewrites each skill's backtick-wrapped `references/`, `scripts/`, and `assets/` paths to `skills/<skill-name>/...` so they resolve against the package-root base path Pi injects for package-sourced skills. `npm run verify` asserts every rewritten ref resolves on disk. Upstream specialist prompts are copied with their owning skills under `references/`.
 
 ## Troubleshooting
 
-### `skills/` and `agents/` are empty after install
+### `skills/` is empty after install
 
 If you used `npm install --ignore-scripts`, the postinstall is skipped. Re-run the install without the flag:
 
@@ -124,7 +123,7 @@ CE_TARBALL_PATH=/path/to/compound-engineering-plugin.tar.gz pi install npm:pi-co
 
 ### CI / air-gapped installs
 
-The preinstall is a no-op when no `CE_TARBALL_PATH` is set **and** the environment looks like CI (`CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, `CIRCLECI`, `TRAVIS`, `JENKINS_URL`, `BUILDKITE`, `APPVEYOR`, `DRONE`, `TEAMCITY_VERSION`, `NETLIFY`, `VERCEL`, `CODESPACES`, `BITBUCKET_BUILD_NUMBER`, `TF_BUILD`) or `PI_OFFLINE=1` is set. In that case the lifecycle completes successfully with an empty `skills/` + `agents/` dir, the install no longer aborts the whole workspace `npm ci`, and the skipped-postinstall warning fires on the next Pi launch with the recovery instruction. Force a network attempt by unsetting the relevant env var and reinstalling.
+The preinstall is a no-op when no `CE_TARBALL_PATH` is set **and** the environment looks like CI (`CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, `CIRCLECI`, `TRAVIS`, `JENKINS_URL`, `BUILDKITE`, `APPVEYOR`, `DRONE`, `TEAMCITY_VERSION`, `NETLIFY`, `VERCEL`, `CODESPACES`, `BITBUCKET_BUILD_NUMBER`, `TF_BUILD`) or `PI_OFFLINE=1` is set. In that case the lifecycle completes successfully with an empty `skills/` dir, the install no longer aborts the whole workspace `npm ci`, and the skipped-postinstall warning fires on the next Pi launch with the recovery instruction. Force a network attempt by unsetting the relevant env var and reinstalling.
 
 ## Development
 

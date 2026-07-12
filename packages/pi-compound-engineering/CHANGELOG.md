@@ -9,15 +9,22 @@ The package version tracks the upstream [`compound-engineering`](https://github.
 
 ## [Unreleased]
 
+## [3.19.0] - 2026-07-12
+
+Mirrors [`compound-engineering-plugin` v3.19.0](https://github.com/EveryInc/compound-engineering-plugin/releases/tag/compound-engineering-v3.19.0) for Pi.
+
 ### Added
 
-- Converter resource-path rewrite: bundled CE skill resources (`references/`, `scripts/`, `assets/`) are rewritten at conversion time to resolve against the package-root base path Pi injects, so they resolve on the first read attempt with no model inference.
-- Persona agents registered as first-class Pi subagents via a `subagents` manifest entry; all 43 appear in `subagent action:list`. Conditional personas (those selected by orchestrating skills based on diff context) are included — invoking one outside its trigger produces a no-op review rather than corruption, so the `ce-` prefix and the persona description are the only guards. Revisit if `pi-subagents` adds a native hide-from-list flag.
-- `npm run verify` resource-resolution guard: fails when any converted skill resource ref would not resolve on disk.
+- New upstream skills: `ce-pov` for project-grounded verdicts, `ce-explain` for personal learning explainers, and `ce-sweep` for recurring feedback sweeps.
+- Upstream workflow improvements across planning, brainstorming, code review, debugging, PR handoff, compounding, product pulse, strategy, and verification evidence.
+- Verification of the root-native, skills-only upstream layout, including required new skills, skill-local persona assets, and resource-path resolution.
 
-### Removed
+### Changed
 
-- Pi runtime guidance for resolving bundled CE skill resources (`src/skill-resource-guidance.ts` and the `before_agent_start` hook); the converter rewrite supersedes it.
+- Updated the SHA256 pin for the `compound-engineering-v3.19.0` tarball and adapted the installer to the upstream root-native layout. The old `cli-v` tag series ended at v3.13.1.
+- Updated the Pi adapter to match upstream's skills-only design: 29 skills are installed, while former standalone agents are now loaded as prompt assets under their owning skills.
+- Removed the `subagents.agents` manifest registration and clean stale generated agents during upgrade, preventing the retired 43-agent registry from persisting in Pi.
+- Retained the Pi-specific resource-path rewrite so bundled references, scripts, and assets resolve from package-installed skills.
 
 ## [3.13.1] - 2026-06-22
 
