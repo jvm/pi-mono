@@ -9,8 +9,8 @@
  * downloads the tarball, verifies the SHA, extracts it, runs the
  * converter, and asserts structure on the staging output.
  *
- * The script reads `CE_VERSION` from `package.json` and the expected
- * counts from `src/ce-version.ts` (parses them as a sanity check).
+ * The script reads the npm package version and upstream `ceVersion` from
+ * `package.json`, then checks them against `src/ce-version.ts`.
  *
  * Exit code 0 = all checks passed. Exit code 1 = at least one check failed.
  *
@@ -61,10 +61,12 @@ async function readPackageJson() {
 async function readCeVersionTs() {
 	const ceVersionPath = join(PACKAGE_ROOT, "src", "ce-version.ts");
 	const raw = await readFile(ceVersionPath, "utf8");
-	const versionMatch = raw.match(/export const CE_VERSION\s*=\s*"([^"]+)"/);
+	const packageVersionMatch = raw.match(/export const PACKAGE_VERSION\s*=\s*"([^"]+)"/);
+	const ceVersionMatch = raw.match(/export const CE_VERSION\s*=\s*"([^"]+)"/);
 	const skillMatch = raw.match(/export const EXPECTED_SKILL_COUNT\s*=\s*(\d+)/);
 	return {
-		version: versionMatch?.[1] ?? null,
+		packageVersion: packageVersionMatch?.[1] ?? null,
+		ceVersion: ceVersionMatch?.[1] ?? null,
 		skillCount: skillMatch ? Number(skillMatch[1]) : null,
 	};
 }
@@ -121,12 +123,20 @@ async function main() {
 	const expectedSha = await readExpectedSha();
 
 	section("Version checks");
-	if (packageJson.version === ceVersion.version) {
-		pass(`package.json version (${packageJson.version}) matches CE_VERSION (${ceVersion.version})`);
+	if (packageJson.version === ceVersion.packageVersion) {
+		pass(`package.json version (${packageJson.version}) matches PACKAGE_VERSION (${ceVersion.packageVersion})`);
 	} else {
 		fail(
-			"package.json version does not match CE_VERSION",
-			`package.json=${packageJson.version} CE_VERSION=${ceVersion.version}`,
+			"package.json version does not match PACKAGE_VERSION",
+			`package.json=${packageJson.version} PACKAGE_VERSION=${ceVersion.packageVersion}`,
+		);
+	}
+	if (packageJson.ceVersion === ceVersion.ceVersion) {
+		pass(`package.json ceVersion (${packageJson.ceVersion}) matches CE_VERSION (${ceVersion.ceVersion})`);
+	} else {
+		fail(
+			"package.json ceVersion does not match CE_VERSION",
+			`package.json=${packageJson.ceVersion} CE_VERSION=${ceVersion.ceVersion}`,
 		);
 	}
 	if (ceVersion.skillCount !== null && ceVersion.skillCount > 0) {
@@ -146,7 +156,7 @@ async function main() {
 	const stagingDir = await mkdtemp(join(STAGING_BASE_DIR, STAGING_PREFIX));
 
 	const tarballPath = join(stagingDir, "ce.tar.gz");
-	const url = `https://codeload.github.com/EveryInc/compound-engineering-plugin/tar.gz/refs/tags/compound-engineering-v${ceVersion.version}`;
+	const url = `https://codeload.github.com/EveryInc/compound-engineering-plugin/tar.gz/refs/tags/compound-engineering-v${ceVersion.ceVersion}`;
 	try {
 		await downloadTarball(url, tarballPath);
 		pass(`downloaded ${url}`);
@@ -182,7 +192,7 @@ async function main() {
 	section("Convert + structure");
 	const outputDir = join(stagingDir, "output");
 	try {
-		await convert(pluginsDir, outputDir, ceVersion.version);
+		await convert(pluginsDir, outputDir, ceVersion.ceVersion);
 		pass("converter returned");
 
 		const skills = await readdir(join(outputDir, "skills"));

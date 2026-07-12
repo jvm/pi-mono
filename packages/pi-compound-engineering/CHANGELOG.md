@@ -5,9 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-The package version tracks the upstream [`compound-engineering`](https://github.com/EveryInc/compound-engineering-plugin) component version exactly (see `src/ce-version.ts`). The package has **no independent hotfix counter** — a release of `compound-engineering` is a release of `pi-compound-engineering`. Pi-specific divergence notes appear under `## [Unreleased]`.
+The package normally tracks the upstream [`compound-engineering`](https://github.com/EveryInc/compound-engineering-plugin) component version. Pi-specific hotfixes may increment the package patch while retaining the pinned upstream version; see `package.json` → `ceVersion` and `src/ce-version.ts`.
 
 ## [Unreleased]
+
+## [3.19.1] - 2026-07-12
+
+Mirrors [`compound-engineering-plugin` v3.19.0](https://github.com/EveryInc/compound-engineering-plugin/releases/tag/compound-engineering-v3.19.0) with a Pi-specific npm 12 installation hotfix.
+
+### Changed
+
+- Documented npm 12's dependency-script approval requirement and updated the missing-skills warning with scoped approval and rebuild recovery commands.
+- Decoupled the package version from the pinned upstream CE version so install scripts continue to fetch `compound-engineering-v3.19.0` for this hotfix release.
 
 ## [3.19.0] - 2026-07-12
 

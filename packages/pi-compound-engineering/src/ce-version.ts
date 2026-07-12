@@ -1,17 +1,15 @@
 /**
  * The Compound Engineering (CE) version this package mirrors.
  *
- * The package version is **identical** to the upstream CE `compound-engineering`
- * component version, as recorded in CE's
- * `.github/.release-please-manifest.json` (the root-native `compound-engineering` component).
- * Users reading the upstream changelog or release notes can match the version
- * they have installed with a one-to-one mapping.
+ * `CE_VERSION` identifies the pinned upstream `compound-engineering`
+ * component release. `PACKAGE_VERSION` identifies this npm package. They
+ * normally match; a Pi-specific hotfix may increment the package patch while
+ * retaining the same pinned upstream CE release.
  *
- * Both `scripts/stage.mjs` and `scripts/commit.mjs` read `CE_VERSION` from
- * `package.json` (not from this file) to avoid a dual source of truth at
- * install time. This file is the API surface for the extension and the
- * structure check.
+ * `scripts/stage.mjs` reads the upstream `ceVersion` from `package.json`,
+ * while this file is the extension API and verification contract.
  */
+export const PACKAGE_VERSION = "3.19.1";
 export const CE_VERSION = "3.19.0";
 
 /**

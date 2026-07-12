@@ -30,7 +30,7 @@ Then run `/ce-status` inside Pi and verify the `[Skills]` list shows 29 `ce-*` e
 To exercise the install-time scripts in isolation:
 
 ```bash
-# Stage into $TMP/pi-compound-engineering-staging-<pid>/
+# Stage into ~/.pi-compound-engineering-staging/run-<random>/
 node scripts/stage.mjs
 
 # Move the staged content into the install dir
@@ -54,7 +54,7 @@ Before opening a pull request:
 
 This is the most common contribution. When CE upstream tags a new release (e.g. `compound-engineering-v3.19.0`):
 
-1. Bump `CE_VERSION` in `src/ce-version.ts` **and** the `"version"` field in `package.json` to the new upstream version string. The version of `pi-compound-engineering` is identical to the upstream CE component version; the dual write is the lockstep contract.
+1. Bump `CE_VERSION` and `PACKAGE_VERSION` in `src/ce-version.ts`, plus the `"version"` and `"ceVersion"` fields in `package.json`, to the new upstream version string. For a Pi-only hotfix, increment only the package version and `PACKAGE_VERSION`; retain the pinned upstream `CE_VERSION` and `ceVersion`.
 2. Compute the new SHA256 locally:
    ```bash
    curl -sL "https://codeload.github.com/EveryInc/compound-engineering-plugin/tar.gz/refs/tags/compound-engineering-v<NEW_VERSION>" | sha256sum

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { CE_VERSION, getCeRepoUrl } from "./ce-version.js";
+import { CE_VERSION, PACKAGE_VERSION, getCeRepoUrl } from "./ce-version.js";
 import {
 	formatSourceLabel,
 	getPackageInstallDir,
@@ -43,10 +43,10 @@ export function buildCeStatusReport(pi: ExtensionAPI, cwd: string): string {
 	const skillCount = countEntries(join(installDir, "skills"));
 	const installStatus = isInstallComplete(installDir)
 		? "complete"
-		: "incomplete (postinstall was skipped or failed)";
+		: "incomplete (install scripts did not run or failed)";
 
 	const lines = [
-		`pi-compound-engineering@${CE_VERSION}`,
+		`pi-compound-engineering@${PACKAGE_VERSION}`,
 		"",
 		`Mirrors compound-engineering-plugin@${CE_VERSION}`,
 		`Upstream: ${getCeRepoUrl()}`,
