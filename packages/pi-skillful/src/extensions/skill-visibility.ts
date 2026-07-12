@@ -85,7 +85,7 @@ export default function skillVisibility(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     store.theme = ctx.ui.theme;
-    await pruneStaleHiddenSkills(pi, ctx.cwd);
+    await refreshHiddenSkillCache(ctx.cwd);
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
@@ -146,25 +146,6 @@ export default function skillVisibility(pi: ExtensionAPI) {
       );
     },
   });
-}
-
-async function pruneStaleHiddenSkills(pi: ExtensionAPI, cwd: string): Promise<void> {
-  const installedNames = new Set(getSkillItems(pi).map((s) => s.name));
-  const scoped = await readScopedSkillfulSettings(cwd);
-
-  await Promise.all(
-    SCOPES.map(async (scope) => {
-      const currentHidden = scoped[scope].hiddenSkills;
-      const prunedHidden = currentHidden.filter((name) => installedNames.has(name));
-      if (prunedHidden.length < currentHidden.length) {
-        scoped[scope] = await writeHiddenSkills(scope, cwd, prunedHidden);
-      }
-    }),
-  );
-
-  const hidden = new Set(scoped.project.hiddenSkillsDefined ? scoped.project.hiddenSkills : scoped.global.hiddenSkills);
-  store.hiddenSkillsByCwd.set(cwd, hidden);
-  store.lastHiddenSkills = hidden;
 }
 
 async function refreshHiddenSkillCache(cwd: string): Promise<Set<string>> {
