@@ -2,7 +2,7 @@
 
 `pi-compound-engineering` ships Every Inc.'s [compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin) (CE) for Pi. The package is a **recipe-only** loader: it commits the glue code (extension, telemetry, dependency detection, `/ce-status` command) and a pure-Node port of the upstream CE-to-Pi converter. At `npm install` time, a `preinstall` script fetches the pinned CE release from GitHub, verifies its SHA256, and stages the resulting `skills/` in a temp dir. A `postinstall` script then commits the staged content into the package's install directory.
 
-The package tracks the upstream `compound-engineering` component version exactly (e.g. CE `3.13.0` → `pi-compound-engineering@3.13.0`) so a user can read the upstream changelog and know what they have.
+The package normally tracks the upstream `compound-engineering` component version (e.g. CE `3.13.0` → `pi-compound-engineering@3.13.0`). A Pi-specific hotfix may increment the package patch while retaining the upstream version in `package.json` → `ceVersion`, so users can identify the mirrored CE release.
 
 ## Project Structure & Module Organization
 
@@ -98,7 +98,7 @@ This is by design: see `README.md` for the rationale. The implementation rules:
 
 When CE upstream tags a new release (e.g. `compound-engineering-v3.19.0`):
 
-1. Bump `CE_VERSION` in `src/ce-version.ts` **and** the `"version"` field in `package.json` to the new upstream version string. The version of `pi-compound-engineering` is identical to the upstream CE component version; the dual write is the lockstep contract.
+1. Bump `CE_VERSION` in `src/ce-version.ts`, `PACKAGE_VERSION` in the same file, and the `"version"` and `"ceVersion"` fields in `package.json` to the new upstream version string. For a Pi-only hotfix, increment only the package version and `PACKAGE_VERSION`; retain the existing `CE_VERSION` and `ceVersion`.
 2. Compute the new SHA256 locally:
    ```bash
    curl -sL "https://codeload.github.com/EveryInc/compound-engineering-plugin/tar.gz/refs/tags/compound-engineering-v<NEW_VERSION>" | sha256sum

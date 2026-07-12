@@ -66,7 +66,7 @@ const ASK_USER_WARNING =
 	"pi-compound-engineering: pi-ask-user is not installed. Interactive skills (ce-plan, ce-brainstorm, ce-debug, ce-compound, ce-worktree, ce-promote, ce-sessions, ce-ideate) will fall back to numbered options in chat. Install with: pi install npm:pi-ask-user";
 
 const POSTINSTALL_SKIPPED_WARNING =
-	"pi-compound-engineering: postinstall was skipped or failed. CE skills are not installed. Re-run `pi install npm:pi-compound-engineering` (without --ignore-scripts) and restart Pi.";
+	"pi-compound-engineering: install scripts did not run, so CE skills are not installed. npm 12+ blocks unapproved dependency scripts: run `npm install-scripts approve pi-compound-engineering --prefix ~/.pi/agent/npm`, then `npm rebuild pi-compound-engineering --prefix ~/.pi/agent/npm`; otherwise, ensure scripts are enabled and rebuild the package. Restart Pi afterward.";
 
 /**
  * Per-session dedupe sets for the three one-shot warnings. Module-scope
@@ -117,7 +117,11 @@ export function isInstallComplete(installDir: string = getPackageInstallDir()): 
  * call multiple times — dedupes by session file path (or cwd if no
  * session file is associated).
  */
-export function maybeWarnAboutDependencies(pi: ExtensionAPI, ctx: ExtensionContext): void {
+export function maybeWarnAboutDependencies(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	installDir: string = getPackageInstallDir(),
+): void {
 	const sessionId = ctx.sessionManager.getSessionFile() ?? ctx.cwd;
 	const result = runDependencyCheck(pi);
 
@@ -131,7 +135,7 @@ export function maybeWarnAboutDependencies(pi: ExtensionAPI, ctx: ExtensionConte
 		ctx.ui.notify(ASK_USER_WARNING, "warning");
 	}
 
-	if (!isInstallComplete() && !warnedPostinstallSessions.has(sessionId)) {
+	if (!isInstallComplete(installDir) && !warnedPostinstallSessions.has(sessionId)) {
 		warnedPostinstallSessions.add(sessionId);
 		ctx.ui.notify(POSTINSTALL_SKIPPED_WARNING, "warning");
 	}

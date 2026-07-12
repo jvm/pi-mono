@@ -13,7 +13,7 @@
 - **Skills-only upstream alignment** — CE v3.14.0+ packages specialist prompts inside their owning skills. Pi follows that model and keeps the installed surface aligned with upstream.
 - **`/ce-status`** — a slash command that reports the synced CE version, skill count, and detected peer packages.
 - **One-shot dependency warnings** — gentle notifications on first session start when peer packages are missing.
-- **Skipped-postinstall warning** — fires when the `skills/` directory is empty (the `--ignore-scripts` failure mode) and tells you exactly how to recover.
+- **Install-script warning** — fires when the `skills/` directory is empty and provides recovery steps for skipped or npm-blocked lifecycle scripts.
 - **Skill resource paths** — bundled CE skill resources like `scripts/`, `references/`, and `assets/` are rewritten at conversion time to resolve under `skills/<skill-name>/...`, matching the package-root base path Pi injects for package-sourced skills. No runtime guidance is needed.
 
 The exact skill list is visible in Pi's startup `[Skills]` list after install.
@@ -50,10 +50,13 @@ pi -e /path/to/pi-mono/packages/pi-compound-engineering
 
 The install runs two lifecycle scripts:
 
-1. `preinstall` (`scripts/stage.mjs`) downloads the pinned CE release tarball, verifies its SHA256, extracts it, runs the pure-Node converter, and stages the result in `$TMP/`.
+1. `preinstall` (`scripts/stage.mjs`) downloads the pinned CE release tarball, verifies its SHA256, extracts it, runs the pure-Node converter, and stages the result in `~/.pi-compound-engineering-staging/`.
 2. `postinstall` (`scripts/commit.mjs`) moves the staged content into the install directory.
 
 Skills are available on the next Pi launch. The `tar` binary is required (universally available on macOS, Linux, and WSL; not native Windows). A working network connection is required at install time.
+
+> [!IMPORTANT]
+> npm 12 blocks dependency lifecycle scripts until the **Pi-managed npm install root** approves them. After reviewing this package's install scripts, approve `pi-compound-engineering` there and rebuild it. This package cannot approve itself because npm blocks its scripts before they run.
 
 ## Usage
 
@@ -105,13 +108,16 @@ At conversion time, the converter rewrites each skill's backtick-wrapped `refere
 
 ### `skills/` is empty after install
 
-If you used `npm install --ignore-scripts`, the postinstall is skipped. Re-run the install without the flag:
+`pi-compound-engineering` must run its `preinstall` and `postinstall` scripts to generate `skills/`. With npm 12, approve this reviewed package in Pi's npm install root, then rebuild it:
 
 ```bash
-pi install npm:pi-compound-engineering
+npm install-scripts approve pi-compound-engineering --prefix ~/.pi/agent/npm
+npm rebuild pi-compound-engineering --prefix ~/.pi/agent/npm
 ```
 
-The lifecycle is idempotent — re-running is safe and will populate the install dir.
+For a project-local Pi package, replace `~/.pi/agent/npm` with `.pi/npm`. On npm versions before 12, ensure `ignore-scripts` is disabled and run the same `npm rebuild` command. Restart Pi after a successful rebuild.
+
+Avoid approving all dependencies or enabling `dangerously-allow-all-scripts`; only this package needs approval.
 
 ### Behind a corporate proxy or offline
 

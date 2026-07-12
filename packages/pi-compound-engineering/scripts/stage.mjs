@@ -103,17 +103,17 @@ function isOfflineEnv() {
 }
 
 /**
- * @returns {Promise<{ version: string, packageJson: any }>}
+ * @returns {Promise<{ ceVersion: string, packageJson: any }>}
  */
 async function readCeVersion() {
 	const packageJsonPath = join(PACKAGE_ROOT, "package.json");
 	const raw = await readFile(packageJsonPath, "utf8");
 	const packageJson = JSON.parse(raw);
-	const version = packageJson.version;
-	if (typeof version !== "string" || version.length === 0) {
-		fatal("package.json is missing a version string");
+	const ceVersion = packageJson.ceVersion;
+	if (typeof ceVersion !== "string" || ceVersion.length === 0) {
+		fatal("package.json is missing a ceVersion string");
 	}
-	return { version, packageJson };
+	return { ceVersion, packageJson };
 }
 
 /**
@@ -313,12 +313,12 @@ async function main() {
 		return;
 	}
 
-	const { version } = await readCeVersion();
+	const { ceVersion } = await readCeVersion();
 	const expectedSha = await readExpectedSha256();
 	const stagingDir = await createStagingDir();
 	log(`Staging dir: ${stagingDir}`);
 
-	const tarballPath = join(stagingDir, `compound-engineering-plugin-v${version}.tar.gz`);
+	const tarballPath = join(stagingDir, `compound-engineering-plugin-v${ceVersion}.tar.gz`);
 	const localTarball = process.env.CE_TARBALL_PATH;
 	if (localTarball) {
 		log(`Using local tarball from CE_TARBALL_PATH: ${localTarball}`);
@@ -330,7 +330,7 @@ async function main() {
 		}
 	} else {
 		try {
-			await downloadTarball(tarballUrl(version), tarballPath);
+			await downloadTarball(tarballUrl(ceVersion), tarballPath);
 		} catch (err) {
 			await rm(stagingDir, { recursive: true, force: true });
 			// A network/transport failure (offline, no DNS, no egress,
@@ -365,7 +365,7 @@ async function main() {
 
 	const { pluginRoot, extractedRoot } = await extractTarball(tarballPath, stagingDir);
 
-	const { outputDir, skillCount } = await runConverter(pluginRoot, stagingDir, version);
+	const { outputDir, skillCount } = await runConverter(pluginRoot, stagingDir, ceVersion);
 
 	try {
 		await verifyStructure(outputDir);
@@ -388,7 +388,7 @@ async function main() {
 	await rm(extractedRoot, { recursive: true, force: true });
 	await rm(tarballPath, { force: true });
 
-	log(`Staged ${skillCount} skills from compound-engineering-plugin@${version} (sha256:${sha256.slice(0, 16)}…)`);
+	log(`Staged ${skillCount} skills from compound-engineering-plugin@${ceVersion} (sha256:${sha256.slice(0, 16)}…)`);
 }
 
 main().catch((err) => {
