@@ -1,5 +1,7 @@
 # Pi 0.80 package compatibility requirements
 
+> **Status: Implemented (2026-07-12)** — all workspace packages now pin Pi core devDependencies at `^0.80.0`, and `npm run check` / `npm test` / `npm ci --dry-run` pass. This requirements doc is retained for history.
+
 ## Outcome
 
 Audit every workspace package for Pi 0.80 breakage and make the smallest PR-ready compatibility update.
