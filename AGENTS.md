@@ -20,7 +20,7 @@ All packages in this monorepo must follow these guidelines to ensure consistency
 
 ### Naming and identity
 
-- Package names must use the unscoped `pi-*` format (e.g., `pi-agentsmd`, not `@mocito/pi-agentsmd`).
+- Package names must use the unscoped `pi-*` format (e.g., `pi-agentsmd`, not `@mocito/pi-agentsmd`). A scoped name (`@scope/pi-*`) is permitted only when the unscoped name is unavailable on npm — `@mocito/pi-goal` is the current example (reverted to scoped form due to an npm name conflict; see its CHANGELOG).
 - Package names must be purpose-specific; do not create generic buckets such as `pi-prompt-templates`.
 - The `author` field in `package.json` must use the full name: `"Jose Mocito"`.
 - The `license` field should be `"MIT"` unless there is a specific reason for another license.
@@ -114,7 +114,7 @@ Every publishable package must include the `pi-package` keyword. Packages with e
 
 ### Dependencies
 
-- Pi core packages imported by extensions must stay in `peerDependencies` with a `"*"` range and in `devDependencies` with a pinned range (e.g., `"^0.75.4"`) for local type-checking.
+- Pi core packages imported by extensions must stay in `peerDependencies` with a `"*"` range and in `devDependencies` with a pinned range (e.g., `"^0.80.0"` at time of writing) for local type-checking.
 - Keep devDependency versions synchronized across all packages in the monorepo. When bumping `@types/node` or `typescript`, update all packages.
 
 ### Scripts
@@ -219,7 +219,7 @@ npm publish --workspace packages/<package-name>
 
 Before publishing, run the package's validation commands and `npm run pack:dry-run --workspace packages/<package-name>`.
 
-GitHub release publishing is monorepo-aware. Use release tags in the form `<package-name>@<version>`, for example `pi-web-kit@0.1.5`. The publish workflow validates that the tag version matches `packages/<package-name>/package.json`, then publishes that workspace with provenance.
+GitHub release publishing is monorepo-aware. Use release tags in the form `<package-name>@<version>`, for example `pi-web-kit@0.2.2`. The publish workflow validates that the tag version matches `packages/<package-name>/package.json`, then publishes that workspace with provenance.
 
 When working in Pi, prefer the project-local `/release-package <package-name> <version>` command. It discovers publishable workspaces from `packages/*/package.json`, validates the release, prints the exact commands it will run, asks for confirmation, then tags, pushes, and creates the GitHub release without invoking the agent.
 

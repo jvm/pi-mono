@@ -3,7 +3,7 @@
   "private": true,
   "description": "Monorepo for Pi-related projects.",
   "license": "MIT",
-  "author": "jvm",
+  "author": "Jose Mocito",
   "type": "module",
   "workspaces": [
     "packages/*"
