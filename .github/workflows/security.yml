@@ -25,30 +25,30 @@ jobs:
 
       - name: Run TruffleHog on pull request diff
         if: github.event_name == 'pull_request'
-        uses: trufflesecurity/trufflehog@f446421baf832d6356c42c1743d99abff52ff334 # v3.95.7
+        uses: trufflesecurity/trufflehog@00155c9dc586f34d189adc83d3ac2698c2ec551f # v3.95.8
         with:
           path: ./
           base: ${{ github.event.pull_request.base.sha }}
           head: ${{ github.event.pull_request.head.sha }}
-          version: 3.95.5
+          version: 3.95.8
           extra_args: --only-verified
 
       - name: Run TruffleHog on push diff
         if: github.event_name == 'push'
-        uses: trufflesecurity/trufflehog@f446421baf832d6356c42c1743d99abff52ff334 # v3.95.7
+        uses: trufflesecurity/trufflehog@00155c9dc586f34d189adc83d3ac2698c2ec551f # v3.95.8
         with:
           path: ./
           base: ${{ github.event.before }}
           head: ${{ github.sha }}
-          version: 3.95.5
+          version: 3.95.8
           extra_args: --only-verified
 
       - name: Run TruffleHog on current tree
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        uses: trufflesecurity/trufflehog@f446421baf832d6356c42c1743d99abff52ff334 # v3.95.7
+        uses: trufflesecurity/trufflehog@00155c9dc586f34d189adc83d3ac2698c2ec551f # v3.95.8
         with:
           path: ./
-          version: 3.95.5
+          version: 3.95.8
           extra_args: --only-verified
 
   semgrep:
