@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { INIT_PROMPT } from "./prompt.js";
+import { FORCE_INIT_PROMPT, INIT_PROMPT } from "./prompt.js";
 
 const DEFAULT_AGENTS_MD_FILENAME = "AGENTS.md";
 
@@ -23,5 +23,5 @@ export async function handleInitCommand(
     return;
   }
 
-  pi.sendUserMessage(INIT_PROMPT);
+  pi.sendUserMessage(force ? FORCE_INIT_PROMPT : INIT_PROMPT);
 }

@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Make `/init --force` and `/init -f` explicitly authorize replacing `AGENTS.md`.
+
 ## [0.1.2] - 2026-07-01
 
 ### Changed
