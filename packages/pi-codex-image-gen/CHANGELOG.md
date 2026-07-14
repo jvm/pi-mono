@@ -6,6 +6,17 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Add native edits using up to five local or recent conversation images.
+- Honor bounded `Retry-After` delays and make retry backoff abort-aware.
+
+### Fixed
+
+- Strictly validate base64 data and output-format signatures before returning or saving images.
+- Preserve valid inline images and report a warning when disk persistence fails.
+- Keep original generated artifacts when copying selected outputs elsewhere by default.
+
 ## [0.1.11] - 2026-07-01
 
 ### Changed

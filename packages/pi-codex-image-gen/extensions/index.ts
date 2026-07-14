@@ -7,7 +7,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -24,6 +24,8 @@ const DEFAULT_SAVE_MODE = "global";
 const OPENAI_BETA_HEADER = "responses=experimental";
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
+const MAX_RETRY_DELAY_MS = 30_000;
+const MAX_EDIT_IMAGES = 5;
 
 const SAVE_MODES = ["none", "project", "global", "custom"] as const;
 type SaveMode = (typeof SAVE_MODES)[number];
@@ -38,9 +40,50 @@ function isRetryableStatus(status: number, errorText: string): boolean {
 	return /rate.?limit|overloaded|service.?unavailable|upstream.?connect|connection.?refused/i.test(errorText);
 }
 
-function backoffMs(attempt: number): number {
-	const jitter = 0.9 + Math.random() * 0.2; // matches codex-rs jitter range
-	return BASE_DELAY_MS * 2 ** (attempt - 1) * jitter;
+export function parseRetryAfter(value: string | null, nowMs = Date.now()): number | undefined {
+	if (!value) return undefined;
+	const trimmed = value.trim();
+	if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+		const milliseconds = Number(trimmed) * 1000;
+		return Number.isFinite(milliseconds) ? Math.min(milliseconds, MAX_RETRY_DELAY_MS) : undefined;
+	}
+	const dateMs = Date.parse(trimmed);
+	if (!Number.isFinite(dateMs) || dateMs <= nowMs) return undefined;
+	return Math.min(dateMs - nowMs, MAX_RETRY_DELAY_MS);
+}
+
+export function retryDelayMs(
+	attempt: number,
+	retryAfter: string | null,
+	random = Math.random,
+	nowMs = Date.now(),
+): number {
+	const serverDelay = parseRetryAfter(retryAfter, nowMs);
+	if (serverDelay !== undefined) {
+		return Math.floor(Math.min(serverDelay * (1 + random() * 0.1), MAX_RETRY_DELAY_MS));
+	}
+	const exponential = Math.min(BASE_DELAY_MS * 2 ** (attempt - 1), MAX_RETRY_DELAY_MS);
+	return Math.floor(exponential * (0.9 + random() * 0.2));
+}
+
+export function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+	if (signal?.aborted) return Promise.reject(new Error("Image generation was aborted."));
+	return new Promise<void>((resolve, reject) => {
+		const timer = setTimeout(finish, milliseconds);
+		function cleanup() {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", abort);
+		}
+		function finish() {
+			cleanup();
+			resolve();
+		}
+		function abort() {
+			cleanup();
+			reject(new Error("Image generation was aborted."));
+		}
+		signal?.addEventListener("abort", abort, { once: true });
+	});
 }
 
 // --- Tool parameter schema ---
@@ -55,6 +98,19 @@ const TOOL_PARAMS = Type.Object({
 	saveDir: Type.Optional(
 		Type.String({
 			description: "Directory to save the image when save=custom. Relative paths resolve under the current workspace.",
+		}),
+	),
+	referencedImagePaths: Type.Optional(
+		Type.Array(Type.String(), {
+			maxItems: MAX_EDIT_IMAGES,
+			description: "Up to five local image paths to edit. Relative paths resolve under the current workspace.",
+		}),
+	),
+	numLastImagesToInclude: Type.Optional(
+		Type.Integer({
+			minimum: 1,
+			maximum: MAX_EDIT_IMAGES,
+			description: "Use the most recent one to five images from the current conversation as edit inputs.",
 		}),
 	),
 });
@@ -86,6 +142,11 @@ interface ParsedCodexResponse {
 	text: string[];
 	responseId?: string;
 	usage?: unknown;
+}
+
+interface InputImage {
+	data: string;
+	mimeType: string;
 }
 
 // --- #11: Typed SSE event discriminated union ---
@@ -203,14 +264,101 @@ function mimeForFormat(outputFormat: OutputFormat): string {
 	return outputFormat === "jpeg" ? "image/jpeg" : `image/${outputFormat}`;
 }
 
-async function saveImage(base64Data: string, outputFormat: OutputFormat, outputDir: string, imageCallId: string): Promise<string> {
+function imagePath(outputFormat: OutputFormat, outputDir: string, imageCallId: string): string {
 	const filename = `${sanitizePathPart(imageCallId, "image_generation")}.${extensionForFormat(outputFormat)}`;
-	const filePath = join(outputDir, filename);
+	return join(outputDir, filename);
+}
+
+export function decodeImageData(base64Data: string, outputFormat: OutputFormat): Buffer {
+	const value = base64Data.trim();
+	if (!value || value.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+		throw new Error("Codex returned invalid base64 image data.");
+	}
+	const bytes = Buffer.from(value, "base64");
+	if (bytes.length === 0 || bytes.toString("base64") !== value) {
+		throw new Error("Codex returned invalid base64 image data.");
+	}
+	const validSignature =
+		(outputFormat === "png" && bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) ||
+		(outputFormat === "jpeg" && bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) ||
+		(outputFormat === "webp" && bytes.length >= 12 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP");
+	if (!validSignature) throw new Error(`Codex returned image data that does not match ${outputFormat}.`);
+	return bytes;
+}
+
+async function saveImage(
+	bytes: Buffer,
+	outputFormat: OutputFormat,
+	outputDir: string,
+	imageCallId: string,
+): Promise<string> {
+	const filePath = imagePath(outputFormat, outputDir, imageCallId);
 	await withFileMutationQueue(filePath, async () => {
 		await mkdir(outputDir, { recursive: true });
-		await writeFile(filePath, Buffer.from(base64Data, "base64"));
+		await writeFile(filePath, bytes);
 	});
 	return filePath;
+}
+
+export function selectRecentImages(messages: unknown[], count: number): InputImage[] {
+	const images: InputImage[] = [];
+	for (let index = messages.length - 1; index >= 0 && images.length < count; index--) {
+		const message = messages[index] as { content?: unknown };
+		if (!Array.isArray(message?.content)) continue;
+		for (let contentIndex = message.content.length - 1; contentIndex >= 0 && images.length < count; contentIndex--) {
+			const block = message.content[contentIndex] as { type?: unknown; data?: unknown; mimeType?: unknown };
+			if (block?.type === "image" && typeof block.data === "string" && typeof block.mimeType === "string") {
+				images.push({ data: block.data, mimeType: block.mimeType });
+			}
+		}
+	}
+	return images.reverse();
+}
+
+function mimeFromBytes(bytes: Buffer, path: string): string {
+	if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+	if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+	if (bytes.length >= 12 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP") return "image/webp";
+	throw new Error(`Referenced image is unavailable or unsupported: ${path}`);
+}
+
+export async function resolveInputImages(
+	params: ToolParams,
+	cwd: string,
+	messages: unknown[],
+): Promise<InputImage[]> {
+	const paths = params.referencedImagePaths ?? [];
+	if (paths.length > 0 && params.numLastImagesToInclude !== undefined) {
+		throw new Error("Provide only one of referencedImagePaths or numLastImagesToInclude.");
+	}
+	if (paths.length > MAX_EDIT_IMAGES) throw new Error(`referencedImagePaths accepts at most ${MAX_EDIT_IMAGES} paths.`);
+	if (paths.length > 0) {
+		return Promise.all(
+			paths.map(async (path) => {
+				const normalized = path.startsWith("@") ? path.slice(1) : path;
+				const absolutePath = resolveUnderCwd(cwd, normalized);
+				let bytes: Buffer;
+				try {
+					bytes = await readFile(absolutePath);
+				} catch (error) {
+					throw new Error(`Unable to read referenced image at ${absolutePath}: ${error instanceof Error ? error.message : String(error)}`);
+				}
+				return { data: bytes.toString("base64"), mimeType: mimeFromBytes(bytes, absolutePath) };
+			}),
+		);
+	}
+	if (params.numLastImagesToInclude !== undefined) {
+		const count = params.numLastImagesToInclude;
+		if (!Number.isInteger(count) || count < 1 || count > MAX_EDIT_IMAGES) {
+			throw new Error(`numLastImagesToInclude must be between 1 and ${MAX_EDIT_IMAGES}.`);
+		}
+		const images = selectRecentImages(messages, count);
+		if (images.length !== count) {
+			throw new Error(`Requested the last ${count} conversation images, but only ${images.length} were available.`);
+		}
+		return images;
+	}
+	return [];
 }
 
 // --- Request building ---
@@ -218,7 +366,13 @@ async function saveImage(base64Data: string, outputFormat: OutputFormat, outputD
 // #7: parallel_tool_calls: false
 // #14: include removed (not needed without reasoning)
 
-function buildRequestBody(params: ToolParams, model: string, outputFormat: OutputFormat, sessionId: string) {
+export function buildRequestBody(
+	params: ToolParams,
+	model: string,
+	outputFormat: OutputFormat,
+	sessionId: string,
+	inputImages: InputImage[] = [],
+) {
 	return {
 		model,
 		store: false,
@@ -229,7 +383,13 @@ function buildRequestBody(params: ToolParams, model: string, outputFormat: Outpu
 		input: [
 			{
 				role: "user",
-				content: [{ type: "input_text", text: params.prompt }],
+				content: [
+					{ type: "input_text", text: params.prompt },
+					...inputImages.map((image) => ({
+						type: "input_image",
+						image_url: `data:${image.mimeType};base64,${image.data}`,
+					})),
+				],
 			},
 		],
 		tools: [{ type: "image_generation", output_format: outputFormat }],
@@ -350,9 +510,10 @@ async function requestImage(
 	model: string,
 	outputFormat: OutputFormat,
 	sessionId: string,
+	inputImages: InputImage[],
 	signal?: AbortSignal,
 ): Promise<ParsedCodexResponse> {
-	const body = JSON.stringify(buildRequestBody(params, model, outputFormat, sessionId));
+	const body = JSON.stringify(buildRequestBody(params, model, outputFormat, sessionId, inputImages));
 	const headers: Record<string, string> = {
 		Authorization: `Bearer ${token}`,
 		"chatgpt-account-id": accountId,
@@ -375,8 +536,8 @@ async function requestImage(
 		if (!response.ok) {
 			const errorText = await response.text();
 			if (attempt <= MAX_RETRIES && isRetryableStatus(response.status, errorText)) {
-				const delay = backoffMs(attempt);
-				await new Promise<void>((resolve) => setTimeout(resolve, delay));
+				const delay = retryDelayMs(attempt, response.headers.get("retry-after"));
+				await abortableDelay(delay, signal);
 				continue;
 			}
 			throw new Error(`Codex image generation request failed (${response.status}): ${errorText}`);
@@ -397,10 +558,10 @@ export default function codexImageGen(pi: ExtensionAPI) {
 		name: "codex_generate_image",
 		label: "Codex Image",
 		description:
-			"Generate an image with the OpenAI Codex ChatGPT backend built-in image_generation tool (gpt-image-2). Uses the existing openai-codex login; does not require OPENAI_API_KEY.",
-		promptSnippet: "Generate bitmap images via the OpenAI Codex ChatGPT backend gpt-image-2 image_generation tool.",
+			"Generate or edit an image with the OpenAI Codex ChatGPT backend built-in image_generation tool (gpt-image-2). Accepts up to five local or recent conversation images. Uses the existing openai-codex login; does not require OPENAI_API_KEY.",
+		promptSnippet: "Generate or edit bitmap images via the OpenAI Codex ChatGPT backend gpt-image-2 image_generation tool.",
 		promptGuidelines: [
-			"Use codex_generate_image when the user asks to generate a raster image, illustration, photo, sprite, icon draft, banner, or other bitmap asset with OpenAI/Codex image generation.",
+			"Use codex_generate_image when the user asks to generate or edit a raster image with OpenAI/Codex image generation.",
 			"Do not use codex_generate_image without a clear image-generation request, because it consumes the user's Codex image quota.",
 		],
 		parameters: TOOL_PARAMS,
@@ -417,32 +578,40 @@ export default function codexImageGen(pi: ExtensionAPI) {
 			}
 			const accountId = extractChatGptAccountId(token);
 			const sessionId = ctx.sessionManager.getSessionId();
+			const messages: unknown[] = [];
+			for (const entry of ctx.sessionManager.getBranch()) {
+				if (entry.type === "message") messages.push(entry.message);
+				if (entry.type === "custom_message") messages.push(entry);
+			}
+			const inputImages = await resolveInputImages(params, ctx.cwd, messages);
 
 			onUpdate?.({
-				content: [{ type: "text", text: `Requesting gpt-image-2 generation through ${PROVIDER}/${model}...` }],
-				details: { provider: PROVIDER, model, outputFormat },
+				content: [{ type: "text", text: `Requesting gpt-image-2 ${inputImages.length > 0 ? "edit" : "generation"} through ${PROVIDER}/${model}...` }],
+				details: { provider: PROVIDER, model, outputFormat, inputImageCount: inputImages.length },
 			});
 
-			const parsed = await requestImage(params, token, accountId, model, outputFormat, sessionId, signal);
+			const parsed = await requestImage(params, token, accountId, model, outputFormat, sessionId, inputImages, signal);
 			if (!parsed.image) {
 				const text = parsed.text.join("").trim();
 				throw new Error(text ? `Codex did not return an image. Response text: ${text}` : "Codex did not return an image.");
 			}
 
+			const imageBytes = decodeImageData(parsed.image.result, outputFormat);
 			const saveConfig = resolveSaveConfig(params, ctx.cwd, sessionId, config);
 			let savedPath: string | undefined;
+			let attemptedPath: string | undefined;
+			let saveWarning: string | undefined;
 			if (saveConfig.mode !== "none" && saveConfig.outputDir) {
-				savedPath = await saveImage(parsed.image.result, outputFormat, saveConfig.outputDir, parsed.image.id || toolCallId);
-				// #12: second onUpdate after save with path + byte count
-				onUpdate?.({
-					content: [{ type: "text", text: `Image saved to ${savedPath}.` }],
-					details: {
-						provider: PROVIDER,
-						model,
-						savedPath,
-						byteCount: Buffer.byteLength(parsed.image.result, "base64"),
-					},
-				});
+				attemptedPath = imagePath(outputFormat, saveConfig.outputDir, parsed.image.id || toolCallId);
+				try {
+					savedPath = await saveImage(imageBytes, outputFormat, saveConfig.outputDir, parsed.image.id || toolCallId);
+					onUpdate?.({
+						content: [{ type: "text", text: `Image saved to ${savedPath}.` }],
+						details: { provider: PROVIDER, model, savedPath, byteCount: imageBytes.length },
+					});
+				} catch (error) {
+					saveWarning = `Image generation succeeded, but the image could not be saved to disk: ${error instanceof Error ? error.message : String(error)}`;
+				}
 			}
 
 			const summary = [
@@ -450,6 +619,7 @@ export default function codexImageGen(pi: ExtensionAPI) {
 				`Status: ${parsed.image.status}.`,
 				parsed.image.revisedPrompt ? `Revised prompt: ${parsed.image.revisedPrompt}` : undefined,
 				savedPath ? `Saved image to: ${savedPath}` : "Image was not saved to disk.",
+				saveWarning ? `Warning: ${saveWarning}` : undefined,
 			]
 				.filter(Boolean)
 				.join(" ");
@@ -466,6 +636,9 @@ export default function codexImageGen(pi: ExtensionAPI) {
 					outputFormat,
 					saveMode: saveConfig.mode,
 					savedPath,
+					attemptedPath,
+					saveWarning,
+					inputImageCount: inputImages.length,
 					responseId: parsed.responseId,
 					imageGenerationId: parsed.image.id,
 					revisedPrompt: parsed.image.revisedPrompt,

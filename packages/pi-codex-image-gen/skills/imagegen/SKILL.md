@@ -7,7 +7,7 @@ description: "Generate or edit raster images when the task benefits from AI-crea
 
 > Adapted from OpenAI Codex's `imagegen` skill for Pi.
 > Original source: https://github.com/openai/codex/tree/main/codex-rs/skills/src/assets/samples/imagegen
-> Required Pi modifications: use Pi's `codex_generate_image` tool name, Pi artifact paths, and the bundled helper path; direct image editing remains CLI fallback unless the Pi tool grows edit support.
+> Required Pi modifications: use Pi's `codex_generate_image` tool name, Pi artifact paths, and the bundled helper path.
 
 Generates or edits images for the current project (for example website assets, game assets, UI mockups, product mockups, wireframes, logo design, photorealistic images, or infographics).
 
@@ -15,7 +15,7 @@ Generates or edits images for the current project (for example website assets, g
 
 This skill has exactly two top-level modes:
 
-- **Default Pi tool mode (preferred):** Pi `codex_generate_image` tool for new image generation, reference-free variants, and simple transparent-image requests. Does not require `OPENAI_API_KEY`.
+- **Default Pi tool mode (preferred):** Pi `codex_generate_image` tool for new image generation, edits using up to five local or recent conversation images, reference variants, and simple transparent-image requests. Does not require `OPENAI_API_KEY`.
 - **Fallback CLI mode:** `scripts/image_gen.py` CLI. Use when the user explicitly asks for the CLI/API/model path, or after the user explicitly confirms a true model-native transparency fallback with `gpt-image-1.5`. Requires `OPENAI_API_KEY`.
 
 Within CLI fallback, the CLI exposes three subcommands:
@@ -26,7 +26,7 @@ Within CLI fallback, the CLI exposes three subcommands:
 
 Rules:
 - Use the Pi `codex_generate_image` tool by default for new image generation requests.
-- Existing-image edits, masks, and local input file paths require CLI fallback. Ask for confirmation unless the user already explicitly requested CLI mode.
+- Use `referencedImagePaths` for edits when every target has a local path. Use `numLastImagesToInclude` only when a target is available solely in recent conversation history. Never provide both selectors. Masks and advanced CLI-only controls still require confirmed CLI fallback.
 - Do not switch to CLI fallback for ordinary generation quality, size, or output file-path control.
 - If the user explicitly asks for a transparent image/background, stay on Pi `codex_generate_image` first: prompt for a flat removable chroma-key background, then remove it locally with the installed helper at `scripts/remove_chroma_key.py`.
 - Never silently switch from Pi `codex_generate_image` or CLI `gpt-image-2` to CLI `gpt-image-1.5`. Treat this as a model/path downgrade and ask the user before doing it, unless the user has already explicitly requested `gpt-image-1.5`, `scripts/image_gen.py`, or CLI fallback.
@@ -39,12 +39,13 @@ Rules:
 Pi tool save-path policy:
 - In Pi tool mode, generated images are saved under Pi's agent directory by default: `<pi-agent-dir>/generated-images/<pi-session-id>/<image-call-id>.*`. The default Pi agent directory is `~/.pi/agent`, but it can be overridden with `PI_CODING_AGENT_DIR`; use Pi's configured agent directory, not a hardcoded home path.
 - Do not describe or rely on OS temp as the default Pi tool destination.
-- Do not describe or rely on a destination-path argument (if any) on the Pi `codex_generate_image` tool. If a specific location is needed, generate first and then move or copy the selected output from `<pi-agent-dir>/generated-images/<pi-session-id>/<image-call-id>.*`.
+- Do not describe or rely on a destination-path argument (if any) on the Pi `codex_generate_image` tool. If a specific location is needed, generate first and then copy the selected output from `<pi-agent-dir>/generated-images/<pi-session-id>/<image-call-id>.*`.
 - Save-path precedence in Pi tool mode:
-  1. If the user names a destination, move or copy the selected output there.
-  2. If the image is meant for the current project, move or copy the final selected image into the workspace before finishing.
+  1. If the user names a destination, copy the selected output there and leave the original in place.
+  2. If the image is meant for the current project, copy the final selected image into the workspace before finishing and leave the original in place.
   3. If the image is only for preview or brainstorming, render it inline; the underlying file can remain at the default `<pi-agent-dir>/generated-images/<pi-session-id>/*` path.
 - Never leave a project-referenced asset only at the default `<pi-agent-dir>/generated-images/<pi-session-id>/*` path.
+- Move or delete a Pi-generated original only when the user explicitly requests it.
 - Do not overwrite an existing asset unless the user explicitly asked for replacement; otherwise create a sibling versioned filename such as `hero-v2.png` or `item-icon-edited.png`.
 
 Shared prompt guidance for both modes lives in `references/prompting.md` and `references/sample-prompts.md`.
@@ -83,9 +84,10 @@ Intent:
 - If the user provides no images, treat the request as **generate**.
 
 Pi edit semantics:
-- The current Pi `codex_generate_image` tool is for new image generation. Do not promise arbitrary filesystem-path editing through the Pi tool.
-- If the user wants to edit an existing image, use the explicit CLI fallback only when the user asks for it or confirms it.
-- If a local file needs direct file-path control, masks, or other explicit CLI-only parameters, use the explicit CLI fallback only after confirmation.
+- Use `referencedImagePaths` when all edit targets have readable local paths, with at most five paths.
+- Use `numLastImagesToInclude` for the smallest recent-conversation window containing all targets, from one to five images.
+- Never provide both image selectors. If neither can include every target, ask the user to attach or provide the missing image.
+- Use confirmed CLI fallback only for masks or other explicit CLI-only parameters.
 - For edits, preserve invariants aggressively and save non-destructively by default.
 
 Execution strategy:
@@ -96,7 +98,7 @@ Execution strategy:
 Assume the user wants a new image unless they clearly ask to change an existing one.
 
 ## Workflow
-1. Decide the top-level mode: Pi tool by default for generation, including simple transparent-output requests; fallback CLI only if explicitly requested or after the user confirms an existing-image edit or transparent-output fallback.
+1. Decide the top-level mode: Pi tool by default for generation, supported edits, and simple transparent-output requests; fallback CLI only if explicitly requested or after the user confirms an unsupported edit control or transparent-output fallback.
 2. Decide the intent: `generate` or `edit`.
 3. Decide whether the output is preview-only or meant to be consumed by the current project.
 4. Decide the execution strategy: single asset vs repeated Pi tool calls vs CLI `generate-batch`.
@@ -105,17 +107,17 @@ Assume the user wants a new image unless they clearly ask to change an existing 
    - reference image
    - edit target
    - supporting insert/style/compositing input
-7. If the edit target is only on the local filesystem, use CLI fallback for direct edits only after the user asks for or confirms fallback mode.
+7. For local edit targets, pass up to five paths through `referencedImagePaths`. For pathless conversation images, use the smallest valid `numLastImagesToInclude`.
 8. If the user asked for a photo, illustration, sprite, product image, banner, or other explicitly raster-style asset, use `codex_generate_image` rather than substituting SVG/HTML/CSS placeholders. If the request is for an icon, logo, or UI graphic that should match existing repo-native SVG/vector/code assets, prefer editing those directly instead.
 9. Augment the prompt based on specificity:
    - If the user's prompt is already specific and detailed, normalize it into a clear spec without adding creative requirements.
    - If the user's prompt is generic, add tasteful augmentation only when it materially improves output quality.
-10. Use the Pi `codex_generate_image` tool by default for generation. For an existing-image edit, ask for CLI fallback confirmation before proceeding.
+10. Use the Pi `codex_generate_image` tool by default for generation and supported existing-image edits. Ask for CLI fallback confirmation only when the request requires unsupported controls such as masks.
 11. For transparent-output requests, follow the transparent image guidance below: generate with Pi `codex_generate_image` on a flat chroma-key background, copy the selected output into the workspace or `tmp/imagegen/`, run the installed `scripts/remove_chroma_key.py` helper, and validate the alpha result before using it. If this path looks unsuitable or fails, ask before switching to CLI `gpt-image-1.5`.
 12. Inspect outputs and validate: subject, style, composition, text accuracy, and invariants/avoid items.
 13. Iterate with a single targeted change, then re-check.
 14. For preview-only work, render the image inline; the underlying file may remain at the default `<pi-agent-dir>/generated-images/<pi-session-id>/<image-call-id>.*` path.
-15. For project-bound work, move or copy the selected artifact into the workspace and update any consuming code or references. Never leave a project-referenced asset only at the default `<pi-agent-dir>/generated-images/<pi-session-id>/<image-call-id>.*` path.
+15. For project-bound work, copy the selected artifact into the workspace, leave the original in place, and update any consuming code or references. Never leave a project-referenced asset only at the default `<pi-agent-dir>/generated-images/<pi-session-id>/<image-call-id>.*` path.
 16. For batches or multi-asset requests, persist every requested deliverable final in the workspace unless the user explicitly asked to keep outputs preview-only. Discarded variants do not need to be kept unless requested.
 17. If the user explicitly chooses or confirms the CLI fallback, then use the fallback-only docs for model, quality, size, `input_fidelity`, masks, output format, output paths, and network setup.
 18. Always report the final saved path(s) for any workspace-bound asset(s), plus the final prompt or prompt set and whether the Pi tool or fallback CLI mode was used.
@@ -127,7 +129,7 @@ Transparent-image requests still use Pi `codex_generate_image` first. Because th
 Default sequence:
 1. Use Pi `codex_generate_image` to generate the requested subject on a perfectly flat solid chroma-key background.
 2. Choose a key color that is unlikely to appear in the subject: default `#00ff00`, use `#ff00ff` for green subjects, and avoid `#0000ff` for blue subjects.
-3. After generation, move or copy the selected source image from `<pi-agent-dir>/generated-images/<pi-session-id>/<image-call-id>.*` into the workspace or `tmp/imagegen/`.
+3. After generation, copy the selected source image from `<pi-agent-dir>/generated-images/<pi-session-id>/<image-call-id>.*` into the workspace or `tmp/imagegen/` and leave the original in place.
 4. Run the bundled helper from this skill directory:
    ```bash
    python "scripts/remove_chroma_key.py" \
