@@ -1,6 +1,6 @@
 # pi-codex-image-gen
 
-Image generation for [Pi](https://pi.dev) using the ChatGPT Images 2.0 model via the OpenAI Codex Responses backend.
+Image generation and editing for [Pi](https://pi.dev) using the ChatGPT Images 2.0 model via the OpenAI Codex Responses backend.
 
 ## Install
 
@@ -34,7 +34,7 @@ In a Pi session:
 > Generate a pixel-art sword icon, 32×32, with a blue blade and gold hilt
 ```
 
-The agent will invoke `codex_generate_image` with your prompt, stream the response from the Codex backend, and save the resulting image to disk. The `model` parameter controls the Codex routing model; image generation is always performed by **gpt-image-2** on the backend.
+The agent will invoke `codex_generate_image` with your prompt, optionally include up to five local or recent conversation images for editing, stream the response from the Codex backend, and save the resulting image to disk. The `model` parameter controls the Codex routing model; image generation is always performed by **gpt-image-2** on the backend.
 
 ## Authentication
 
@@ -100,15 +100,18 @@ Project config overrides global config only when project trust is active. If pro
 | `outputFormat` | string | —        | `png` (default), `jpeg`, or `webp`.                                |
 | `save`         | string | —        | Override save mode for this call.                                  |
 | `saveDir`      | string | —        | Directory when `save=custom`. Relative paths resolve under CWD.    |
+| `referencedImagePaths` | string[] | — | Up to five local images to edit. Relative paths resolve under CWD. |
+| `numLastImagesToInclude` | integer | — | Include the most recent one to five conversation images for editing. Mutually exclusive with `referencedImagePaths`. |
 
 ## How it works
 
 1. Resolves auth via Pi's `openai-codex` provider (ChatGPT session token).
 2. Sends a Codex Responses API request to the routing model (default `gpt-5.5`) with the `image_generation` tool enabled.
-3. The backend invokes **gpt-image-2** to generate the image.
-4. Parses the SSE stream for `response.output_item.done` events containing the base64 image.
-5. Saves the image to disk according to the active save mode.
-6. Returns the image data inline plus metadata (model, format, path, revised prompt, usage).
+3. For edits, attaches the selected local or conversation images to the request.
+4. The backend invokes **gpt-image-2** to generate or edit the image.
+5. Parses the SSE stream and strictly validates the returned base64 and image format.
+6. Saves the image according to the active save mode; persistence failures produce a warning without discarding a valid inline image.
+7. Returns the image data inline plus metadata (model, format, path, revised prompt, usage).
 
 ## Troubleshooting
 
