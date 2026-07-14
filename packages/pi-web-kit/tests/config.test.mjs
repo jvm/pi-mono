@@ -27,15 +27,19 @@ test("config precedence defaults < env < file < flags", () => {
   assert.equal(cfg.apiKeys.context7, "env-context7");
 });
 
-test("project config overrides global config", () => {
+test("project config overrides global config only when included", () => {
   const home = mkdtempSync(join(tmpdir(), "pi-web-kit-home-"));
   const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
   mkdirSync(join(home, ".pi/agent"), { recursive: true });
   writeFileSync(join(home, ".pi/agent/pi-web-kit.json"), JSON.stringify({ provider_fetch: "firecrawl", apiKeys: { firecrawl: "global" } }));
-  writeFileSync(join(cwd, ".pi-web-kit.json"), JSON.stringify({ provider_fetch: "markdown_new" }));
-  const cfg = resolveConfig({}, cwd, { HOME: home });
-  assert.equal(cfg.provider_fetch, "markdown_new");
-  assert.equal(cfg.apiKeys.firecrawl, "global");
+  writeFileSync(join(cwd, ".pi-web-kit.json"), JSON.stringify({ provider_fetch: "markdown_new", apiKeys: { firecrawl: "project-secret" } }));
+  const trusted = resolveConfig({}, cwd, { HOME: home }, { includeProject: true });
+  assert.equal(trusted.provider_fetch, "markdown_new");
+  assert.equal(trusted.apiKeys.firecrawl, "project-secret");
+
+  const untrusted = resolveConfig({}, cwd, { HOME: home }, { includeProject: false });
+  assert.equal(untrusted.provider_fetch, "firecrawl");
+  assert.equal(untrusted.apiKeys.firecrawl, "global");
 });
 
 test("unknown providers and missing keys fail clearly", () => {

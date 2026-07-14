@@ -6,6 +6,14 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Honor project-local config only after Pi confirms project trust.
+- Keep structured tool output valid JSON under the 50KB limit with continuation metadata.
+- Derive opaque cache scopes from full API keys and hide internal cache keys from tool output.
+- Prevent provider fetch results from being assigned to more than one requested URL.
+- Remove the stale package-local lockfile in favor of the monorepo root lockfile.
+
 ## [0.2.2] - 2026-07-01
 
 ### Changed

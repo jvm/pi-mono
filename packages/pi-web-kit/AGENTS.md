@@ -13,13 +13,13 @@
 
 ## Build, Test, and Development Commands
 
-Use the existing npm workflow for this repository:
+Use the monorepo root `package-lock.json`; do not create a package-local lockfile. Run dependency updates from the monorepo root with a workspace scope:
 
 ```bash
-npm install
-npm run check
-npm test
-npm run pack:dry-run
+npm install -w packages/pi-web-kit
+npm run -w packages/pi-web-kit check
+npm test -w packages/pi-web-kit
+npm run -w packages/pi-web-kit pack:dry-run
 ```
 
 - `npm run check` / `npm run typecheck`: run `tsc --noEmit`.
