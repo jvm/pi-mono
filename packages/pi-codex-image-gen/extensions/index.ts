@@ -407,7 +407,8 @@ export default function codexImageGen(pi: ExtensionAPI) {
 		executionMode: "parallel", // #4: safe to run concurrently — no shared state, saves serialized per-path
 		async execute(toolCallId, params: ToolParams, signal, onUpdate, ctx) {
 			const outputFormat = params.outputFormat || "png";
-			const config = loadConfig(ctx.cwd, ctx.isProjectTrusted()); // #5: load once, pass to resolveSaveConfig
+			const projectTrusted = typeof ctx.isProjectTrusted === "function" && ctx.isProjectTrusted();
+			const config = loadConfig(ctx.cwd, projectTrusted); // #5: load once, pass to resolveSaveConfig
 			const requestedModel = params.model || config.model || DEFAULT_MODEL;
 			const model = ctx.modelRegistry.find(PROVIDER, requestedModel)?.id || requestedModel; // #6: removed dead FALLBACK_MODEL
 			const token = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER);
