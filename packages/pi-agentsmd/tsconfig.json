@@ -8,5 +8,5 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["index.ts", "src/**/*.ts", "extensions/**/*.ts"]
+  "include": ["index.ts", "src/**/*.ts", "extensions/**/*.ts", "tests/**/*.mjs"]
 }

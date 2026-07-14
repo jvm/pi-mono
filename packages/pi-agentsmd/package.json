@@ -46,6 +46,7 @@
   "scripts": {
     "check": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
+    "test": "rm -rf .test-dist && tsc --noEmit false --outDir .test-dist && cp -R prompts .test-dist/prompts && node --test tests/*.test.mjs",
     "pack:dry-run": "npm pack --dry-run"
   },
   "peerDependencies": {
