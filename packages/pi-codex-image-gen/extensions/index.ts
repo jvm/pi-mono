@@ -8,6 +8,7 @@
 
 import { readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, getAgentDir, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
@@ -143,15 +144,18 @@ function readConfigFile(path: string): ExtensionConfig {
 	}
 }
 
-function loadConfig(cwd: string): ExtensionConfig {
-	const globalConfig = readConfigFile(join(getAgentDir(), "extensions", "codex-image-gen.json"));
+export function loadConfig(cwd: string, projectTrusted: boolean, agentDir = getAgentDir()): ExtensionConfig {
+	const globalConfig = readConfigFile(join(agentDir, "extensions", "codex-image-gen.json"));
+	if (!projectTrusted) return globalConfig;
 	const projectConfig = readConfigFile(join(cwd, ".pi", "extensions", "codex-image-gen.json"));
 	return { ...globalConfig, ...projectConfig };
 }
 
 // --- Path helpers ---
 
-function resolveUnderCwd(cwd: string, path: string): string {
+export function resolveUnderCwd(cwd: string, path: string, homeDir = homedir()): string {
+	if (path === "~") return homeDir;
+	if (path.startsWith("~/")) return resolve(homeDir, path.slice(2));
 	return isAbsolute(path) ? path : resolve(cwd, path);
 }
 
@@ -403,7 +407,7 @@ export default function codexImageGen(pi: ExtensionAPI) {
 		executionMode: "parallel", // #4: safe to run concurrently — no shared state, saves serialized per-path
 		async execute(toolCallId, params: ToolParams, signal, onUpdate, ctx) {
 			const outputFormat = params.outputFormat || "png";
-			const config = loadConfig(ctx.cwd); // #5: load once, pass to resolveSaveConfig
+			const config = loadConfig(ctx.cwd, ctx.isProjectTrusted()); // #5: load once, pass to resolveSaveConfig
 			const requestedModel = params.model || config.model || DEFAULT_MODEL;
 			const model = ctx.modelRegistry.find(PROVIDER, requestedModel)?.id || requestedModel; // #6: removed dead FALLBACK_MODEL
 			const token = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER);

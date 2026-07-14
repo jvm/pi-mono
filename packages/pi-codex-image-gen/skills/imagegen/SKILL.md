@@ -15,7 +15,7 @@ Generates or edits images for the current project (for example website assets, g
 
 This skill has exactly two top-level modes:
 
-- **Default Pi tool mode (preferred):** Pi `codex_generate_image` tool for normal image generation, editing, and simple transparent-image requests. Does not require `OPENAI_API_KEY`.
+- **Default Pi tool mode (preferred):** Pi `codex_generate_image` tool for new image generation, reference-free variants, and simple transparent-image requests. Does not require `OPENAI_API_KEY`.
 - **Fallback CLI mode:** `scripts/image_gen.py` CLI. Use when the user explicitly asks for the CLI/API/model path, or after the user explicitly confirms a true model-native transparency fallback with `gpt-image-1.5`. Requires `OPENAI_API_KEY`.
 
 Within CLI fallback, the CLI exposes three subcommands:
@@ -25,8 +25,9 @@ Within CLI fallback, the CLI exposes three subcommands:
 - `generate-batch`
 
 Rules:
-- Use the Pi `codex_generate_image` tool by default for normal image generation and editing requests.
-- Do not switch to CLI fallback for ordinary quality, size, or file-path control.
+- Use the Pi `codex_generate_image` tool by default for new image generation requests.
+- Existing-image edits, masks, and local input file paths require CLI fallback. Ask for confirmation unless the user already explicitly requested CLI mode.
+- Do not switch to CLI fallback for ordinary generation quality, size, or output file-path control.
 - If the user explicitly asks for a transparent image/background, stay on Pi `codex_generate_image` first: prompt for a flat removable chroma-key background, then remove it locally with the installed helper at `scripts/remove_chroma_key.py`.
 - Never silently switch from Pi `codex_generate_image` or CLI `gpt-image-2` to CLI `gpt-image-1.5`. Treat this as a model/path downgrade and ask the user before doing it, unless the user has already explicitly requested `gpt-image-1.5`, `scripts/image_gen.py`, or CLI fallback.
 - If a transparent request appears too complex for clean chroma-key removal, asks for true/native transparency, or local removal fails validation, explain that true transparency requires CLI `gpt-image-1.5 --background transparent --output-format png` because `gpt-image-2` does not support `background=transparent`, then ask whether to proceed. Run the CLI fallback only after the user confirms.
@@ -95,7 +96,7 @@ Execution strategy:
 Assume the user wants a new image unless they clearly ask to change an existing one.
 
 ## Workflow
-1. Decide the top-level mode: Pi tool by default, including simple transparent-output requests; fallback CLI only if explicitly requested or after the user explicitly confirms a transparent-output fallback.
+1. Decide the top-level mode: Pi tool by default for generation, including simple transparent-output requests; fallback CLI only if explicitly requested or after the user confirms an existing-image edit or transparent-output fallback.
 2. Decide the intent: `generate` or `edit`.
 3. Decide whether the output is preview-only or meant to be consumed by the current project.
 4. Decide the execution strategy: single asset vs repeated Pi tool calls vs CLI `generate-batch`.
@@ -109,7 +110,7 @@ Assume the user wants a new image unless they clearly ask to change an existing 
 9. Augment the prompt based on specificity:
    - If the user's prompt is already specific and detailed, normalize it into a clear spec without adding creative requirements.
    - If the user's prompt is generic, add tasteful augmentation only when it materially improves output quality.
-10. Use the Pi `codex_generate_image` tool by default.
+10. Use the Pi `codex_generate_image` tool by default for generation. For an existing-image edit, ask for CLI fallback confirmation before proceeding.
 11. For transparent-output requests, follow the transparent image guidance below: generate with Pi `codex_generate_image` on a flat chroma-key background, copy the selected output into the workspace or `tmp/imagegen/`, run the installed `scripts/remove_chroma_key.py` helper, and validate the alpha result before using it. If this path looks unsuitable or fails, ask before switching to CLI `gpt-image-1.5`.
 12. Inspect outputs and validate: subject, style, composition, text accuracy, and invariants/avoid items.
 13. Iterate with a single targeted change, then re-check.

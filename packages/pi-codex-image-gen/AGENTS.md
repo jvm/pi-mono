@@ -18,16 +18,18 @@ Run these in order after any extension or skill change. All must pass before com
 
 ### 1. Install dependencies (first time or after package.json changes)
 
+From the repository root:
+
 ```bash
-npm install
+npm install -w packages/pi-codex-image-gen
 ```
 
-Installs `typescript`, `@types/node`, and resolves Pi peer dependencies (`@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, `typebox`) into `node_modules/`. The `package-lock.json` file must be committed.
+Installs `typescript`, `@types/node`, and resolves Pi peer dependencies (`@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent`, `typebox`) through the root workspace. Commit dependency changes to the root `package-lock.json`; do not create a nested lockfile.
 
 ### 2. Type-check
 
 ```bash
-npm run check
+npm run check -w packages/pi-codex-image-gen
 ```
 
 Uses `tsconfig.json` (ES2022 / NodeNext module resolution). Catches schema mismatches, missing imports, and type errors in the extension.
@@ -62,7 +64,7 @@ npm run check &&
   python3 skills/imagegen/scripts/image_gen.py generate --prompt "Test" --out /tmp/test.png --dry-run
 ```
 
-No `npm test`, formatter, or linter script is wired in `package.json`.
+Run config and path-resolution tests from the repository root with `npm test -w packages/pi-codex-image-gen`. No formatter or linter script is wired in `package.json`.
 
 ## Coding Style & Naming Conventions
 
