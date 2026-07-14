@@ -55,7 +55,7 @@ Create a JSON config file at one (or both) of these locations:
 | Global  | `~/.pi/agent/extensions/codex-image-gen.json`           |
 | Project | `<project-root>/.pi/extensions/codex-image-gen.json`    |
 
-Project config overrides global config. Example:
+Project config overrides global config only when project trust is active. If project trust is declined or otherwise inactive, project config is ignored and global config still applies. Example:
 
 ```json
 {
@@ -89,7 +89,7 @@ Project config overrides global config. Example:
 | `none`    | Image is returned inline but not written to disk.                |
 | `project` | Saves to `<project>/.pi/generated-images/<session-id>/`.         |
 | `global`  | Saves to `~/.pi/agent/generated-images/<session-id>/`.           |
-| `custom`  | Saves to a user-specified directory (requires `saveDir` or env). |
+| `custom`  | Saves to a user-specified directory (requires `saveDir` or env). `~` and `~/...` expand to the current user's home directory. |
 
 ## Tool parameters
 
