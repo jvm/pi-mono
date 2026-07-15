@@ -6,6 +6,7 @@ import { ExaProvider } from "../src/providers/exa.ts";
 import { FirecrawlProvider } from "../src/providers/firecrawl.ts";
 import { MarkdownNewProvider } from "../src/providers/markdown-new.ts";
 import { fetchWithCache } from "../extensions/index.ts";
+import { mapFetchResults } from "../src/providers/fallback.ts";
 
 const cfg = (apiKeys = {}) => ({ provider_search: "exa_mcp", provider_fetch: "exa_mcp", apiKeys, markdownNew: { method: "auto", retainImages: false } });
 
@@ -95,6 +96,29 @@ test("Exa fetch matches canonical/trailing-slash URLs and falls back by index", 
   } finally {
     globalThis.fetch = oldFetch;
   }
+});
+
+test("mapFetchResults never assigns an exact match twice", () => {
+  const mapped = mapFetchResults(["https://a.test", "https://b.test"], {
+    provider: "test",
+    results: [{ url: "https://b.test", content: "B" }],
+  });
+  assert.equal(mapped.has("https://a.test"), false);
+  assert.equal(mapped.get("https://b.test").content, "B");
+});
+
+test("mapFetchResults prioritizes exact matches then consumes unmatched results once", () => {
+  const mapped = mapFetchResults(["https://a.test", "https://b.test", "https://c.test"], {
+    provider: "test",
+    results: [
+      { url: "https://redirect.test", content: "redirect" },
+      { url: "https://b.test/", content: "B" },
+    ],
+  });
+  assert.equal(mapped.get("https://b.test").content, "B");
+  assert.equal(mapped.get("https://a.test").content, "redirect");
+  assert.equal(mapped.has("https://c.test"), false);
+  assert.equal(new Set(mapped.values()).size, mapped.size);
 });
 
 test("fetchWithCache preserves requested URL when provider returns canonical URL", async () => {

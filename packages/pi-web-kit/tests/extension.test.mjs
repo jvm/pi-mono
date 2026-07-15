@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import extension, { buildCacheKey, buildCodeSearchSchema, buildFetchSchema, buildLibraryDocsSchema, buildLibrarySearchSchema, buildSearchSchema, fetchWithCache, pageSlice } from "../extensions/index.ts";
+import extension, { buildCacheKey, buildCodeSearchSchema, buildFetchSchema, buildLibraryDocsSchema, buildLibrarySearchSchema, buildSearchSchema, fetchWithCache, jsonToolResult, pageSlice } from "../extensions/index.ts";
 
 const propNames = (schema) => Object.keys(schema.properties ?? {}).sort();
 
@@ -23,17 +23,68 @@ test("active fetch schemas are provider-tailored", () => {
   assert.deepEqual(propNames(buildFetchSchema("exa_mcp")), ["limit", "offset", "refresh", "url", "urls"]);
 });
 
+test("missing trust API defaults to untrusted and repeated session starts do not duplicate tools", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
+  writeFileSync(join(cwd, ".pi-web-kit.json"), JSON.stringify({ provider_fetch: "markdown_new" }));
+  const tools = [];
+  let sessionStart;
+  extension({
+    registerFlag() {},
+    getFlag() { return undefined; },
+    registerTool(tool) { tools.push(tool); },
+    on(name, handler) { if (name === "session_start") sessionStart = handler; },
+  });
+  sessionStart({}, { cwd });
+  sessionStart({}, { cwd });
+  const names = tools.map((tool) => tool.name);
+  assert.equal(new Set(names).size, names.length);
+  assert(names.includes("web_fetch"));
+  assert(names.includes("web_search"));
+  assert(!propNames(tools.find((tool) => tool.name === "web_fetch").parameters).includes("method"));
+});
+
+test("changed session config refreshes provider-tailored tools", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
+  writeFileSync(join(cwd, ".pi-web-kit.json"), JSON.stringify({ provider_fetch: "markdown_new" }));
+  const tools = [];
+  let sessionStart;
+  extension({
+    registerFlag() {},
+    getFlag() { return undefined; },
+    registerTool(tool) { tools.push(tool); },
+    on(name, handler) { if (name === "session_start") sessionStart = handler; },
+  });
+  sessionStart({}, { cwd, isProjectTrusted: () => false });
+  sessionStart({}, { cwd, isProjectTrusted: () => true });
+  const fetchTools = tools.filter((tool) => tool.name === "web_fetch");
+  assert.equal(fetchTools.length, 2);
+  assert(!propNames(fetchTools[0].parameters).includes("method"));
+  assert(propNames(fetchTools[1].parameters).includes("method"));
+});
+
+test("project config controls tool schemas only for trusted projects", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
+  writeFileSync(join(cwd, ".pi-web-kit.json"), JSON.stringify({ provider_fetch: "markdown_new" }));
+  const trusted = registerWithFlags({}, { cwd, trusted: true }).find((tool) => tool.name === "web_fetch");
+  const untrusted = registerWithFlags({}, { cwd, trusted: false }).find((tool) => tool.name === "web_fetch");
+  assert(propNames(trusted.parameters).includes("method"));
+  assert(!propNames(untrusted.parameters).includes("method"));
+});
+
 test("CLI fetch provider override controls startup schema", () => {
   const oldTelemetry = process.env.PI_TELEMETRY;
   process.env.PI_TELEMETRY = "0";
   try {
     const tools = [];
+    let sessionStart;
     const pi = {
       registerFlag() {},
       getFlag(name) { return name === "web-provider-fetch" ? "markdown_new" : undefined; },
       registerTool(tool) { tools.push(tool); },
+      on(name, handler) { if (name === "session_start") sessionStart = handler; },
     };
     extension(pi);
+    sessionStart({}, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")), isProjectTrusted: () => true });
     const fetchTool = tools.find((t) => t.name === "web_fetch");
     assert(fetchTool);
     assert(propNames(fetchTool.parameters).includes("method"));
@@ -55,7 +106,8 @@ test("cache keys include canonical URL and config-derived fetch defaults", () =>
 test("range metadata includes previous/next and offset truncation", () => {
   const result = pageSlice({ provider: "exa_mcp", cacheKey: "k", url: "u", content: "abcdef", format: "markdown", fetchedAt: 1 }, 2, 2, true, false);
   assert.equal(result.content, "cd");
-  assert.deepEqual(result.range, { offset: 2, limit: 2, returned: 2, total: 6, truncated: true, hasPrevious: true, hasNext: true });
+  assert.deepEqual(result.range, { offset: 2, limit: 2, returned: 2, total: 6, truncated: true, hasPrevious: true, hasNext: true, nextOffset: 4 });
+  assert.equal(result.cacheKey, undefined);
 });
 
 test("search schema rejects unknown properties in principle", () => {
@@ -103,7 +155,7 @@ test("web_search returns grouped multi-query output with bounded details", async
     throw new Error(`unexpected ${body.method}`);
   };
   try {
-    const out = await searchTool.execute("id", { queries: ["one", "two"] }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")) });
+    const out = await searchTool.execute("id", { queries: ["one", "two"] }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")), isProjectTrusted: () => true });
     const parsed = JSON.parse(out.content[0].text);
     assert.deepEqual(parsed.queries.map((q) => q.query), ["one", "two"]);
     assert.equal(out.details.queries[0].results[0].snippet, undefined);
@@ -115,13 +167,13 @@ test("web_search returns grouped multi-query output with bounded details", async
 test("web_search rejects query and numResults limits", async () => {
   const searchTool = registerWithFlags({}).find((t) => t.name === "web_search");
   const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
-  await assert.rejects(() => searchTool.execute("id", { queries: ["a", "b", "c", "d", "e", "f"] }, undefined, undefined, { cwd }), /Too many queries/);
-  await assert.rejects(() => searchTool.execute("id", { query: "a", numResults: 21 }, undefined, undefined, { cwd }), /numResults/);
+  await assert.rejects(() => searchTool.execute("id", { queries: ["a", "b", "c", "d", "e", "f"] }, undefined, undefined, { cwd, isProjectTrusted: () => true }), /Too many queries/);
+  await assert.rejects(() => searchTool.execute("id", { query: "a", numResults: 21 }, undefined, undefined, { cwd, isProjectTrusted: () => true }), /numResults/);
 });
 
 test("web_fetch rejects offset with multiple URLs", async () => {
   const fetchTool = registerWithFlags({}).find((t) => t.name === "web_fetch");
-  await assert.rejects(() => fetchTool.execute("id", { urls: ["https://a.test", "https://b.test"], offset: 1 }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")) }), /offset range reads require a single url/);
+  await assert.rejects(() => fetchTool.execute("id", { urls: ["https://a.test", "https://b.test"], offset: 1 }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")), isProjectTrusted: () => true }), /offset range reads require a single url/);
 });
 
 test("web_fetch allows limit with multiple URLs", async () => {
@@ -132,7 +184,7 @@ test("web_fetch allows limit with multiple URLs", async () => {
     return new Response(`content for ${body.url}`, { status: 200, headers: { "content-type": "text/markdown" } });
   };
   try {
-    const out = await fetchTool.execute("id", { urls: ["https://limit-a.test", "https://limit-b.test"], limit: 7 }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")) });
+    const out = await fetchTool.execute("id", { urls: ["https://limit-a.test", "https://limit-b.test"], limit: 7 }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")), isProjectTrusted: () => true });
     const parsed = JSON.parse(out.content[0].text);
     assert.equal(parsed.results.length, 2);
     assert.deepEqual(parsed.results.map((r) => r.content), ["content", "content"]);
@@ -144,7 +196,7 @@ test("web_fetch allows limit with multiple URLs", async () => {
 
 test("web_fetch rejects invalid range params", async () => {
   const fetchTool = registerWithFlags({ "web-provider-fetch": "markdown_new" }).find((t) => t.name === "web_fetch");
-  await assert.rejects(() => fetchTool.execute("id", { url: "https://a.test", offset: 1.5 }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")) }), /offset/);
+  await assert.rejects(() => fetchTool.execute("id", { url: "https://a.test", offset: 1.5 }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")), isProjectTrusted: () => true }), /offset/);
 });
 
 test("single-URL cache hit avoids provider refetch", async () => {
@@ -166,13 +218,71 @@ test("single-URL cache hit avoids provider refetch", async () => {
   }
 });
 
-function registerWithFlags(flags) {
+
+test("large structured fetch output remains valid JSON with continuation metadata", () => {
+  const content = "😀line\n".repeat(20_000);
+  const out = jsonToolResult({ provider: "test", results: [{ url: "https://e.test", content, range: { offset: 0, limit: 100_000, returned: content.length, total: content.length, truncated: false, hasPrevious: false, hasNext: false } }] });
+  assert(Buffer.byteLength(out.content[0].text) <= 50_000);
+  const parsed = JSON.parse(out.content[0].text);
+  const result = parsed.results[0];
+  assert.equal(result.range.returned, result.content.length);
+  assert.equal(result.range.hasNext, true);
+  assert.equal(result.range.nextOffset, result.content.length);
+  assert(!result.content.endsWith("\ud83d"));
+});
+
+test("large search output preserves result URLs while fitting snippets", () => {
+  const queries = Array.from({ length: 5 }, (_, queryIndex) => ({
+    query: `query-${queryIndex}`,
+    results: Array.from({ length: 20 }, (_, resultIndex) => ({
+      title: `Result ${resultIndex}`,
+      url: `https://example.com/${queryIndex}/${resultIndex}`,
+      snippet: "s".repeat(1_000),
+      position: resultIndex + 1,
+    })),
+  }));
+  const out = jsonToolResult({ provider: "test", queries });
+  assert(Buffer.byteLength(out.content[0].text) <= 50_000);
+  const parsed = JSON.parse(out.content[0].text);
+  assert.equal(parsed.queries.length, 5);
+  assert.equal(parsed.queries.reduce((total, group) => total + group.results.length, 0), 100);
+  assert.equal(parsed.queries[4].results[19].url, "https://example.com/4/19");
+  assert((parsed.queries[0].results[0].snippet?.length ?? 0) < 1_000);
+});
+
+test("oversized fetch metadata is bounded without discarding page content", () => {
+  const content = "body".repeat(25_000);
+  const out = jsonToolResult({
+    provider: "test",
+    results: [{ url: "https://e.test", title: "x".repeat(60_000), content, range: { offset: 0, returned: content.length, total: content.length } }],
+  });
+  assert(Buffer.byteLength(out.content[0].text) <= 50_000);
+  const parsed = JSON.parse(out.content[0].text).results[0];
+  assert.equal(parsed.title.length, 1_000);
+  assert(parsed.content.length > 0);
+  assert.equal(parsed.range.nextOffset, parsed.content.length);
+});
+
+test("API keys produce opaque distinct cache scopes and never escape results", () => {
+  const first = buildCacheKey("exa", "https://e.test", {}, { apiKeys: { exa: "sentinel-prefix-one" } });
+  const second = buildCacheKey("exa", "https://e.test", {}, { apiKeys: { exa: "sentinel-prefix-two" } });
+  assert.notEqual(first, second);
+  assert(!first.includes("sentinel"));
+  const out = pageSlice({ provider: "exa", cacheKey: first, url: "https://e.test", content: "body", format: "markdown", fetchedAt: 1 }, 0, 4, false, false);
+  assert(!JSON.stringify(out).includes("sentinel"));
+  assert.equal(out.cacheKey, undefined);
+});
+
+function registerWithFlags(flags, { cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-")), trusted = true } = {}) {
   const tools = [];
+  let sessionStart;
   const pi = {
     registerFlag() {},
     getFlag(name) { return flags[name]; },
     registerTool(tool) { tools.push(tool); },
+    on(name, handler) { if (name === "session_start") sessionStart = handler; },
   };
   extension(pi);
+  sessionStart({}, { cwd, isProjectTrusted: () => trusted });
   return tools;
 }

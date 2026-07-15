@@ -89,7 +89,7 @@ Tool schemas are tailored to the configured providers at startup/reload, so only
 
 ## Configuration
 
-Resolution order: defaults < environment variables < global config < project config < CLI flags.
+Resolution order: defaults < environment variables < global config < trusted project config < CLI flags. Project config is ignored unless Pi trusts the current project, including in print, JSON, and RPC modes.
 
 ### Environment variables
 
@@ -217,7 +217,7 @@ Finds practical code examples, implementation context, setup snippets, migration
 | Max `numResults` | 20 |
 | Max URL length | 2048 characters |
 
-Cache keys include the provider, canonical URL, fetch-affecting parameters, relevant provider defaults, and a short API-key/account scope marker. `refresh: true` bypasses and replaces the cached entry.
+Cache keys include the provider, canonical URL, fetch-affecting parameters, relevant provider defaults, and an opaque SHA-256 API-key/account scope. Internal cache keys are never returned in tool output. `refresh: true` bypasses and replaces the cached entry.
 
 ## Privacy and security
 
@@ -236,7 +236,7 @@ Report security issues privately. See [SECURITY.md](SECURITY.md).
 | Invalid URL / scheme / credentials error | URL validation rejected the input. | Use an absolute `http:` or `https:` URL without username/password credentials. |
 | Timeout error | Provider request exceeded its timeout. | Retry, reduce URL count, or switch provider. |
 | No content returned | Provider returned no matching content or a redirected/canonicalized response could not be mapped. | Retry with `refresh: true`, fetch a single URL, or switch provider. |
-| Large page is truncated | Tool output is bounded for context efficiency. | Use `offset` and `limit` to continue reading chunks. |
+| Large page is truncated | Tool output is bounded to valid JSON under 50KB. | Continue with the returned `range.nextOffset`. |
 
 ## Development
 

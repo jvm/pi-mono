@@ -69,8 +69,12 @@ export function mapFetchResults(requested: string[], fetched: WebFetchResult): M
     const index = remaining.findIndex((item) => urlsMatch(item.url, url));
     if (index >= 0) out.set(url, remaining.splice(index, 1)[0]);
   }
-  // providers may not echo back the canonical URL; fall back to positional match
-  requested.forEach((url, index) => { if (!out.has(url) && fetched.results?.[index]) out.set(url, fetched.results[index]); });
+  // Providers may not echo the requested URL. Assign each unmatched result at
+  // most once, after exact canonical matches have consumed their results.
+  for (const url of requested) {
+    if (out.has(url) || remaining.length === 0) continue;
+    out.set(url, remaining.shift()!);
+  }
   return out;
 }
 

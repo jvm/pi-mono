@@ -1,10 +1,10 @@
+import { createHash } from "node:crypto";
 import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { fetchCache, type CachedPage } from "../src/cache.js";
 import { resolveConfig } from "../src/config.js";
 import { DEFAULT_FETCH_LIMIT, DEFAULT_NUM_RESULTS, MAX_LIMIT, MAX_NUM_RESULTS, MAX_OFFSET, MAX_QUERY_COUNT, MAX_URL_COUNT, MULTI_FETCH_LIMIT } from "../src/limits.js";
-import { truncateText } from "../src/http.js";
 import { createCodeSearchProvider, createContext7Provider, createFetchProvider, createSearchProvider } from "../src/providers/index.js";
 import { mapFetchResults } from "../src/providers/fallback.js";
 import type { FetchProviderName, SearchProviderName, WebFetchResult } from "../src/types.js";
@@ -22,11 +22,18 @@ export default function (pi: ExtensionAPI) {
     type: "string",
   });
 
-  const startupConfig = resolveConfig({
-    providerSearch: pi.getFlag("web-provider-search"),
-    providerFetch: pi.getFlag("web-provider-fetch"),
+  let registeredConfig = "";
+  pi.on("session_start", (_event, ctx) => {
+    const startupConfig = runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx));
+    const signature = toolConfigSignature(startupConfig);
+    if (signature === registeredConfig) return;
+    registerTools(pi, startupConfig);
+    syncOptionalTools(pi, startupConfig);
+    registeredConfig = signature;
   });
+}
 
+function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolveConfig>) {
   pi.registerTool({
     name: "web_search",
     label: "Web Search",
@@ -40,7 +47,7 @@ export default function (pi: ExtensionAPI) {
       const numResults = parseInteger(params.numResults, DEFAULT_NUM_RESULTS, "numResults", 1, MAX_NUM_RESULTS);
       if (queries.length === 0) throw new Error("web_search requires query or queries.");
 
-      const config = resolveConfig({ providerSearch: pi.getFlag("web-provider-search") }, ctx.cwd);
+      const config = runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx));
       assertProviderUnchanged("web_search", startupConfig.provider_search, config.provider_search);
       const provider = createSearchProvider(config);
       const grouped = [];
@@ -80,7 +87,7 @@ export default function (pi: ExtensionAPI) {
         throw new Error("web_fetch offset range reads require a single url, not urls.");
       }
 
-      const config = resolveConfig({ providerFetch: pi.getFlag("web-provider-fetch") }, ctx.cwd);
+      const config = runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx));
       assertProviderUnchanged("web_fetch", startupConfig.provider_fetch, config.provider_fetch);
       const progress = createProgress("fetch", config.provider_fetch, urls);
       const result = await fetchWithCache(config.provider_fetch, params, urls, signal, config, (event) => {
@@ -110,7 +117,7 @@ export default function (pi: ExtensionAPI) {
         const libraryName = requiredString(params.libraryName, "libraryName");
         const query = optionalString(params.query, "query") ?? libraryName;
         const limit = parseInteger(params.limit, 10, "limit", 1, MAX_NUM_RESULTS);
-        const provider = createContext7Provider(runtimeConfig(pi, ctx.cwd));
+        const provider = createContext7Provider(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)));
         const result = await provider.searchLibraries({ libraryName, query, fast: params.fast === true, limit }, signal);
         return jsonToolResult(result);
       },
@@ -127,7 +134,7 @@ export default function (pi: ExtensionAPI) {
         const params = rawParams as Record<string, any>;
         const query = requiredString(params.query, "query");
         const limit = parseInteger(params.limit, 10, "limit", 1, MAX_NUM_RESULTS);
-        const provider = createContext7Provider(runtimeConfig(pi, ctx.cwd));
+        const provider = createContext7Provider(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)));
         let libraryId = optionalString(params.libraryId, "libraryId");
         if (!libraryId) {
           const libraryName = requiredString(params.libraryName, "libraryName");
@@ -153,12 +160,33 @@ export default function (pi: ExtensionAPI) {
         const params = rawParams as Record<string, any>;
         const query = requiredString(params.query, "query");
         const tokensNum = parseTokensNum(params.tokensNum);
-        const provider = createCodeSearchProvider(runtimeConfig(pi, ctx.cwd));
+        const provider = createCodeSearchProvider(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)));
         const result = await provider.searchCode({ query, tokensNum }, signal);
         return jsonToolResult(result);
       },
     });
   }
+}
+
+const OPTIONAL_TOOLS = ["library_search", "library_docs", "code_search"];
+
+function toolConfigSignature(config: ReturnType<typeof resolveConfig>): string {
+  return JSON.stringify({
+    search: config.provider_search,
+    fetch: config.provider_fetch,
+    context7: !!config.apiKeys.context7,
+    exa: !!config.apiKeys.exa,
+  });
+}
+
+function syncOptionalTools(pi: ExtensionAPI, config: ReturnType<typeof resolveConfig>) {
+  if (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function") return;
+  const enabled = [
+    ...(config.apiKeys.context7 ? ["library_search", "library_docs"] : []),
+    ...(config.apiKeys.exa ? ["code_search"] : []),
+  ];
+  const active = pi.getActiveTools().filter((name) => !OPTIONAL_TOOLS.includes(name));
+  pi.setActiveTools([...new Set([...active, ...enabled])]);
 }
 
 type ProgressKind = "search" | "fetch";
@@ -320,7 +348,7 @@ export async function fetchWithCache(providerName: FetchProviderName, params: Re
 export function pageSlice(page: CachedPage, offset: number, limit: number, cached: boolean, refreshed: boolean) {
   const total = page.content.length;
   const content = page.content.slice(offset, offset + limit);
-  return { url: page.requestedUrl ?? page.url, fetchedUrl: page.url, title: page.title, content, format: page.format, cached, refreshed, cacheKey: page.cacheKey, range: { offset, limit, returned: content.length, total, truncated: offset > 0 || offset + content.length < total, hasPrevious: offset > 0, hasNext: offset + content.length < total } };
+  return { url: page.requestedUrl ?? page.url, fetchedUrl: page.url, title: page.title, content, format: page.format, cached, refreshed, range: { offset, limit, returned: content.length, total, truncated: offset > 0 || offset + content.length < total, hasPrevious: offset > 0, hasNext: offset + content.length < total, nextOffset: offset + content.length < total ? offset + content.length : undefined } };
 }
 
 export function buildCacheKey(provider: FetchProviderName, url: string, params: Record<string, any>, config?: any): string {
@@ -335,13 +363,163 @@ export function buildCacheKey(provider: FetchProviderName, url: string, params: 
   return `${provider}\0${scope}\0${JSON.stringify(affecting)}\0${canonical}`;
 }
 
-function runtimeConfig(pi: ExtensionAPI, cwd: string) {
-  return resolveConfig({ providerSearch: pi.getFlag("web-provider-search"), providerFetch: pi.getFlag("web-provider-fetch") }, cwd);
+function projectIsTrusted(ctx: { isProjectTrusted?: () => boolean }): boolean {
+  return typeof ctx.isProjectTrusted === "function" && ctx.isProjectTrusted() === true;
 }
 
-function jsonToolResult(result: unknown) {
-  const text = truncateText(JSON.stringify(result, null, 2));
-  return { content: [{ type: "text" as const, text }], details: boundedDetails(result) };
+function runtimeConfig(pi: ExtensionAPI, cwd: string, projectTrusted: boolean) {
+  return resolveConfig(
+    { providerSearch: pi.getFlag("web-provider-search"), providerFetch: pi.getFlag("web-provider-fetch") },
+    cwd,
+    process.env,
+    { includeProject: projectTrusted },
+  );
+}
+
+const MAX_OUTPUT_BYTES = 50_000;
+
+export function jsonToolResult(result: unknown) {
+  const bounded = boundStructuredResult(result);
+  return { content: [{ type: "text" as const, text: JSON.stringify(bounded) }], details: boundedDetails(bounded) };
+}
+
+function boundStructuredResult(result: unknown): unknown {
+  if (Buffer.byteLength(JSON.stringify(result)) <= MAX_OUTPUT_BYTES) return result;
+
+  if (isFetchResult(result)) {
+    const metadataBounded = limitFetchMetadata(result, 1_000);
+    let low = 0;
+    let high = Math.max(...metadataBounded.results.map((item: any) => typeof item.content === "string" ? item.content.length : 0));
+    const emptyContent = fetchResultWithContentLimit(metadataBounded, 0);
+    if (Buffer.byteLength(JSON.stringify(emptyContent)) > MAX_OUTPUT_BYTES) {
+      return { truncated: true, message: "Fetch metadata exceeded 50KB; retry with fewer URLs." };
+    }
+    let best: unknown = emptyContent;
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const candidate = fetchResultWithContentLimit(metadataBounded, middle);
+      if (Buffer.byteLength(JSON.stringify(candidate)) <= MAX_OUTPUT_BYTES) {
+        best = candidate;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return best;
+  }
+
+  if (isSearchResult(result)) return boundSearchResult(result);
+
+  const compact = limitStrings(result, 1_000);
+  if (Buffer.byteLength(JSON.stringify(compact)) <= MAX_OUTPUT_BYTES) return compact;
+  return { truncated: true, message: "Structured result exceeded 50KB; refine the request or use smaller limits." };
+}
+
+function isFetchResult(value: any): value is { provider?: string; results: any[] } {
+  return !!value && Array.isArray(value.results) && value.results.some((item: any) => typeof item?.content === "string" && item?.range);
+}
+
+function isSearchResult(value: any): value is { provider?: string; queries: Array<{ query?: string; results?: any[] }> } {
+  return !!value && Array.isArray(value.queries) && value.queries.every((group: any) => Array.isArray(group?.results));
+}
+
+function boundSearchResult(value: { provider?: string; queries: Array<{ query?: string; results?: any[] }> }) {
+  const compact = limitStrings(value, 1_000) as typeof value;
+  const maxSnippet = Math.max(0, ...compact.queries.flatMap((group) => (group.results ?? []).map((item) => typeof item?.snippet === "string" ? item.snippet.length : 0)));
+  let low = 0;
+  let high = maxSnippet;
+  let best = searchResultWithLimits(compact, 0);
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate = searchResultWithLimits(compact, middle);
+    if (Buffer.byteLength(JSON.stringify(candidate)) <= MAX_OUTPUT_BYTES) {
+      best = candidate;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  if (Buffer.byteLength(JSON.stringify(best)) <= MAX_OUTPUT_BYTES) return best;
+
+  low = 0;
+  high = Math.max(0, ...compact.queries.map((group) => group.results?.length ?? 0));
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate = searchResultWithLimits(compact, 0, middle);
+    if (Buffer.byteLength(JSON.stringify(candidate)) <= MAX_OUTPUT_BYTES) {
+      best = candidate;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return Buffer.byteLength(JSON.stringify(best)) <= MAX_OUTPUT_BYTES
+    ? best
+    : { truncated: true, message: "Search metadata exceeded 50KB; retry with fewer queries or results." };
+}
+
+function searchResultWithLimits(value: { provider?: string; queries: Array<{ query?: string; results?: any[] }> }, snippetChars: number, resultsPerQuery?: number) {
+  return {
+    ...value,
+    queries: value.queries.map((group) => ({
+      ...group,
+      results: (group.results ?? []).slice(0, resultsPerQuery).map((item) => {
+        if (typeof item?.snippet !== "string") return item;
+        if (snippetChars === 0) {
+          const { snippet: _snippet, ...metadata } = item;
+          return metadata;
+        }
+        return { ...item, snippet: safePrefix(item.snippet, snippetChars) };
+      }),
+    })),
+  };
+}
+
+function limitFetchMetadata(value: { provider?: string; results: any[] }, maxChars: number) {
+  return {
+    ...value,
+    results: value.results.map((item: any) => {
+      if (typeof item.content !== "string") return limitStrings(item, maxChars);
+      const content = item.content;
+      return { ...(limitStrings(item, maxChars) as Record<string, unknown>), content };
+    }),
+  };
+}
+
+function fetchResultWithContentLimit(value: { provider?: string; results: any[] }, maxChars: number) {
+  return {
+    ...value,
+    results: value.results.map((item: any) => {
+      if (typeof item.content !== "string" || !item.range) return item;
+      const content = safePrefix(item.content, maxChars);
+      const returned = content.length;
+      const hasNext = item.range.offset + returned < item.range.total;
+      return {
+        ...item,
+        content,
+        range: {
+          ...item.range,
+          returned,
+          truncated: item.range.offset > 0 || hasNext,
+          hasNext,
+          nextOffset: hasNext ? item.range.offset + returned : undefined,
+        },
+      };
+    }),
+  };
+}
+
+function safePrefix(value: string, maxChars: number): string {
+  let end = Math.min(value.length, maxChars);
+  if (end > 0 && /[\uD800-\uDBFF]/.test(value[end - 1])) end--;
+  return value.slice(0, end);
+}
+
+function limitStrings(value: unknown, maxChars: number): unknown {
+  if (typeof value === "string") return safePrefix(value, maxChars);
+  if (Array.isArray(value)) return value.map((item) => limitStrings(item, maxChars));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, limitStrings(item, maxChars)]));
+  return value;
 }
 
 function parseInteger(value: unknown, defaultValue: number, name: string, min: number, max: number): number {
@@ -380,7 +558,7 @@ function providerScope(provider: FetchProviderName, config?: any): string {
     firecrawl: config?.apiKeys?.firecrawl,
   };
   const key = keyMap[provider];
-  return key ? `key:${String(key).slice(0, 8)}` : "default";
+  return key ? `key:${createHash("sha256").update(String(key)).digest("hex")}` : "default";
 }
 
 function assertProviderUnchanged(tool: string, startup: string, runtime: string) {
@@ -449,7 +627,6 @@ function fetchDetails(value: any) {
       format: r.format,
       cached: r.cached,
       refreshed: r.refreshed,
-      cacheKey: r.cacheKey,
       range: r.range,
       error: r.error,
     })),

@@ -24,7 +24,12 @@ type PartialConfig = Partial<Omit<WebKitConfig, "apiKeys" | "markdownNew">> & {
   markdownNew?: Partial<WebKitConfig["markdownNew"]>;
 };
 
-export function resolveConfig(flags: { providerSearch?: unknown; providerFetch?: unknown } = {}, cwd = process.cwd(), env = process.env): WebKitConfig {
+export function resolveConfig(
+  flags: { providerSearch?: unknown; providerFetch?: unknown } = {},
+  cwd = process.cwd(),
+  env = process.env,
+  options: { includeProject?: boolean } = {},
+): WebKitConfig {
   let cfg = DEFAULT_CONFIG;
   cfg = merge(cfg, {
     provider_search: env.PI_WEB_KIT_PROVIDER_SEARCH as SearchProviderName | undefined,
@@ -38,9 +43,11 @@ export function resolveConfig(flags: { providerSearch?: unknown; providerFetch?:
     },
   });
   const home = env.HOME ?? homedir();
-  for (const path of [join(home, ".pi/agent/pi-web-kit.json"), join(cwd, ".pi-web-kit.json")]) {
-    const fileConfig = readConfigFile(path);
-    if (fileConfig) cfg = merge(cfg, fileConfig);
+  const globalConfig = readConfigFile(join(home, ".pi/agent/pi-web-kit.json"));
+  if (globalConfig) cfg = merge(cfg, globalConfig);
+  if (options.includeProject !== false) {
+    const projectConfig = readConfigFile(join(cwd, ".pi-web-kit.json"));
+    if (projectConfig) cfg = merge(cfg, projectConfig);
   }
   cfg = merge(cfg, {
     provider_search: flags.providerSearch as SearchProviderName | undefined,
