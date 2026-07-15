@@ -231,13 +231,17 @@ test("large structured fetch output remains valid JSON with continuation metadat
   assert(!result.content.endsWith("\ud83d"));
 });
 
-test("oversized fetch metadata falls back to bounded valid JSON", () => {
+test("oversized fetch metadata is bounded without discarding page content", () => {
+  const content = "body".repeat(25_000);
   const out = jsonToolResult({
     provider: "test",
-    results: [{ url: "https://e.test", title: "x".repeat(60_000), content: "body", range: { offset: 0, returned: 4, total: 4 } }],
+    results: [{ url: "https://e.test", title: "x".repeat(60_000), content, range: { offset: 0, returned: content.length, total: content.length } }],
   });
   assert(Buffer.byteLength(out.content[0].text) <= 50_000);
-  assert.doesNotThrow(() => JSON.parse(out.content[0].text));
+  const parsed = JSON.parse(out.content[0].text).results[0];
+  assert.equal(parsed.title.length, 1_000);
+  assert(parsed.content.length > 0);
+  assert.equal(parsed.range.nextOffset, parsed.content.length);
 });
 
 test("API keys produce opaque distinct cache scopes and never escape results", () => {

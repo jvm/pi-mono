@@ -387,17 +387,17 @@ function boundStructuredResult(result: unknown): unknown {
   if (Buffer.byteLength(JSON.stringify(result)) <= MAX_OUTPUT_BYTES) return result;
 
   if (isFetchResult(result)) {
+    const metadataBounded = limitFetchMetadata(result, 1_000);
     let low = 0;
-    let high = Math.max(...result.results.map((item: any) => typeof item.content === "string" ? item.content.length : 0));
-    const emptyContent = fetchResultWithContentLimit(result, 0);
-    const boundedEnvelope = limitStrings(emptyContent, 1_000);
-    if (Buffer.byteLength(JSON.stringify(boundedEnvelope)) > MAX_OUTPUT_BYTES) {
+    let high = Math.max(...metadataBounded.results.map((item: any) => typeof item.content === "string" ? item.content.length : 0));
+    const emptyContent = fetchResultWithContentLimit(metadataBounded, 0);
+    if (Buffer.byteLength(JSON.stringify(emptyContent)) > MAX_OUTPUT_BYTES) {
       return { truncated: true, message: "Fetch metadata exceeded 50KB; retry with fewer URLs." };
     }
-    let best: unknown = boundedEnvelope;
+    let best: unknown = emptyContent;
     while (low <= high) {
       const middle = Math.floor((low + high) / 2);
-      const candidate = fetchResultWithContentLimit(result, middle);
+      const candidate = fetchResultWithContentLimit(metadataBounded, middle);
       if (Buffer.byteLength(JSON.stringify(candidate)) <= MAX_OUTPUT_BYTES) {
         best = candidate;
         low = middle + 1;
@@ -415,6 +415,17 @@ function boundStructuredResult(result: unknown): unknown {
 
 function isFetchResult(value: any): value is { provider?: string; results: any[] } {
   return !!value && Array.isArray(value.results) && value.results.some((item: any) => typeof item?.content === "string" && item?.range);
+}
+
+function limitFetchMetadata(value: { provider?: string; results: any[] }, maxChars: number) {
+  return {
+    ...value,
+    results: value.results.map((item: any) => {
+      if (typeof item.content !== "string") return limitStrings(item, maxChars);
+      const content = item.content;
+      return { ...(limitStrings(item, maxChars) as Record<string, unknown>), content };
+    }),
+  };
 }
 
 function fetchResultWithContentLimit(value: { provider?: string; results: any[] }, maxChars: number) {
