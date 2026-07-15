@@ -70,10 +70,50 @@ export function applyGoalMutation(current: GoalState | null, mutation: GoalMutat
 }
 
 function isKnownMutation(value: Partial<GoalMutation> | undefined): value is GoalMutation {
-  if (!value || value.schemaVersion !== GOAL_SCHEMA_VERSION || typeof value.kind !== "string" || typeof value.at !== "string") return false;
-  if (["create", "replace"].includes(value.kind)) return typeof value.goalId === "string" && typeof (value as any).objective === "string";
-  if (["edit", "status", "budget", "account"].includes(value.kind)) return typeof value.goalId === "string";
-  return value.kind === "clear";
+  if (!value || value.schemaVersion !== GOAL_SCHEMA_VERSION || typeof value.kind !== "string" || !validTimestamp(value.at)) return false;
+  const mutation = value as Record<string, unknown>;
+  if (value.kind === "clear") return optionalNonNegativeInteger(mutation.timeUsedSeconds);
+  if (typeof mutation.goalId !== "string" || mutation.goalId.length === 0) return false;
+  switch (value.kind) {
+    case "create":
+    case "replace":
+      return typeof mutation.objective === "string" && optionalPositiveInteger(mutation.tokenBudget);
+    case "edit":
+      return typeof mutation.objective === "string" && (mutation.status === undefined || isGoalStatus(mutation.status));
+    case "status":
+      return isGoalStatus(mutation.status)
+        && optionalNonNegativeInteger(mutation.timeUsedSeconds)
+        && (mutation.activeStartedAt === undefined || validTimestamp(mutation.activeStartedAt));
+    case "budget":
+      return optionalPositiveInteger(mutation.tokenBudget);
+    case "account":
+      return nonNegativeInteger(mutation.tokens)
+        && Array.isArray(mutation.entryIds)
+        && mutation.entryIds.every((id) => typeof id === "string");
+    default:
+      return false;
+  }
+}
+
+function isGoalStatus(value: unknown): value is GoalStatus {
+  return typeof value === "string" && ["active", "paused", "blocked", "usage_limited", "budget_limited", "complete"].includes(value);
+}
+
+function validTimestamp(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
+function nonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value >= 0;
+}
+
+function optionalNonNegativeInteger(value: unknown): boolean {
+  return value === undefined || nonNegativeInteger(value);
+}
+
+function optionalPositiveInteger(value: unknown): boolean {
+  return value === undefined
+    || (typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value > 0);
 }
 
 export function statusMutation(goal: GoalState, status: GoalStatus, timeUsedSeconds: number, activeStartedAt?: string, meta?: GoalMutationMeta): GoalMutation {

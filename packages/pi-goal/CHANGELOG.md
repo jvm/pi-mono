@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+
+- Preserve accumulated wall-clock time when `/goal resume` is used on an already-active goal.
+- Derive persisted `piGoalVersion` metadata from the package version so release versions cannot drift.
+- Ignore malformed persisted mutations instead of allowing invalid status, budget, or accounting data to corrupt reconstructed goal state.
+
 ## 0.1.10 - 2026-07-01
 
 ### Changed

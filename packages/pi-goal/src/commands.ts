@@ -94,9 +94,10 @@ async function editGoal(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime:
 function setGoalStatus(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime: CommandRuntime, status: "paused" | "active"): void {
   const current = accountCurrent(pi, ctx, runtime.getGoal());
   if (!current) return ctx.ui.notify("No goal set.", "error");
-  const time = status === "active" ? current.timeUsedSeconds : realizedTimeUsed(current);
-  const activeStartedAt = status === "active" ? nowIso() : undefined;
-  const mutation = statusMutation(current, status, time, activeStartedAt, transitionMeta(status === "active" ? "command:/goal resume" : "command:/goal pause", current, time, nowIso()));
+  const transitionedAt = nowIso();
+  const time = realizedTimeUsed(current, Date.parse(transitionedAt));
+  const activeStartedAt = status === "active" ? transitionedAt : undefined;
+  const mutation = statusMutation(current, status, time, activeStartedAt, transitionMeta(status === "active" ? "command:/goal resume" : "command:/goal pause", current, time, transitionedAt));
   appendGoalMutation(pi, mutation);
   runtime.setGoal(applyGoalMutation(current, mutation));
   runtime.afterGoalChanged(ctx, status === "active" ? "Goal resumed." : "Goal paused.");
