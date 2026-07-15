@@ -231,6 +231,25 @@ test("large structured fetch output remains valid JSON with continuation metadat
   assert(!result.content.endsWith("\ud83d"));
 });
 
+test("large search output preserves result URLs while fitting snippets", () => {
+  const queries = Array.from({ length: 5 }, (_, queryIndex) => ({
+    query: `query-${queryIndex}`,
+    results: Array.from({ length: 20 }, (_, resultIndex) => ({
+      title: `Result ${resultIndex}`,
+      url: `https://example.com/${queryIndex}/${resultIndex}`,
+      snippet: "s".repeat(1_000),
+      position: resultIndex + 1,
+    })),
+  }));
+  const out = jsonToolResult({ provider: "test", queries });
+  assert(Buffer.byteLength(out.content[0].text) <= 50_000);
+  const parsed = JSON.parse(out.content[0].text);
+  assert.equal(parsed.queries.length, 5);
+  assert.equal(parsed.queries.reduce((total, group) => total + group.results.length, 0), 100);
+  assert.equal(parsed.queries[4].results[19].url, "https://example.com/4/19");
+  assert((parsed.queries[0].results[0].snippet?.length ?? 0) < 1_000);
+});
+
 test("oversized fetch metadata is bounded without discarding page content", () => {
   const content = "body".repeat(25_000);
   const out = jsonToolResult({

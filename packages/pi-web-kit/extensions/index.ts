@@ -408,6 +408,8 @@ function boundStructuredResult(result: unknown): unknown {
     return best;
   }
 
+  if (isSearchResult(result)) return boundSearchResult(result);
+
   const compact = limitStrings(result, 1_000);
   if (Buffer.byteLength(JSON.stringify(compact)) <= MAX_OUTPUT_BYTES) return compact;
   return { truncated: true, message: "Structured result exceeded 50KB; refine the request or use smaller limits." };
@@ -415,6 +417,62 @@ function boundStructuredResult(result: unknown): unknown {
 
 function isFetchResult(value: any): value is { provider?: string; results: any[] } {
   return !!value && Array.isArray(value.results) && value.results.some((item: any) => typeof item?.content === "string" && item?.range);
+}
+
+function isSearchResult(value: any): value is { provider?: string; queries: Array<{ query?: string; results?: any[] }> } {
+  return !!value && Array.isArray(value.queries) && value.queries.every((group: any) => Array.isArray(group?.results));
+}
+
+function boundSearchResult(value: { provider?: string; queries: Array<{ query?: string; results?: any[] }> }) {
+  const compact = limitStrings(value, 1_000) as typeof value;
+  const maxSnippet = Math.max(0, ...compact.queries.flatMap((group) => (group.results ?? []).map((item) => typeof item?.snippet === "string" ? item.snippet.length : 0)));
+  let low = 0;
+  let high = maxSnippet;
+  let best = searchResultWithLimits(compact, 0);
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate = searchResultWithLimits(compact, middle);
+    if (Buffer.byteLength(JSON.stringify(candidate)) <= MAX_OUTPUT_BYTES) {
+      best = candidate;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  if (Buffer.byteLength(JSON.stringify(best)) <= MAX_OUTPUT_BYTES) return best;
+
+  low = 0;
+  high = Math.max(0, ...compact.queries.map((group) => group.results?.length ?? 0));
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const candidate = searchResultWithLimits(compact, 0, middle);
+    if (Buffer.byteLength(JSON.stringify(candidate)) <= MAX_OUTPUT_BYTES) {
+      best = candidate;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return Buffer.byteLength(JSON.stringify(best)) <= MAX_OUTPUT_BYTES
+    ? best
+    : { truncated: true, message: "Search metadata exceeded 50KB; retry with fewer queries or results." };
+}
+
+function searchResultWithLimits(value: { provider?: string; queries: Array<{ query?: string; results?: any[] }> }, snippetChars: number, resultsPerQuery?: number) {
+  return {
+    ...value,
+    queries: value.queries.map((group) => ({
+      ...group,
+      results: (group.results ?? []).slice(0, resultsPerQuery).map((item) => {
+        if (typeof item?.snippet !== "string") return item;
+        if (snippetChars === 0) {
+          const { snippet: _snippet, ...metadata } = item;
+          return metadata;
+        }
+        return { ...item, snippet: safePrefix(item.snippet, snippetChars) };
+      }),
+    })),
+  };
 }
 
 function limitFetchMetadata(value: { provider?: string; results: any[] }, maxChars: number) {
