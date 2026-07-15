@@ -23,6 +23,26 @@ test("active fetch schemas are provider-tailored", () => {
   assert.deepEqual(propNames(buildFetchSchema("exa_mcp")), ["limit", "offset", "refresh", "url", "urls"]);
 });
 
+test("missing trust API defaults to untrusted and repeated session starts do not duplicate tools", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
+  writeFileSync(join(cwd, ".pi-web-kit.json"), JSON.stringify({ provider_fetch: "markdown_new" }));
+  const tools = [];
+  let sessionStart;
+  extension({
+    registerFlag() {},
+    getFlag() { return undefined; },
+    registerTool(tool) { tools.push(tool); },
+    on(name, handler) { if (name === "session_start") sessionStart = handler; },
+  });
+  sessionStart({}, { cwd });
+  sessionStart({}, { cwd });
+  const names = tools.map((tool) => tool.name);
+  assert.equal(new Set(names).size, names.length);
+  assert(names.includes("web_fetch"));
+  assert(names.includes("web_search"));
+  assert(!propNames(tools.find((tool) => tool.name === "web_fetch").parameters).includes("method"));
+});
+
 test("project config controls tool schemas only for trusted projects", () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
   writeFileSync(join(cwd, ".pi-web-kit.json"), JSON.stringify({ provider_fetch: "markdown_new" }));
@@ -190,6 +210,15 @@ test("large structured fetch output remains valid JSON with continuation metadat
   assert.equal(result.range.hasNext, true);
   assert.equal(result.range.nextOffset, result.content.length);
   assert(!result.content.endsWith("\ud83d"));
+});
+
+test("oversized fetch metadata falls back to bounded valid JSON", () => {
+  const out = jsonToolResult({
+    provider: "test",
+    results: [{ url: "https://e.test", title: "x".repeat(60_000), content: "body", range: { offset: 0, returned: 4, total: 4 } }],
+  });
+  assert(Buffer.byteLength(out.content[0].text) <= 50_000);
+  assert.doesNotThrow(() => JSON.parse(out.content[0].text));
 });
 
 test("API keys produce opaque distinct cache scopes and never escape results", () => {

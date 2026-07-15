@@ -22,9 +22,12 @@ export default function (pi: ExtensionAPI) {
     type: "string",
   });
 
+  let toolsRegistered = false;
   pi.on("session_start", (_event, ctx) => {
-    const startupConfig = runtimeConfig(pi, ctx.cwd, ctx.isProjectTrusted());
+    if (toolsRegistered) return;
+    const startupConfig = runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx));
     registerTools(pi, startupConfig);
+    toolsRegistered = true;
   });
 }
 
@@ -42,7 +45,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
       const numResults = parseInteger(params.numResults, DEFAULT_NUM_RESULTS, "numResults", 1, MAX_NUM_RESULTS);
       if (queries.length === 0) throw new Error("web_search requires query or queries.");
 
-      const config = runtimeConfig(pi, ctx.cwd, ctx.isProjectTrusted());
+      const config = runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx));
       assertProviderUnchanged("web_search", startupConfig.provider_search, config.provider_search);
       const provider = createSearchProvider(config);
       const grouped = [];
@@ -82,7 +85,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
         throw new Error("web_fetch offset range reads require a single url, not urls.");
       }
 
-      const config = runtimeConfig(pi, ctx.cwd, ctx.isProjectTrusted());
+      const config = runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx));
       assertProviderUnchanged("web_fetch", startupConfig.provider_fetch, config.provider_fetch);
       const progress = createProgress("fetch", config.provider_fetch, urls);
       const result = await fetchWithCache(config.provider_fetch, params, urls, signal, config, (event) => {
@@ -112,7 +115,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
         const libraryName = requiredString(params.libraryName, "libraryName");
         const query = optionalString(params.query, "query") ?? libraryName;
         const limit = parseInteger(params.limit, 10, "limit", 1, MAX_NUM_RESULTS);
-        const provider = createContext7Provider(runtimeConfig(pi, ctx.cwd, ctx.isProjectTrusted()));
+        const provider = createContext7Provider(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)));
         const result = await provider.searchLibraries({ libraryName, query, fast: params.fast === true, limit }, signal);
         return jsonToolResult(result);
       },
@@ -129,7 +132,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
         const params = rawParams as Record<string, any>;
         const query = requiredString(params.query, "query");
         const limit = parseInteger(params.limit, 10, "limit", 1, MAX_NUM_RESULTS);
-        const provider = createContext7Provider(runtimeConfig(pi, ctx.cwd, ctx.isProjectTrusted()));
+        const provider = createContext7Provider(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)));
         let libraryId = optionalString(params.libraryId, "libraryId");
         if (!libraryId) {
           const libraryName = requiredString(params.libraryName, "libraryName");
@@ -155,7 +158,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
         const params = rawParams as Record<string, any>;
         const query = requiredString(params.query, "query");
         const tokensNum = parseTokensNum(params.tokensNum);
-        const provider = createCodeSearchProvider(runtimeConfig(pi, ctx.cwd, ctx.isProjectTrusted()));
+        const provider = createCodeSearchProvider(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)));
         const result = await provider.searchCode({ query, tokensNum }, signal);
         return jsonToolResult(result);
       },
@@ -337,6 +340,10 @@ export function buildCacheKey(provider: FetchProviderName, url: string, params: 
   return `${provider}\0${scope}\0${JSON.stringify(affecting)}\0${canonical}`;
 }
 
+function projectIsTrusted(ctx: { isProjectTrusted?: () => boolean }): boolean {
+  return typeof ctx.isProjectTrusted === "function" && ctx.isProjectTrusted() === true;
+}
+
 function runtimeConfig(pi: ExtensionAPI, cwd: string, projectTrusted: boolean) {
   return resolveConfig(
     { providerSearch: pi.getFlag("web-provider-search"), providerFetch: pi.getFlag("web-provider-fetch") },
@@ -359,7 +366,12 @@ function boundStructuredResult(result: unknown): unknown {
   if (isFetchResult(result)) {
     let low = 0;
     let high = Math.max(...result.results.map((item: any) => typeof item.content === "string" ? item.content.length : 0));
-    let best: unknown = fetchResultWithContentLimit(result, 0);
+    const emptyContent = fetchResultWithContentLimit(result, 0);
+    const boundedEnvelope = limitStrings(emptyContent, 1_000);
+    if (Buffer.byteLength(JSON.stringify(boundedEnvelope)) > MAX_OUTPUT_BYTES) {
+      return { truncated: true, message: "Fetch metadata exceeded 50KB; retry with fewer URLs." };
+    }
+    let best: unknown = boundedEnvelope;
     while (low <= high) {
       const middle = Math.floor((low + high) / 2);
       const candidate = fetchResultWithContentLimit(result, middle);
