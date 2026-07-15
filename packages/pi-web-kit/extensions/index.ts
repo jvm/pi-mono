@@ -22,12 +22,14 @@ export default function (pi: ExtensionAPI) {
     type: "string",
   });
 
-  let toolsRegistered = false;
+  let registeredConfig = "";
   pi.on("session_start", (_event, ctx) => {
-    if (toolsRegistered) return;
     const startupConfig = runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx));
+    const signature = toolConfigSignature(startupConfig);
+    if (signature === registeredConfig) return;
     registerTools(pi, startupConfig);
-    toolsRegistered = true;
+    syncOptionalTools(pi, startupConfig);
+    registeredConfig = signature;
   });
 }
 
@@ -164,6 +166,27 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
       },
     });
   }
+}
+
+const OPTIONAL_TOOLS = ["library_search", "library_docs", "code_search"];
+
+function toolConfigSignature(config: ReturnType<typeof resolveConfig>): string {
+  return JSON.stringify({
+    search: config.provider_search,
+    fetch: config.provider_fetch,
+    context7: !!config.apiKeys.context7,
+    exa: !!config.apiKeys.exa,
+  });
+}
+
+function syncOptionalTools(pi: ExtensionAPI, config: ReturnType<typeof resolveConfig>) {
+  if (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function") return;
+  const enabled = [
+    ...(config.apiKeys.context7 ? ["library_search", "library_docs"] : []),
+    ...(config.apiKeys.exa ? ["code_search"] : []),
+  ];
+  const active = pi.getActiveTools().filter((name) => !OPTIONAL_TOOLS.includes(name));
+  pi.setActiveTools([...new Set([...active, ...enabled])]);
 }
 
 type ProgressKind = "search" | "fetch";

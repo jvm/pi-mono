@@ -43,6 +43,25 @@ test("missing trust API defaults to untrusted and repeated session starts do not
   assert(!propNames(tools.find((tool) => tool.name === "web_fetch").parameters).includes("method"));
 });
 
+test("changed session config refreshes provider-tailored tools", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
+  writeFileSync(join(cwd, ".pi-web-kit.json"), JSON.stringify({ provider_fetch: "markdown_new" }));
+  const tools = [];
+  let sessionStart;
+  extension({
+    registerFlag() {},
+    getFlag() { return undefined; },
+    registerTool(tool) { tools.push(tool); },
+    on(name, handler) { if (name === "session_start") sessionStart = handler; },
+  });
+  sessionStart({}, { cwd, isProjectTrusted: () => false });
+  sessionStart({}, { cwd, isProjectTrusted: () => true });
+  const fetchTools = tools.filter((tool) => tool.name === "web_fetch");
+  assert.equal(fetchTools.length, 2);
+  assert(!propNames(fetchTools[0].parameters).includes("method"));
+  assert(propNames(fetchTools[1].parameters).includes("method"));
+});
+
 test("project config controls tool schemas only for trusted projects", () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
   writeFileSync(join(cwd, ".pi-web-kit.json"), JSON.stringify({ provider_fetch: "markdown_new" }));
