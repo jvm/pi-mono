@@ -9,7 +9,7 @@
 It currently provides three extensions:
 
 - **Inline skill invocation**: invoke one or more skills anywhere in a prompt with `/skill:name`.
-- **Skill prompt visibility**: choose which skills are hidden from the model's automatic skill-discovery prompt, while keeping them explicitly invokable and visibly marked in Pi's startup skill list.
+- **Skill prompt visibility**: choose which skills are hidden from the model's automatic skill-discovery prompt while keeping them explicitly invokable.
 - **Session skill toggles**: assign up to nine skills to number slots and toggle model visibility while writing a prompt.
 
 > [!WARNING]
@@ -64,9 +64,9 @@ Open the menu with:
 
 The menu lists configurable skills alphabetically. Toggle a skill off or on in the active scope. Use the Global/Project tabs to choose which settings file to edit. In the Project tab, inherited on/off values are shown normally; project overrides are highlighted. Press `1` through `9` on a selected skill to assign or clear that scope's session toggle slot. Visibility and toggle slots are independent.
 
-Pi's startup `[Skills]` list also highlights hidden skills in the error color (red in the default dark theme).
+Project settings are read and the Project tab is available only when Pi trusts the current project. In an untrusted project, `pi-skillful` ignores `.pi/settings.json` and exposes only global settings.
 
-When the project settings file contains only `skillful` settings and the project `hiddenSkills` list becomes empty, `.pi/settings.json` is deleted instead of leaving an empty settings file behind.
+When the project settings file contains only `skillful` settings and the project override is removed, `.pi/settings.json` is deleted instead of leaving an empty settings file behind.
 
 ### Session skill toggles
 
@@ -86,9 +86,9 @@ Assign skills to up to nine prompt-editor slots with JSON settings:
 }
 ```
 
-Configured slots appear on the prompt editor's top border as `N skill-name`. Project `toggleSlots`, when defined as part of a project override, replace global `toggleSlots`; otherwise global slots are used and shown in the Project tab. Long names are truncated per slot when needed so all configured slot numbers remain visible. Active slots use the theme accent color; inactive slots use the muted color. Press `alt+1` through `alt+9` by default to toggle a slot for the current session only.
+Configured slots appear on the prompt editor's top border as `N skill-name`. Project `toggleSlots`, when defined as part of a project override, replace global `toggleSlots`; otherwise global slots are used and shown in the Project tab. Long names are truncated per slot when needed so all configured slot numbers remain visible. Active slots use the theme accent color; inactive slots use the muted color. Press `alt+1` through `alt+9` by default to toggle a slot for the current session only. Only the configured modifier and assigned slot numbers are consumed while the prompt editor has focus; no modifier-number keys are reserved when no slots are configured.
 
-`toggleModifier` defaults to `"alt"`. Supported values are `"alt"`, `"ctrl"`, `"ctrl+shift"`, `"alt+shift"`, `"ctrl+alt"`, and `"ctrl+alt+shift"`. Change it if your terminal reserves `alt+number` shortcuts.
+`toggleModifier` defaults to `"alt"`. Supported values are `"alt"`, `"ctrl"`, `"ctrl+shift"`, `"alt+shift"`, `"ctrl+alt"`, and `"ctrl+alt+shift"`. Change it if your terminal reserves `alt+number` shortcuts. An explicitly configured project value takes precedence over the global value, including explicit `"alt"`. Unsupported explicit values fall back to `"alt"` in that scope.
 
 On app startup, non-hidden skills are active and hidden skills are inactive. Within a running Pi process, `/new` preserves the current toggle state for the new session. Resuming, forking, cloning, reloading, or restarting Pi resets toggle state from settings. Inline `/skill:name` invocation remains explicit and works even when that skill is inactive. Skills bundled in Pi packages are never modified by these toggles.
 
@@ -146,6 +146,7 @@ Common commands:
 ```bash
 npm install
 npm run check
+npm test
 npm run pack:dry-run
 ```
 
