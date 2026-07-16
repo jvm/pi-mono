@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { accountUsageFromBranch, assistantUsageTokens, buildGoalContextMessage, classifyAssistantError, createGoalMutation, formatElapsed, formatTokensCompact, parseGoalCommand, realizedTimeUsed, reconstructGoalState, validateObjective, validateTokenBudget } from "../src/index.ts";
+import { readFile } from "node:fs/promises";
+import { accountUsageFromBranch, assistantUsageTokens, buildGoalContextMessage, classifyAssistantError, createGoalMutation, formatElapsed, formatTokensCompact, parseGoalCommand, PI_GOAL_VERSION, realizedTimeUsed, reconstructGoalState, validateObjective, validateTokenBudget } from "../src/index.ts";
+
+test("persisted metadata version matches the package version", async () => {
+  const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(PI_GOAL_VERSION, packageJson.version);
+});
 
 test("validation rejects empty and long objectives", () => {
   assert.equal(validateObjective("  ").ok, false);
@@ -37,6 +43,14 @@ test("reconstructs branch state from custom entries", () => {
   assert.equal(goal.tokenBudget, 1000);
 });
 
+test("reconstruction preserves all budgets accepted by public validation", () => {
+  const tokenBudget = Number.MAX_SAFE_INTEGER + 1;
+  assert.equal(validateTokenBudget(tokenBudget).ok, true);
+  const create = createGoalMutation("ship it", tokenBudget);
+  const goal = reconstructGoalState([{ type: "custom", customType: "pi-goal", id: "1", data: create }]);
+  assert.equal(goal.tokenBudget, tokenBudget);
+});
+
 test("accounts assistant usage once", () => {
   const create = createGoalMutation("ship it");
   const goal = reconstructGoalState([{ type: "custom", customType: "pi-goal", id: "1", timestamp: create.at, data: create }]);
@@ -63,6 +77,24 @@ test("accounting does not compound active elapsed time", () => {
   const twice = accountUsageFromBranch(once, branch, start + 20_000).goal;
   assert.equal(twice.timeUsedSeconds, 0);
   assert.equal(realizedTimeUsed(twice, start + 20_000), 20);
+});
+
+test("malformed persisted mutations are ignored without corrupting state", () => {
+  const create = createGoalMutation("ship it");
+  const malformed = [
+    { schemaVersion: 1, kind: "status", goalId: create.goalId, status: "unknown", at: create.at },
+    { schemaVersion: 1, kind: "account", goalId: create.goalId, tokens: 10, at: create.at },
+    { schemaVersion: 1, kind: "budget", goalId: create.goalId, tokenBudget: -1, at: create.at },
+  ];
+  const diagnostics = [];
+  const goal = reconstructGoalState([
+    { type: "custom", customType: "pi-goal", id: "create", data: create },
+    ...malformed.map((data, index) => ({ type: "custom", customType: "pi-goal", id: `bad-${index}`, data })),
+  ], diagnostics);
+  assert.equal(goal.status, "active");
+  assert.equal(goal.tokensUsed, 0);
+  assert.equal(goal.tokenBudget, undefined);
+  assert.equal(diagnostics.length, malformed.length);
 });
 
 test("legacy account mutations with elapsed time do not inflate reconstructed time", () => {

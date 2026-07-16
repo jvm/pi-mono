@@ -76,6 +76,33 @@ test("/goal creates, pauses, resumes, budgets, and clears", async () => {
   assert.equal(pi.entries.at(-1).data.kind, "clear");
 });
 
+test("/goal resume preserves elapsed time for an already-active goal", async () => {
+  const pi = makePi();
+  const ctx = makeCtx();
+  const startedAt = new Date(Date.now() - 100_000).toISOString();
+  const goal = {
+    goalId: "g1",
+    objective: "ship",
+    status: "active",
+    tokensUsed: 0,
+    timeUsedSeconds: 7,
+    createdAt: startedAt,
+    updatedAt: startedAt,
+    activeStartedAt: startedAt,
+    accountedUsage: { tokens: 0, entryIds: [] },
+  };
+  const runtime = makeCommandRuntime(goal);
+
+  await handleGoalCommand(pi, "resume", ctx, runtime);
+
+  const resumed = runtime.getGoal();
+  const mutation = pi.entries.at(-1).data;
+  assert.ok(resumed.timeUsedSeconds >= 106, `expected at least 106 seconds, got ${resumed.timeUsedSeconds}`);
+  assert.equal(mutation.meta.time.elapsedDeltaSeconds, resumed.timeUsedSeconds - 7);
+  assert.equal(mutation.meta.time.realizedTimeUsedSeconds, resumed.timeUsedSeconds);
+  assert.equal(resumed.activeStartedAt, mutation.meta.time.endedAt);
+});
+
 test("/goal replacement requires confirmation for non-terminal goals", async () => {
   const pi = makePi();
   const ctx = makeCtx();

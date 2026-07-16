@@ -1,7 +1,15 @@
+import { createRequire } from "node:module";
 import type { BranchEntry, GoalMutationMeta, GoalState } from "./types.js";
 import { secondsBetween } from "./utils.js";
 
-export const PI_GOAL_VERSION = "0.1.7";
+const packageJson = createRequire(import.meta.url)("../package.json") as { version?: unknown };
+
+if (typeof packageJson.version !== "string" || packageJson.version.length === 0) {
+  throw new Error("pi-goal package version is missing or invalid.");
+}
+
+/** Package version that produced the persisted metadata; schema versioning is separate. */
+export const PI_GOAL_VERSION = packageJson.version;
 
 export function withPiGoalVersion(meta: GoalMutationMeta = {}): GoalMutationMeta {
   return { piGoalVersion: PI_GOAL_VERSION, ...meta };
