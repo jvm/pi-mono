@@ -24,6 +24,7 @@ export interface SkillfulSettings extends SkillToggleConfig {
   hiddenSkillsDefined: boolean;
   visibleSkills: string[];
   toggleSlotsDefined: boolean;
+  toggleModifierDefined: boolean;
 }
 
 export interface EffectiveSkillfulSettings extends SkillfulSettings {
@@ -113,21 +114,27 @@ export async function readSkillfulSettings(path: string): Promise<SkillfulSettin
   return settingsFromRecord(settings[SKILLFUL_SETTINGS_KEY]);
 }
 
-export async function readScopedSkillfulSettings(cwd: string): Promise<Record<SkillfulScope, SkillfulSettings>> {
+export async function readScopedSkillfulSettings(
+  cwd: string,
+  projectTrusted: boolean,
+): Promise<Record<SkillfulScope, SkillfulSettings>> {
   const [global, project] = await Promise.all([
     readSkillfulSettings(globalSettingsPath()),
-    readSkillfulSettings(projectSettingsPath(cwd)),
+    projectTrusted ? readSkillfulSettings(projectSettingsPath(cwd)) : Promise.resolve(settingsFromRecord(undefined)),
   ]);
   return { global, project };
 }
 
-export async function readEffectiveHiddenSkills(cwd: string): Promise<Set<string>> {
-  const scoped = await readScopedSkillfulSettings(cwd);
+export async function readEffectiveHiddenSkills(cwd: string, projectTrusted: boolean): Promise<Set<string>> {
+  const scoped = await readScopedSkillfulSettings(cwd, projectTrusted);
   return effectiveHiddenSkillSet(scoped);
 }
 
-export async function readEffectiveSkillfulSettings(cwd: string): Promise<EffectiveSkillfulSettings> {
-  const scoped = await readScopedSkillfulSettings(cwd);
+export async function readEffectiveSkillfulSettings(
+  cwd: string,
+  projectTrusted: boolean,
+): Promise<EffectiveSkillfulSettings> {
+  const scoped = await readScopedSkillfulSettings(cwd, projectTrusted);
   const hiddenSkills = normalizeSkillNames(effectiveHiddenSkillSet(scoped));
   const toggleSlots = scoped.project.toggleSlotsDefined ? scoped.project.toggleSlots : scoped.global.toggleSlots;
   return {
@@ -137,8 +144,8 @@ export async function readEffectiveSkillfulSettings(cwd: string): Promise<Effect
     hiddenSkillSet: new Set(hiddenSkills),
     toggleSlots,
     toggleSlotsDefined: scoped.global.toggleSlotsDefined || scoped.project.toggleSlotsDefined,
-    toggleModifier:
-      scoped.project.toggleModifier !== DEFAULT_TOGGLE_MODIFIER ? scoped.project.toggleModifier : scoped.global.toggleModifier,
+    toggleModifier: scoped.project.toggleModifierDefined ? scoped.project.toggleModifier : scoped.global.toggleModifier,
+    toggleModifierDefined: scoped.global.toggleModifierDefined || scoped.project.toggleModifierDefined,
   };
 }
 
@@ -146,8 +153,9 @@ export async function writeHiddenSkills(
   scope: SkillfulScope,
   cwd: string,
   hiddenSkills: Iterable<string>,
+  projectTrusted = false,
 ): Promise<SkillfulSettings> {
-  return updateSkillfulSettings(scope, cwd, (current) => {
+  return updateSkillfulSettings(scope, cwd, projectTrusted, (current) => {
     current.hiddenSkills = normalizeSkillNames(hiddenSkills);
   });
 }
@@ -157,8 +165,9 @@ export async function writeSkillVisibility(
   cwd: string,
   hiddenSkills: Iterable<string>,
   visibleSkills: Iterable<string> = [],
+  projectTrusted = false,
 ): Promise<SkillfulSettings> {
-  return updateSkillfulSettings(scope, cwd, (current) => {
+  return updateSkillfulSettings(scope, cwd, projectTrusted, (current) => {
     const visible = normalizeSkillNames(visibleSkills);
     current.hiddenSkills = normalizeSkillNames(hiddenSkills);
     if (visible.length === 0) delete current.visibleSkills;
@@ -170,8 +179,9 @@ export async function writeToggleSlots(
   scope: SkillfulScope,
   cwd: string,
   toggleSlots: Partial<Record<SkillToggleSlot, string>>,
+  projectTrusted = false,
 ): Promise<SkillfulSettings> {
-  return updateSkillfulSettings(scope, cwd, (current) => {
+  return updateSkillfulSettings(scope, cwd, projectTrusted, (current) => {
     current.toggleSlots = normalizeToggleSlots(toggleSlots);
   });
 }
@@ -180,8 +190,9 @@ export async function writeProjectSkillfulOverride(
   cwd: string,
   hiddenSkills: Iterable<string> | undefined,
   toggleSlots: Partial<Record<SkillToggleSlot, string>> | undefined,
+  projectTrusted: boolean,
 ): Promise<SkillfulSettings> {
-  return updateSkillfulSettings("project", cwd, (current) => {
+  return updateSkillfulSettings("project", cwd, projectTrusted, (current) => {
     delete current.visibleSkills;
     if (hiddenSkills === undefined) delete current.hiddenSkills;
     else current.hiddenSkills = normalizeSkillNames(hiddenSkills);
@@ -193,8 +204,13 @@ export async function writeProjectSkillfulOverride(
 async function updateSkillfulSettings(
   scope: SkillfulScope,
   cwd: string,
+  projectTrusted: boolean,
   updater: (current: Record<string, unknown>) => void,
 ): Promise<SkillfulSettings> {
+  if (scope === "project" && !projectTrusted) {
+    throw new Error("Project skillful settings require a trusted project.");
+  }
+
   const path = settingsPath(scope, cwd);
   const document = await readSettingsDocument(path);
 
@@ -224,10 +240,15 @@ export async function updateHiddenSkills(
   scope: SkillfulScope,
   cwd: string,
   updater: (current: string[]) => string[],
+  projectTrusted = false,
 ): Promise<SkillfulSettings> {
+  if (scope === "project" && !projectTrusted) {
+    throw new Error("Project skillful settings require a trusted project.");
+  }
+
   const path = settingsPath(scope, cwd);
   const current = await readSkillfulSettings(path);
-  return writeHiddenSkills(scope, cwd, updater(current.hiddenSkills));
+  return writeHiddenSkills(scope, cwd, updater(current.hiddenSkills), projectTrusted);
 }
 
 function settingsFromRecord(value: unknown): SkillfulSettings {
@@ -240,6 +261,7 @@ function settingsFromRecord(value: unknown): SkillfulSettings {
     toggleSlots: normalizeToggleSlots(skillful.toggleSlots),
     toggleSlotsDefined: Object.hasOwn(skillful, "toggleSlots"),
     toggleModifier: normalizeToggleModifier(skillful.toggleModifier),
+    toggleModifierDefined: Object.hasOwn(skillful, "toggleModifier"),
   };
 }
 

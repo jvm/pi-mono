@@ -1,19 +1,24 @@
-import { CustomEditor, type ExtensionAPI, type KeybindingsManager, type Skill, type Theme } from "@earendil-works/pi-coding-agent";
-import type { AutocompleteProvider, Component, EditorComponent, EditorTheme, TUI } from "@earendil-works/pi-tui";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import {
+  CustomEditor,
+  type AppKeybinding,
+  type ExtensionAPI,
+  type KeybindingsManager,
+  type Skill,
+  type Theme,
+} from "@earendil-works/pi-coding-agent";
+import type { AutocompleteProvider, EditorComponent, EditorTheme, Focusable, KeyId, TUI } from "@earendil-works/pi-tui";
+import { isFocusable, isKeyRelease, isKeyRepeat, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import {
   DEFAULT_TOGGLE_MODIFIER,
   normalizeSkillName,
   readEffectiveSkillfulSettings,
   SKILL_TOGGLE_SLOTS,
-  SUPPORTED_TOGGLE_MODIFIERS,
   type SkillToggleModifier,
   type SkillToggleSlot,
 } from "../config.js";
 import { replaceSkillsSection } from "../skill-prompt.js";
 import { isTopLevelSkill, listLoadedSkills } from "../skills.js";
 
-const WIDGET_KEY = "pi-skillful-session-toggles";
 const STORE_KEY = Symbol.for("pi-skillful.sessionSkillTogglesStore");
 const BORDER_PREFIX = "─── ";
 const BORDER_SUFFIX = " ";
@@ -33,10 +38,10 @@ interface SessionToggleState {
   slots: ToggleSlotState[];
   activeBySkill: Map<string, boolean>;
   installedEditor: boolean;
-  installedWidget: boolean;
   previousEditorFactory: SkillfulEditorFactory | undefined;
   activeTui: TUI | undefined;
   theme: Theme | undefined;
+  notify: (message: string, type?: "info" | "warning" | "error") => void;
 }
 
 interface SessionToggleStore {
@@ -50,20 +55,8 @@ const store = (((globalThis as Record<PropertyKey, unknown>)[STORE_KEY] as Sessi
 let state: SessionToggleState = createEmptyState();
 
 export default function sessionSkillToggles(pi: ExtensionAPI) {
-  for (const modifier of SUPPORTED_TOGGLE_MODIFIERS) {
-    for (const slot of SKILL_TOGGLE_SLOTS) {
-      pi.registerShortcut(`${modifier}+${slot}`, {
-        description: `Toggle pi-skillful slot ${slot}`,
-        handler: (ctx) => {
-          if (state.modifier !== modifier) return;
-          toggleSlot(slot, ctx.ui.notify.bind(ctx.ui));
-        },
-      });
-    }
-  }
-
   pi.on("session_start", async (event, ctx) => {
-    const settings = await readEffectiveSkillfulSettings(ctx.cwd);
+    const settings = await readEffectiveSkillfulSettings(ctx.cwd, ctx.isProjectTrusted());
     const slots = configuredToggleSlots(pi, settings.toggleSlots);
 
     const preservedActiveBySkill =
@@ -84,13 +77,13 @@ export default function sessionSkillToggles(pi: ExtensionAPI) {
         ]),
       ),
       installedEditor: false,
-      installedWidget: false,
       previousEditorFactory: undefined,
       activeTui: undefined,
       theme: ctx.ui.theme,
+      notify: ctx.ui.notify.bind(ctx.ui),
     };
 
-    if (ctx.hasUI && slots.length > 0) installEditor(ctx.ui);
+    if (ctx.mode === "tui" && slots.length > 0) installEditor(ctx.ui);
     refreshUi();
   });
 
@@ -108,7 +101,6 @@ export default function sessionSkillToggles(pi: ExtensionAPI) {
 
   pi.on("session_shutdown", (event, ctx) => {
     if (state.installedEditor) ctx.ui.setEditorComponent(state.previousEditorFactory);
-    if (state.installedWidget) ctx.ui.setWidget(WIDGET_KEY, undefined);
     store.preservedNewSessionActiveBySkill =
       event.reason === "new" ? { cwd: state.cwd, activeBySkill: new Map(state.activeBySkill) } : undefined;
     state = createEmptyState();
@@ -123,10 +115,10 @@ function createEmptyState(): SessionToggleState {
     slots: [],
     activeBySkill: new Map<string, boolean>(),
     installedEditor: false,
-    installedWidget: false,
     previousEditorFactory: undefined,
     activeTui: undefined,
     theme: undefined,
+    notify: () => undefined,
   };
 }
 
@@ -134,8 +126,13 @@ export function hasActiveSessionSkillToggles(): boolean {
   return state.slots.length > 0;
 }
 
-export async function refreshSessionSkillToggles(pi: ExtensionAPI, cwd: string, ui: SkillfulUi): Promise<void> {
-  const settings = await readEffectiveSkillfulSettings(cwd);
+export async function refreshSessionSkillToggles(
+  pi: ExtensionAPI,
+  cwd: string,
+  projectTrusted: boolean,
+  ui: SkillfulUi,
+): Promise<void> {
+  const settings = await readEffectiveSkillfulSettings(cwd, projectTrusted);
   const slots = configuredToggleSlots(pi, settings.toggleSlots);
 
   const previousActiveBySkill = state.activeBySkill;
@@ -146,13 +143,11 @@ export async function refreshSessionSkillToggles(pi: ExtensionAPI, cwd: string, 
     slots.map(({ skillName }) => [skillName, previousActiveBySkill.get(skillName) ?? !settings.hiddenSkillSet.has(skillName)]),
   );
 
-  if (slots.length > 0 && !state.installedEditor && !state.installedWidget) {
+  if (slots.length > 0 && !state.installedEditor) {
     installEditor(ui);
-  } else if (slots.length === 0) {
-    if (state.installedEditor) ui.setEditorComponent(state.previousEditorFactory);
-    if (state.installedWidget) ui.setWidget(WIDGET_KEY, undefined);
+  } else if (slots.length === 0 && state.installedEditor) {
+    ui.setEditorComponent(state.previousEditorFactory);
     state.installedEditor = false;
-    state.installedWidget = false;
     state.previousEditorFactory = undefined;
   }
 
@@ -179,17 +174,16 @@ function isSkillActive(skillName: string): boolean {
   return state.activeBySkill.get(skillName) ?? !state.hiddenSkills.has(skillName);
 }
 
-function toggleSlot(slot: SkillToggleSlot, notify: (message: string, type?: "info" | "warning" | "error") => void): void {
-  const entry = state.slots.find((candidate) => candidate.slot === slot);
-  if (!entry) {
-    notify(`No pi-skillful skill assigned to slot ${slot}.`, "info");
-    return;
-  }
+function handleToggleShortcut(data: string): boolean {
+  const entry = state.slots.find(({ slot }) => matchesKey(data, `${state.modifier}+${slot}` as KeyId));
+  if (!entry) return false;
+  if (isKeyRelease(data) || isKeyRepeat(data)) return true;
 
   const next = !isSkillActive(entry.skillName);
   state.activeBySkill.set(entry.skillName, next);
-  notify(`${entry.skillName} ${next ? "active" : "inactive"} for this session.`, "info");
+  state.notify(`${entry.skillName} ${next ? "active" : "inactive"} for this session.`, "info");
   refreshUi();
+  return true;
 }
 
 type SkillfulEditorFactory = (tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => EditorComponent;
@@ -197,31 +191,17 @@ type SkillfulEditorFactory = (tui: TUI, theme: EditorTheme, keybindings: Keybind
 type SkillfulUi = {
   getEditorComponent: () => SkillfulEditorFactory | undefined;
   setEditorComponent: (factory: SkillfulEditorFactory | undefined) => void;
-  setWidget: (
-    key: string,
-    content: ((tui: TUI, theme: Theme) => Component & { dispose?(): void }) | undefined,
-    options?: { placement?: "aboveEditor" | "belowEditor" },
-  ) => void;
 };
 
 function installEditor(ui: SkillfulUi): void {
   state.previousEditorFactory = ui.getEditorComponent();
-
-  try {
-    const previous = state.previousEditorFactory;
-    ui.setEditorComponent((tui, theme, keybindings) => {
-      state.activeTui = tui;
-      if (previous) return new SkillToggleEditorWrapper(previous(tui, theme, keybindings));
-      return new SkillToggleEditor(tui, theme, keybindings);
-    });
-    state.installedEditor = true;
-  } catch {
-    ui.setWidget(WIDGET_KEY, (tui) => {
-      state.activeTui = tui;
-      return new SkillToggleWidget();
-    });
-    state.installedWidget = true;
-  }
+  const previous = state.previousEditorFactory;
+  ui.setEditorComponent((tui, theme, keybindings) => {
+    state.activeTui = tui;
+    if (previous) return new SkillToggleEditorWrapper(previous(tui, theme, keybindings));
+    return new SkillToggleEditor(tui, theme, keybindings);
+  });
+  state.installedEditor = true;
 }
 
 function refreshUi(): void {
@@ -229,6 +209,11 @@ function refreshUi(): void {
 }
 
 class SkillToggleEditor extends CustomEditor {
+  handleInput(data: string): void {
+    if (handleToggleShortcut(data)) return;
+    super.handleInput(data);
+  }
+
   render(width: number): string[] {
     const lines = super.render(width);
     if (lines.length === 0) return lines;
@@ -237,11 +222,78 @@ class SkillToggleEditor extends CustomEditor {
   }
 }
 
-class SkillToggleEditorWrapper implements EditorComponent {
-  borderColor?: (str: string) => string;
+interface CustomEditorHooks {
+  actionHandlers: Map<AppKeybinding, () => void>;
+  onEscape?: () => void;
+  onCtrlD?: () => void;
+  onPasteImage?: () => void;
+  onExtensionShortcut?: (data: string) => boolean;
+}
 
-  constructor(private readonly inner: EditorComponent) {
-    this.borderColor = inner.borderColor?.bind(inner);
+function hasCustomEditorHooks(editor: EditorComponent): editor is EditorComponent & CustomEditorHooks {
+  return "actionHandlers" in editor && editor.actionHandlers instanceof Map;
+}
+
+class SkillToggleEditorWrapper implements EditorComponent, Focusable {
+  private _focused = false;
+
+  constructor(private readonly inner: EditorComponent) {}
+
+  get borderColor(): ((str: string) => string) | undefined {
+    return this.inner.borderColor?.bind(this.inner);
+  }
+
+  set borderColor(color: ((str: string) => string) | undefined) {
+    this.inner.borderColor = color;
+  }
+
+  get focused(): boolean {
+    return this._focused;
+  }
+
+  set focused(value: boolean) {
+    this._focused = value;
+    if (isFocusable(this.inner)) this.inner.focused = value;
+  }
+
+  get wantsKeyRelease(): boolean | undefined {
+    return this.inner.wantsKeyRelease;
+  }
+
+  get actionHandlers(): Map<AppKeybinding, () => void> | undefined {
+    return hasCustomEditorHooks(this.inner) ? this.inner.actionHandlers : undefined;
+  }
+
+  get onEscape(): (() => void) | undefined {
+    return hasCustomEditorHooks(this.inner) ? this.inner.onEscape : undefined;
+  }
+
+  set onEscape(handler: (() => void) | undefined) {
+    if (hasCustomEditorHooks(this.inner)) this.inner.onEscape = handler;
+  }
+
+  get onCtrlD(): (() => void) | undefined {
+    return hasCustomEditorHooks(this.inner) ? this.inner.onCtrlD : undefined;
+  }
+
+  set onCtrlD(handler: (() => void) | undefined) {
+    if (hasCustomEditorHooks(this.inner)) this.inner.onCtrlD = handler;
+  }
+
+  get onPasteImage(): (() => void) | undefined {
+    return hasCustomEditorHooks(this.inner) ? this.inner.onPasteImage : undefined;
+  }
+
+  set onPasteImage(handler: (() => void) | undefined) {
+    if (hasCustomEditorHooks(this.inner)) this.inner.onPasteImage = handler;
+  }
+
+  get onExtensionShortcut(): ((data: string) => boolean) | undefined {
+    return hasCustomEditorHooks(this.inner) ? this.inner.onExtensionShortcut : undefined;
+  }
+
+  set onExtensionShortcut(handler: ((data: string) => boolean) | undefined) {
+    if (hasCustomEditorHooks(this.inner)) this.inner.onExtensionShortcut = handler;
   }
 
   get onSubmit(): ((text: string) => void) | undefined {
@@ -280,6 +332,7 @@ class SkillToggleEditorWrapper implements EditorComponent {
   }
 
   handleInput(data: string): void {
+    if (handleToggleShortcut(data)) return;
     this.inner.handleInput(data);
   }
 
@@ -310,14 +363,6 @@ class SkillToggleEditorWrapper implements EditorComponent {
   dispose(): void {
     (this.inner as EditorComponent & { dispose?(): void }).dispose?.();
   }
-}
-
-class SkillToggleWidget implements Component {
-  render(width: number): string[] {
-    return [renderToggleBorder(width, (text) => text)];
-  }
-
-  invalidate(): void {}
 }
 
 function renderToggleBorder(width: number, borderColor: (text: string) => string): string {
