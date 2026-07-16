@@ -6,6 +6,14 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Avoided empty stdin writes for probe commands, which could race with fast-exiting dcg binaries and falsely report that dcg was unavailable.
+
+### Security
+
+- Documented that Pi's RPC control-channel `bash` command does not emit an extension event and therefore cannot be guarded by `pi-dcg`.
+
 ## [0.1.0] - 2026-07-16
 
 ### Added

@@ -37,6 +37,7 @@ This setting cannot detect dcg's internal intentional fail-open paths, which may
 The extension cannot intercept arbitrary process creation. Important bypasses include:
 
 - custom tools with other names;
+- Pi's RPC control-channel `{"type":"bash"}` command, which does not emit a `user_bash` event;
 - `pi.exec()` and child processes started inside another extension;
 - non-shell file, database, cloud, or API operations;
 - opaque generated scripts and dynamic payloads dcg cannot inspect;

@@ -205,7 +205,9 @@ export default function piDcg(
       try {
         const probe = await client.probe(ctx.cwd);
         markHealthy(ctx, probe.version);
-        const coverage = config.guardUserBash ? "agent bash and user !/!! commands" : "agent bash commands";
+        const coverage = config.guardUserBash
+          ? "agent bash and user !/!! commands (RPC bash excluded)"
+          : "agent bash commands";
         notify(
           ctx,
           `pi-dcg is active\nBinary: ${config.binary}\nVersion: ${probe.version}\nCoverage: ${coverage}\nBridge errors: ${config.onError}`,

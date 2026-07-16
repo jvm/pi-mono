@@ -38,10 +38,12 @@ pi -e /path/to/pi-mono/packages/pi-dcg
 
 ## What it guards
 
-By default, the extension checks both Pi shell entry points:
+By default, the extension checks both Pi shell events available to extensions:
 
 - agent calls to Pi's built-in `bash` tool;
 - user `!command` and `!!command` invocations.
+
+Pi's separate RPC control-channel `{"type":"bash"}` command does not emit either event in current Pi releases and cannot be intercepted by `pi-dcg`; see [Limitations](#limitations).
 
 For every non-empty command, the extension starts dcg directly without a shell, sends a Claude-compatible `PreToolUse` payload on stdin, and waits for dcg's decision before Pi executes the command.
 
@@ -118,6 +120,7 @@ On startup, this package also sends the monorepo-standard best-effort install/up
 This extension intercepts Pi events, not operating-system process execution. It cannot see:
 
 - custom tools that execute commands under another tool name;
+- Pi's RPC control-channel `{"type":"bash"}` command, which does not emit a `user_bash` event;
 - `pi.exec()` or child processes started internally by another extension;
 - destructive behavior performed directly through non-shell tools;
 - the contents of an opaque script invoked only as `./script.sh` unless dcg can infer or inspect the payload;
