@@ -1,9 +1,9 @@
-import { mkdir, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, rm } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { platform, tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadPrunedState, saveState, type ScoutRepo } from "./state.js";
+import { mutateState, type ScoutRepo } from "./state.js";
 
 export interface RegisterRepoOptions {
   source: string;
@@ -21,7 +21,8 @@ export async function registerRepo(pi: ExtensionAPI, options: RegisterRepoOption
   const name = sanitizeName(options.name?.trim() || inferName(source) || `repo-${id}`);
   const root = getScoutCloneRoot();
   const destination = join(root, `${name}-${id}`);
-  await mkdir(root, { recursive: true });
+  await ensurePrivateCloneRoot(root);
+  await mkdir(destination, { mode: 0o700 });
 
   const args = ["clone"];
   if (options.branch?.trim()) args.push("--branch", options.branch.trim());
@@ -31,9 +32,11 @@ export async function registerRepo(pi: ExtensionAPI, options: RegisterRepoOption
 
   const result = await pi.exec("git", args, { signal: options.signal, timeout: 120_000 });
   if (result.code !== 0) {
+    await rm(destination, { recursive: true, force: true });
     const stderr = result.stderr?.trim() || result.stdout?.trim() || "git clone failed";
     throw new Error(stderr);
   }
+  if (platform() !== "win32") await chmod(destination, 0o700);
 
   const now = new Date().toISOString();
   const repo: ScoutRepo = {
@@ -46,9 +49,9 @@ export async function registerRepo(pi: ExtensionAPI, options: RegisterRepoOption
     lastSeenAt: now,
   };
 
-  const state = await loadPrunedState();
-  state.repos.push(repo);
-  await saveState(state);
+  await mutateState((state) => {
+    state.repos.push(repo);
+  });
   return repo;
 }
 
@@ -56,12 +59,11 @@ export async function removeRepo(idOrName: string, options: { deleteClone?: bool
   const needle = idOrName.trim();
   if (!needle) return undefined;
 
-  const state = await loadPrunedState();
-  const index = state.repos.findIndex((repo) => repo.id === needle || repo.name === needle);
-  if (index === -1) return undefined;
-
-  const [removed] = state.repos.splice(index, 1);
-  await saveState(state);
+  const removed = await mutateState((state) => {
+    const index = state.repos.findIndex((repo) => repo.id === needle || repo.name === needle);
+    if (index === -1) return undefined;
+    return state.repos.splice(index, 1)[0];
+  });
 
   if (options.deleteClone && removed) {
     await rm(removed.path, { recursive: true, force: true });
@@ -75,10 +77,29 @@ export function formatRepo(repo: ScoutRepo): string {
   return `${repo.name}${branch}\n  id: ${repo.id}\n  source: ${repo.source}\n  path: ${repo.path}`;
 }
 
-function getScoutCloneRoot(): string {
-  if (process.env.PI_SCOUT_TMPDIR) return join(process.env.PI_SCOUT_TMPDIR, "pi-scout");
-  if (platform() !== "win32") return "/tmp/pi-scout";
-  return join(tmpdir(), "pi-scout");
+export function getScoutCloneRoot(): string {
+  const parent = process.env.PI_SCOUT_TMPDIR || tmpdir();
+  if (platform() === "win32") return join(parent, "pi-scout");
+  return join(parent, `pi-scout-${getCurrentUid()}`);
+}
+
+export async function ensurePrivateCloneRoot(root: string): Promise<void> {
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  if (platform() === "win32") return;
+
+  const info = await lstat(root);
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new Error(`Unsafe Pi Scout clone root: ${root} is not a real directory.`);
+  }
+  if (info.uid !== getCurrentUid()) {
+    throw new Error(`Unsafe Pi Scout clone root: ${root} is not owned by current user.`);
+  }
+  await chmod(root, 0o700);
+}
+
+function getCurrentUid(): number {
+  if (!process.getuid) throw new Error("Pi Scout cannot determine current user ID.");
+  return process.getuid();
 }
 
 function inferName(source: string): string {

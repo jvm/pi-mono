@@ -13,7 +13,7 @@ A source-distributed [Pi](https://pi.dev) package for registering local referenc
 - Compact per-turn system prompt guidance with registered repo names and local clone paths.
 - Automatic pruning: if the OS cleans a temporary clone, Pi Scout removes that stale entry before adding prompt context.
 
-Registered repositories are cloned under `/tmp/pi-scout/<name>-<id>` on Unix-like systems, or the OS temp directory on Windows. Set `PI_SCOUT_TMPDIR` to override the parent temp directory. Pi Scout uses shallow clones with depth `1` by default because it is for code exploration, not history exploration. Pi Scout keeps records in Pi's agent directory and reuses them across sessions while the cloned directories still exist.
+Registered repositories are cloned in a private, per-user directory under the OS temp directory (`<temp>/pi-scout-<uid>` on Unix-like systems). Root and clone permissions are restricted to the current user on Unix. Set `PI_SCOUT_TMPDIR` to override the parent temp directory. Pi Scout uses shallow clones with depth `1` by default because it is for code exploration, not history exploration. Pi Scout keeps records in Pi's agent directory and reuses them across sessions while the cloned directories still exist.
 
 ## Installation
 
@@ -87,6 +87,7 @@ After a repository is registered, the agent sees its local path in the system pr
 - Pi Scout uses local file access for exploration. It does not provide web search or remote content-fetching tools.
 - Registering a Git URL still uses `git clone`, so Git may contact the configured remote.
 - Registered repositories are intended as read-only references unless the user explicitly asks otherwise.
+- Repository state changes are serialized and persisted with atomic file replacement.
 - The system prompt includes only registered repo names and local paths, not origin URLs or branch metadata.
 
 ## Development
@@ -94,5 +95,6 @@ After a repository is registered, the agent sees its local path in the system pr
 ```bash
 npm install
 npm run check
+npm test
 npm run pack:dry-run
 ```

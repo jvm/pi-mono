@@ -6,6 +6,11 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Store temporary clones in a private per-user directory and reject unsafe clone roots.
+- Serialize repository state mutations and persist state through atomic file replacement.
+
 ## [0.1.3] - 2026-07-01
 
 ### Changed
