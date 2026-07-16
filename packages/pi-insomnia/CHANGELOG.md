@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep macOS sleep inhibition active across automatic retries, compaction retries, and queued follow-up work until Pi emits `agent_settled`.
+
 ## [0.1.2] - 2026-07-01
 
 ### Changed

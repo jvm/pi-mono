@@ -8,7 +8,7 @@ A source-distributed [Pi](https://pi.dev) package that prevents macOS idle sleep
 ## Features
 
 - Automatically starts a macOS sleep assertion when a Pi agent run starts.
-- Automatically releases the assertion when the agent run ends.
+- Automatically releases the assertion when Pi settles after all retries, compaction, and queued follow-up work.
 - Cleans up on Pi session shutdown, reloads, and quits.
 - Uses the macOS built-in `/usr/bin/caffeinate` command; no third-party runtime dependency is required.
 - Shows a small `☕ sleep inhibited` footer status while active in UI modes.
@@ -24,7 +24,7 @@ On macOS, the extension launches:
 /usr/bin/caffeinate -i -w <pi-pid>
 ```
 
-`-i` prevents idle system sleep while the process is running. `-w <pi-pid>` also ties the assertion to the Pi process so the helper exits if Pi exits unexpectedly. The extension still explicitly terminates the helper when the agent becomes idle.
+`-i` prevents idle system sleep while the process is running. `-w <pi-pid>` also ties the assertion to the Pi process so the helper exits if Pi exits unexpectedly. The extension still explicitly terminates the helper when Pi becomes fully idle after any automatic retries, compaction retries, or queued follow-up work.
 
 ## Installation
 

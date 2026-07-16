@@ -34,16 +34,17 @@ function stopSpinner(ctx: ExtensionContext): void {
   setStatus(ctx, undefined);
 }
 
-export default function piInsomnia(pi: ExtensionAPI) {
+export default function piInsomnia(
+  pi: ExtensionAPI,
+  inhibitor = new MacSleepInhibitor(),
+) {
   reportInstallTelemetry();
-
-  const inhibitor = new MacSleepInhibitor();
 
   pi.on("agent_start", async (_event, ctx) => {
     if (inhibitor.acquire()) startSpinner(ctx);
   });
 
-  pi.on("agent_end", async (_event, ctx) => {
+  pi.on("agent_settled", async (_event, ctx) => {
     inhibitor.release();
     if (!inhibitor.isInhibiting) stopSpinner(ctx);
   });

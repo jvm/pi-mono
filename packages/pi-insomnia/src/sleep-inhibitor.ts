@@ -13,7 +13,7 @@ export class MacSleepInhibitor {
   private readonly pid: number;
   private readonly caffeinatePath: string;
   private child: ChildProcess | undefined;
-  private activeRequests = 0;
+  private active = false;
 
   constructor(options: MacSleepInhibitorOptions = {}) {
     this.platform = options.platform ?? process.platform;
@@ -26,7 +26,7 @@ export class MacSleepInhibitor {
   }
 
   get isActive(): boolean {
-    return this.activeRequests > 0;
+    return this.active;
   }
 
   get isInhibiting(): boolean {
@@ -36,7 +36,7 @@ export class MacSleepInhibitor {
   acquire(): boolean {
     if (!this.isSupported) return false;
 
-    this.activeRequests += 1;
+    this.active = true;
     this.start();
     return this.isInhibiting;
   }
@@ -44,12 +44,12 @@ export class MacSleepInhibitor {
   release(): void {
     if (!this.isSupported) return;
 
-    if (this.activeRequests > 0) this.activeRequests -= 1;
-    if (this.activeRequests === 0) this.stop();
+    this.active = false;
+    this.stop();
   }
 
   forceStop(): void {
-    this.activeRequests = 0;
+    this.active = false;
     this.stop();
   }
 
