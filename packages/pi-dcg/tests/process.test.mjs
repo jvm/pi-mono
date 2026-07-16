@@ -29,6 +29,17 @@ test("executes directly with stdin, cwd, and environment", async () => {
   assert.deepEqual(JSON.parse(result.stdout), { input: "payload", cwd, marker: "present" });
 });
 
+test("does not open a stdin pipe when input is omitted", { skip: process.platform === "win32" }, async () => {
+  const script = "const { fstatSync } = require('node:fs'); process.stdout.write(String(fstatSync(0).isFIFO()));";
+  const result = await executeProcess({
+    ...baseRequest,
+    args: ["-e", script],
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stdout, "false");
+});
+
 test("enforces the process timeout", async () => {
   await assert.rejects(
     executeProcess({

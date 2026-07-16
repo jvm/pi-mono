@@ -48,7 +48,7 @@ export const executeProcess: ProcessExecutor = (request) => new Promise((resolve
   const child = spawn(request.command, request.args, {
     cwd: request.cwd,
     env: request.env,
-    stdio: ["pipe", "pipe", "pipe"],
+    stdio: [request.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     windowsHide: true,
   });
 
@@ -90,13 +90,10 @@ export const executeProcess: ProcessExecutor = (request) => new Promise((resolve
   }, request.timeoutMs);
 
   request.signal?.addEventListener("abort", onAbort, { once: true });
-  child.stdout.on("data", (chunk: Buffer) => append("stdout", chunk));
-  child.stderr.on("data", (chunk: Buffer) => append("stderr", chunk));
+  child.stdout?.on("data", (chunk: Buffer) => append("stdout", chunk));
+  child.stderr?.on("data", (chunk: Buffer) => append("stderr", chunk));
   child.once("error", (error) => {
     rejectOnce(new DcgProcessError(`could not start dcg: ${error.message}`, "spawn_failed"));
-  });
-  child.stdin.once("error", (error) => {
-    rejectOnce(new DcgProcessError(`could not send the command to dcg: ${error.message}`, "spawn_failed"), true);
   });
   child.once("close", (exitCode) => {
     if (settled) return;
@@ -105,7 +102,16 @@ export const executeProcess: ProcessExecutor = (request) => new Promise((resolve
     resolve({ stdout, stderr, exitCode });
   });
 
-  child.stdin.end(request.input ?? "", "utf8");
+  if (request.input !== undefined) {
+    if (!child.stdin) {
+      rejectOnce(new DcgProcessError("could not open dcg stdin", "spawn_failed"), true);
+      return;
+    }
+    child.stdin.once("error", (error) => {
+      rejectOnce(new DcgProcessError(`could not send the command to dcg: ${error.message}`, "spawn_failed"), true);
+    });
+    child.stdin.end(request.input, "utf8");
+  }
 });
 
 export interface DcgProbeResult {
