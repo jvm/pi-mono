@@ -1,6 +1,7 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { getAgentDir, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 
 export interface ScoutRepo {
   id: string;
@@ -36,7 +37,25 @@ export async function loadState(): Promise<ScoutState> {
 
 export async function saveState(state: ScoutState): Promise<void> {
   await mkdir(STATE_DIR, { recursive: true });
-  await writeFile(STATE_PATH, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  const temporaryPath = join(dirname(STATE_PATH), `.${basename(STATE_PATH)}.${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporaryPath, `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    await rename(temporaryPath, STATE_PATH);
+  } catch (error) {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function mutateState<T>(
+  mutation: (state: ScoutState) => Promise<T> | T,
+): Promise<T> {
+  return withFileMutationQueue(STATE_PATH, async () => {
+    const state = (await pruneMissingRepos(await loadState())).state;
+    const result = await mutation(state);
+    await saveState(state);
+    return result;
+  });
 }
 
 export async function pruneMissingRepos(state: ScoutState): Promise<{ state: ScoutState; removed: ScoutRepo[] }> {
@@ -52,13 +71,15 @@ export async function pruneMissingRepos(state: ScoutState): Promise<{ state: Sco
     }
   }
 
-  const next = { repos };
-  if (removed.length > 0) await saveState(next);
-  return { state: next, removed };
+  return { state: { repos }, removed };
 }
 
 export async function loadPrunedState(): Promise<ScoutState> {
-  return (await pruneMissingRepos(await loadState())).state;
+  return withFileMutationQueue(STATE_PATH, async () => {
+    const { state, removed } = await pruneMissingRepos(await loadState());
+    if (removed.length > 0) await saveState(state);
+    return state;
+  });
 }
 
 async function pathExists(path: string): Promise<boolean> {
