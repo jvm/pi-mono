@@ -1,0 +1,9 @@
+THIRD-PARTY NOTICES
+
+pi-dcg interoperates with Destructive Command Guard (dcg), maintained by Jeffrey Emanuel and contributors:
+https://github.com/Dicklesworthstone/destructive_command_guard
+
+Destructive Command Guard is NOT included, copied, linked, or redistributed in the pi-dcg npm package. It is a separately installed executable governed by its own nonstandard license, including an OpenAI/Anthropic rider:
+https://github.com/Dicklesworthstone/destructive_command_guard/blob/main/LICENSE
+
+The MIT license distributed with pi-dcg applies only to pi-dcg's independently authored bridge code and documentation. Users are responsible for reviewing and complying with dcg's separate license before installing or using dcg.

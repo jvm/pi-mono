@@ -1,0 +1,67 @@
+{
+  "name": "pi-dcg",
+  "version": "0.1.0",
+  "description": "Guard Pi shell commands with Destructive Command Guard.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Jose Mocito",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jvm/pi-mono.git",
+    "directory": "packages/pi-dcg"
+  },
+  "bugs": {
+    "url": "https://github.com/jvm/pi-mono/issues"
+  },
+  "homepage": "https://github.com/jvm/pi-mono/tree/main/packages/pi-dcg#readme",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "dcg",
+    "destructive-command-guard",
+    "command-safety",
+    "guardrails"
+  ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "files": [
+    "index.ts",
+    "extensions",
+    "src",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "THIRD-PARTY-NOTICES"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.mjs",
+    "pack:dry-run": "npm pack --dry-run"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.0",
+    "@types/node": "^26.1.0",
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  }
+}
