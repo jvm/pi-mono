@@ -1,14 +1,6 @@
-import {
-  DynamicBorder,
-  getSettingsListTheme,
-  InteractiveMode,
-  type ExtensionAPI,
-  type Skill,
-  type Theme,
-} from "@earendil-works/pi-coding-agent";
+import { DynamicBorder, getSettingsListTheme, type ExtensionAPI, type Skill, type Theme } from "@earendil-works/pi-coding-agent";
 import { type Component, Key, matchesKey, type SettingItem, SettingsList, truncateToWidth, type TUI } from "@earendil-works/pi-tui";
 import {
-  normalizeSkillName,
   normalizeSkillNames,
   readEffectiveHiddenSkills,
   readScopedSkillfulSettings,
@@ -23,36 +15,6 @@ import { replaceSkillsSection } from "../skill-prompt.js";
 import { isTopLevelSkill, listLoadedSkills, type LoadedSkillInfo } from "../skills.js";
 import { hasActiveSessionSkillToggles, refreshSessionSkillToggles } from "./session-skill-toggles.js";
 const SCOPES: SkillfulScope[] = ["global", "project"];
-const STORE_KEY = Symbol.for("pi-skillful.skillVisibilityStore");
-const STARTUP_PATCH_KEY = Symbol.for("pi-skillful.startupPatchV2");
-
-interface SkillVisibilityStore {
-  hiddenSkillsByCwd: Map<string, Set<string>>;
-  lastHiddenSkills: Set<string>;
-  theme: Theme | null;
-}
-
-interface ExpandableTextLike {
-  getCollapsedText: () => string;
-  setText: (text: string) => void;
-}
-
-interface BoxLike {
-  children: unknown[];
-}
-
-interface InteractiveModeLike {
-  loadedResourcesContainer?: BoxLike;
-  showLoadedResources?: (options?: unknown) => void;
-  session?: { resourceLoader?: { getSkills: () => { skills: Skill[]; diagnostics: unknown[] } } };
-  sessionManager?: { getCwd?: () => string };
-}
-
-const store = (((globalThis as Record<PropertyKey, unknown>)[STORE_KEY] as SkillVisibilityStore | undefined) ??= {
-  hiddenSkillsByCwd: new Map<string, Set<string>>(),
-  lastHiddenSkills: new Set<string>(),
-  theme: null,
-}) as SkillVisibilityStore;
 
 type SkillListItem = LoadedSkillInfo;
 type HiddenSkillsByScope = Record<SkillfulScope, Set<string>>;
@@ -61,6 +23,7 @@ type DefinedByScope = Record<SkillfulScope, boolean>;
 
 interface SkillfulVisibilityMenuOptions {
   cwd: string;
+  projectTrusted: boolean;
   skills: SkillListItem[];
   hiddenByScope: HiddenSkillsByScope;
   hiddenSkillsDefinedByScope: DefinedByScope;
@@ -81,17 +44,14 @@ interface SettingsListSelectionView {
 }
 
 export default function skillVisibility(pi: ExtensionAPI) {
-  installStartupSkillListPatch();
-
   pi.on("session_start", async (_event, ctx) => {
-    store.theme = ctx.ui.theme;
-    await refreshHiddenSkillCache(ctx.cwd);
+    await readEffectiveHiddenSkills(ctx.cwd, ctx.isProjectTrusted());
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
     if (hasActiveSessionSkillToggles()) return;
 
-    const hidden = await refreshHiddenSkillCache(ctx.cwd);
+    const hidden = await readEffectiveHiddenSkills(ctx.cwd, ctx.isProjectTrusted());
     if (hidden.size === 0 || !event.systemPromptOptions.skills?.length) return;
 
     const filteredSkills: Skill[] = event.systemPromptOptions.skills.map((skill) =>
@@ -105,7 +65,7 @@ export default function skillVisibility(pi: ExtensionAPI) {
   pi.registerCommand("skillful", {
     description: "Open the pi-skillful skill visibility menu.",
     handler: async (_args, ctx) => {
-      if (!ctx.hasUI) {
+      if (ctx.mode !== "tui") {
         ctx.ui.notify("/skillful requires interactive UI", "warning");
         return;
       }
@@ -116,10 +76,12 @@ export default function skillVisibility(pi: ExtensionAPI) {
         return;
       }
 
-      const scoped = await readScopedSkillfulSettings(ctx.cwd);
+      const projectTrusted = ctx.isProjectTrusted();
+      const scoped = await readScopedSkillfulSettings(ctx.cwd, projectTrusted);
       await ctx.ui.custom<void>((tui, theme, _keybindings, done) =>
         new SkillfulVisibilityMenu({
           cwd: ctx.cwd,
+          projectTrusted,
           skills,
           hiddenByScope: {
             global: new Set(scoped.global.hiddenSkills),
@@ -140,84 +102,12 @@ export default function skillVisibility(pi: ExtensionAPI) {
           theme,
           tui,
           notify: (message, type) => ctx.ui.notify(message, type),
-          onToggleSlotsChanged: () => refreshSessionSkillToggles(pi, ctx.cwd, ctx.ui),
+          onToggleSlotsChanged: () => refreshSessionSkillToggles(pi, ctx.cwd, projectTrusted, ctx.ui),
           done,
         }),
       );
     },
   });
-}
-
-async function refreshHiddenSkillCache(cwd: string): Promise<Set<string>> {
-  const hidden = await readEffectiveHiddenSkills(cwd);
-  store.hiddenSkillsByCwd.set(cwd, hidden);
-  store.lastHiddenSkills = hidden;
-  return hidden;
-}
-
-// Must patch the real prototype from pi's module — separate module resolutions have distinct class identities.
-function installStartupSkillListPatch(): void {
-  const realPrototype = (InteractiveMode as unknown as { prototype: InteractiveModeLike }).prototype;
-  if (!realPrototype) return;
-
-  const patchState = realPrototype as Record<PropertyKey, unknown>;
-  if (patchState[STARTUP_PATCH_KEY]) return;
-
-  const original = realPrototype.showLoadedResources;
-  if (typeof original !== "function") return;
-
-  realPrototype.showLoadedResources = function (this: InteractiveModeLike, options?: unknown): void {
-    const loader = this.session?.resourceLoader;
-    const originalGetSkills = loader?.getSkills;
-    if (!loader || typeof originalGetSkills !== "function") {
-      original.call(this, options);
-      return;
-    }
-
-    const cwd = this.sessionManager?.getCwd?.();
-
-    let rawSkillNames: string[] = [];
-    loader.getSkills = () => {
-      const result = originalGetSkills.call(loader);
-      rawSkillNames = result.skills.map((s) => normalizeSkillName(s.name));
-      return result;
-    };
-
-    const childrenBefore = this.loadedResourcesContainer?.children.length ?? 0;
-
-    try {
-      original.call(this, options);
-    } finally {
-      loader.getSkills = originalGetSkills;
-    }
-
-    if (rawSkillNames.length === 0 || !cwd || !this.loadedResourcesContainer) return;
-
-    const children = this.loadedResourcesContainer.children;
-    for (let i = childrenBefore; i < children.length; i++) {
-      const child = children[i] as ExpandableTextLike | undefined;
-      if (!child || typeof child.getCollapsedText !== "function") continue;
-      const collapsed = child.getCollapsedText();
-      if (!collapsed.includes("[Skills]")) continue;
-
-      const colorized = buildColorizedSkillList(rawSkillNames, store.lastHiddenSkills, store.theme);
-      child.getCollapsedText = () => colorized;
-      child.setText(colorized);
-      break;
-    }
-  };
-
-  patchState[STARTUP_PATCH_KEY] = true;
-}
-
-function buildColorizedSkillList(names: string[], hidden: Set<string>, theme: Theme | null): string {
-  const sorted = [...names].sort((a, b) => a.localeCompare(b));
-  if (!theme) {
-    return `[Skills]\n  ${sorted.join(", ")}`;
-  }
-  const header = theme.fg("mdHeading", "[Skills]");
-  const parts = sorted.map((n) => (hidden.has(n) ? theme.fg("error", n) : theme.fg("dim", n)));
-  return `${header}\n  ${parts.join(", ")}`;
 }
 
 function getSkillItems(pi: ExtensionAPI): SkillListItem[] {
@@ -226,6 +116,8 @@ function getSkillItems(pi: ExtensionAPI): SkillListItem[] {
 
 class SkillfulVisibilityMenu implements Component {
   private readonly cwd: string;
+  private readonly projectTrusted: boolean;
+  private readonly scopes: SkillfulScope[];
   private readonly skills: SkillListItem[];
   private readonly hiddenByScope: HiddenSkillsByScope;
   private readonly hiddenSkillsDefinedByScope: DefinedByScope;
@@ -238,12 +130,15 @@ class SkillfulVisibilityMenu implements Component {
   private readonly done: () => void;
   private readonly topBorder: DynamicBorder;
   private readonly bottomBorder: DynamicBorder;
-  private scope: SkillfulScope = "project";
+  private scope: SkillfulScope;
   private settingsList: SettingsList;
   private saveQueue: Promise<void> = Promise.resolve();
 
   constructor(options: SkillfulVisibilityMenuOptions) {
     this.cwd = options.cwd;
+    this.projectTrusted = options.projectTrusted;
+    this.scopes = options.projectTrusted ? SCOPES : ["global"];
+    this.scope = options.projectTrusted ? "project" : "global";
     this.skills = options.skills;
     this.hiddenByScope = options.hiddenByScope;
     this.hiddenSkillsDefinedByScope = options.hiddenSkillsDefinedByScope;
@@ -267,7 +162,7 @@ class SkillfulVisibilityMenu implements Component {
       "",
       ...this.settingsList.render(width),
       "",
-      truncateToWidth(this.theme.fg("dim", "  Tab/←/→ switch scope · 1-9 assign/clear toggle · Enter/Space on/off · Esc close"), width),
+      truncateToWidth(this.theme.fg("dim", this.renderHelp()), width),
       ...this.bottomBorder.render(width),
     ];
   }
@@ -297,7 +192,7 @@ class SkillfulVisibilityMenu implements Component {
   }
 
   private renderTabs(): string {
-    return SCOPES
+    return this.scopes
       .map((scope) => {
         const label = scope === "global" ? "Global" : "Project";
         return scope === this.scope
@@ -307,9 +202,14 @@ class SkillfulVisibilityMenu implements Component {
       .join(" ");
   }
 
+  private renderHelp(): string {
+    const scopeHelp = this.projectTrusted ? "Tab/←/→ switch scope · " : "";
+    return `  ${scopeHelp}1-9 assign/clear toggle · Enter/Space on/off · Esc close`;
+  }
+
   private switchScope(direction: 1 | -1): void {
-    const current = SCOPES.indexOf(this.scope);
-    this.scope = SCOPES[(current + direction + SCOPES.length) % SCOPES.length];
+    const current = this.scopes.indexOf(this.scope);
+    this.scope = this.scopes[(current + direction + this.scopes.length) % this.scopes.length];
     this.settingsList = this.createSettingsList();
     this.tui.requestRender();
   }
@@ -431,7 +331,7 @@ class SkillfulVisibilityMenu implements Component {
       .then(async () => {
         if (scope === "project") await this.writeProjectOverrideOrInheritance();
         else await writeHiddenSkills(scope, this.cwd, hiddenSnapshot);
-        await refreshHiddenSkillCache(this.cwd);
+        await readEffectiveHiddenSkills(this.cwd, this.projectTrusted);
       })
       .catch((error) => {
         this.notify(`Failed to save ${scope} skill visibility: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -465,13 +365,18 @@ class SkillfulVisibilityMenu implements Component {
     if (this.projectMatchesGlobal()) {
       this.hiddenSkillsDefinedByScope.project = false;
       this.toggleSlotsDefinedByScope.project = false;
-      await writeProjectSkillfulOverride(this.cwd, undefined, undefined);
+      await writeProjectSkillfulOverride(this.cwd, undefined, undefined, this.projectTrusted);
       return;
     }
 
     this.hiddenSkillsDefinedByScope.project = true;
     this.toggleSlotsDefinedByScope.project = true;
-    await writeProjectSkillfulOverride(this.cwd, this.hiddenByScope.project, this.toggleSlotsByScope.project);
+    await writeProjectSkillfulOverride(
+      this.cwd,
+      this.hiddenByScope.project,
+      this.toggleSlotsByScope.project,
+      this.projectTrusted,
+    );
   }
 
   private projectMatchesGlobal(): boolean {

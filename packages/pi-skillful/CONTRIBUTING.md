@@ -7,6 +7,7 @@ Thanks for your interest in contributing to `pi-skillful`.
 ```bash
 npm install
 npm run check
+npm test
 ```
 
 The package is source-distributed: Pi loads the TypeScript extension files directly. There is no build step for runtime use.
@@ -35,6 +36,7 @@ pi -e /path/to/pi-mono/packages/pi-skillful
 Before opening a pull request:
 
 - Run `npm run check`.
+- Run `npm test`.
 - Run `npm run pack:dry-run` and confirm the package contents are intentional.
 - Update `README.md` if user-facing behavior changes.
 - Update `CHANGELOG.md` for notable changes.

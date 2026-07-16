@@ -11,6 +11,7 @@ Use npm for this repository.
 - `npm install`: install development dependencies and peer packages.
 - `npm run check`: run `tsc --noEmit`; this is the main validation command.
 - `npm run typecheck`: alias for the same TypeScript check.
+- `npm test`: compile to `.test-dist` and run the Node test suite.
 - `npm run pack:dry-run`: preview the npm package contents before publishing.
 
 There is no runtime build step. For local Pi testing, install this workspace package into a temporary project with `pi install -l /path/to/pi-mono/packages/pi-skillful`, then run `pi` and open `/skillful`.
@@ -21,7 +22,7 @@ Follow `.editorconfig`: UTF-8, LF line endings, final newline, two-space indenta
 
 ## Testing Guidelines
 
-There is no dedicated test suite yet. Treat `npm run check` as required before every change. For behavior changes, smoke test in a temporary Pi project and verify `/skillful`, hidden skill toggling, and inline `/skill:name` expansion. For packaging changes, run `npm run pack:dry-run`.
+Run `npm test` and `npm run check` before every change. Tests cover settings precedence, project trust, prompt visibility, dynamic shortcuts, editor composition, and focus propagation. For behavior changes, also smoke test in a temporary Pi project and verify `/skillful`, hidden skill toggling, and inline `/skill:name` expansion. For packaging changes, run `npm run pack:dry-run`.
 
 ## Commit & Pull Request Guidelines
 
