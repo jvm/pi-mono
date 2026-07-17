@@ -1,6 +1,14 @@
-import { DynamicBorder, getSettingsListTheme, type ExtensionAPI, type Skill, type Theme } from "@earendil-works/pi-coding-agent";
+import {
+  DynamicBorder,
+  getSettingsListTheme,
+  InteractiveMode,
+  type ExtensionAPI,
+  type Skill,
+  type Theme,
+} from "@earendil-works/pi-coding-agent";
 import { type Component, Key, matchesKey, type SettingItem, SettingsList, truncateToWidth, type TUI } from "@earendil-works/pi-tui";
 import {
+  normalizeSkillName,
   normalizeSkillNames,
   readEffectiveHiddenSkills,
   readScopedSkillfulSettings,
@@ -15,6 +23,34 @@ import { replaceSkillsSection } from "../skill-prompt.js";
 import { isTopLevelSkill, listLoadedSkills, type LoadedSkillInfo } from "../skills.js";
 import { hasActiveSessionSkillToggles, refreshSessionSkillToggles } from "./session-skill-toggles.js";
 const SCOPES: SkillfulScope[] = ["global", "project"];
+const STORE_KEY = Symbol.for("pi-skillful.skillVisibilityStore");
+const STARTUP_PATCH_KEY = Symbol.for("pi-skillful.startupPatchV3");
+
+interface SkillVisibilityStore {
+  hiddenSkillsByCwd: Map<string, Set<string>>;
+  theme: Theme | null;
+}
+
+interface ExpandableTextLike {
+  getCollapsedText: () => string;
+  setText: (text: string) => void;
+}
+
+interface BoxLike {
+  children: unknown[];
+}
+
+interface InteractiveModeLike {
+  loadedResourcesContainer?: BoxLike;
+  showLoadedResources?: (options?: unknown) => void;
+  session?: { resourceLoader?: { getSkills: () => { skills: Skill[]; diagnostics: unknown[] } } };
+  sessionManager?: { getCwd?: () => string };
+}
+
+const store = (((globalThis as Record<PropertyKey, unknown>)[STORE_KEY] as SkillVisibilityStore | undefined) ??= {
+  hiddenSkillsByCwd: new Map<string, Set<string>>(),
+  theme: null,
+}) as SkillVisibilityStore;
 
 type SkillListItem = LoadedSkillInfo;
 type HiddenSkillsByScope = Record<SkillfulScope, Set<string>>;
@@ -44,14 +80,17 @@ interface SettingsListSelectionView {
 }
 
 export default function skillVisibility(pi: ExtensionAPI) {
+  installStartupSkillListPatch();
+
   pi.on("session_start", async (_event, ctx) => {
-    await readEffectiveHiddenSkills(ctx.cwd, ctx.isProjectTrusted());
+    store.theme = ctx.ui.theme;
+    await refreshHiddenSkillCache(ctx.cwd, ctx.isProjectTrusted());
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
     if (hasActiveSessionSkillToggles()) return;
 
-    const hidden = await readEffectiveHiddenSkills(ctx.cwd, ctx.isProjectTrusted());
+    const hidden = await refreshHiddenSkillCache(ctx.cwd, ctx.isProjectTrusted());
     if (hidden.size === 0 || !event.systemPromptOptions.skills?.length) return;
 
     const filteredSkills: Skill[] = event.systemPromptOptions.skills.map((skill) =>
@@ -108,6 +147,76 @@ export default function skillVisibility(pi: ExtensionAPI) {
       );
     },
   });
+}
+
+async function refreshHiddenSkillCache(cwd: string, projectTrusted: boolean): Promise<Set<string>> {
+  const hidden = await readEffectiveHiddenSkills(cwd, projectTrusted);
+  store.hiddenSkillsByCwd.set(cwd, hidden);
+  return hidden;
+}
+
+// Pi has no public hook for styling the built-in startup resource list, so patch the
+// prototype from Pi's own module and keep the workaround isolated here.
+export function installStartupSkillListPatch(
+  realPrototype: InteractiveModeLike = (InteractiveMode as unknown as { prototype: InteractiveModeLike }).prototype,
+): void {
+  if (!realPrototype) return;
+
+  const patchState = realPrototype as Record<PropertyKey, unknown>;
+  if (patchState[STARTUP_PATCH_KEY]) return;
+
+  const original = realPrototype.showLoadedResources;
+  if (typeof original !== "function") return;
+
+  realPrototype.showLoadedResources = function (this: InteractiveModeLike, options?: unknown): void {
+    const loader = this.session?.resourceLoader;
+    const originalGetSkills = loader?.getSkills;
+    if (!loader || typeof originalGetSkills !== "function") {
+      original.call(this, options);
+      return;
+    }
+
+    const cwd = this.sessionManager?.getCwd?.();
+    let rawSkillNames: string[] = [];
+    loader.getSkills = () => {
+      const result = originalGetSkills.call(loader);
+      rawSkillNames = result.skills.map((skill) => normalizeSkillName(skill.name));
+      return result;
+    };
+
+    const childrenBefore = this.loadedResourcesContainer?.children.length ?? 0;
+    try {
+      original.call(this, options);
+    } finally {
+      loader.getSkills = originalGetSkills;
+    }
+
+    if (rawSkillNames.length === 0 || !cwd || !this.loadedResourcesContainer) return;
+
+    const hidden = store.hiddenSkillsByCwd.get(cwd) ?? new Set<string>();
+    const children = this.loadedResourcesContainer.children;
+    for (let index = childrenBefore; index < children.length; index++) {
+      const child = children[index] as ExpandableTextLike | undefined;
+      if (!child || typeof child.getCollapsedText !== "function") continue;
+      if (!child.getCollapsedText().includes("[Skills]")) continue;
+
+      const colorized = buildColorizedSkillList(rawSkillNames, hidden, store.theme);
+      child.getCollapsedText = () => colorized;
+      child.setText(colorized);
+      break;
+    }
+  };
+
+  patchState[STARTUP_PATCH_KEY] = true;
+}
+
+export function buildColorizedSkillList(names: string[], hidden: Set<string>, theme: Theme | null): string {
+  const sorted = [...names].sort((a, b) => a.localeCompare(b));
+  if (!theme) return `[Skills]\n  ${sorted.join(", ")}`;
+
+  const header = theme.fg("mdHeading", "[Skills]");
+  const parts = sorted.map((name) => (hidden.has(name) ? theme.fg("error", name) : theme.fg("dim", name)));
+  return `${header}\n  ${parts.join(", ")}`;
 }
 
 function getSkillItems(pi: ExtensionAPI): SkillListItem[] {
@@ -331,7 +440,7 @@ class SkillfulVisibilityMenu implements Component {
       .then(async () => {
         if (scope === "project") await this.writeProjectOverrideOrInheritance();
         else await writeHiddenSkills(scope, this.cwd, hiddenSnapshot);
-        await readEffectiveHiddenSkills(this.cwd, this.projectTrusted);
+        await refreshHiddenSkillCache(this.cwd, this.projectTrusted);
       })
       .catch((error) => {
         this.notify(`Failed to save ${scope} skill visibility: ${error instanceof Error ? error.message : String(error)}`, "error");

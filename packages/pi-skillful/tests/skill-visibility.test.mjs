@@ -3,13 +3,16 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { formatSkillsForPrompt, initTheme, InteractiveMode } from "@earendil-works/pi-coding-agent";
+import { formatSkillsForPrompt, initTheme } from "@earendil-works/pi-coding-agent";
 
 const home = await mkdtemp(join(tmpdir(), "pi-skillful-visibility-test-"));
 process.env.HOME = home;
 initTheme("dark");
 
-const { default: skillVisibility } = await import("../.test-dist/src/extensions/skill-visibility.js");
+const {
+  default: skillVisibility,
+  installStartupSkillListPatch,
+} = await import("../.test-dist/src/extensions/skill-visibility.js");
 
 const globalSettingsPath = join(home, ".pi", "agent", "settings.json");
 const identityTheme = {
@@ -151,10 +154,50 @@ test("untrusted projects expose only global settings in the menu", async () => {
   assert.deepEqual(JSON.parse(await readFile(projectPath, "utf-8")), projectSettings);
 });
 
-test("registration does not patch InteractiveMode prototype", () => {
-  const original = InteractiveMode.prototype.showLoadedResources;
-  registerVisibility();
-  assert.equal(InteractiveMode.prototype.showLoadedResources, original);
+test("startup patch colors the built-in skill list from effective settings", async () => {
+  const cwd = await mkdtemp(join(home, "startup-colors-"));
+  await writeSettings(globalSettingsPath, { skillful: { hiddenSkills: ["hidden"] } });
+
+  const { handlers } = registerVisibility();
+  const theme = {
+    fg: (color, text) => `<${color}>${text}</${color}>`,
+  };
+  await handlers.get("session_start")(
+    { reason: "startup" },
+    { cwd, isProjectTrusted: () => false, ui: { theme } },
+  );
+
+  const prototype = {
+    showLoadedResources() {
+      const { skills } = this.session.resourceLoader.getSkills();
+      const names = skills.map(({ name }) => name).sort().join(", ");
+      this.loadedResourcesContainer.children.push({
+        getCollapsedText: () => `[Skills]\n  ${names}`,
+        setText(text) {
+          this.text = text;
+        },
+      });
+    },
+  };
+  installStartupSkillListPatch(prototype);
+
+  const instance = Object.assign(Object.create(prototype), {
+    loadedResourcesContainer: { children: [] },
+    session: {
+      resourceLoader: {
+        getSkills: () => ({ skills: [skill("visible"), skill("hidden")], diagnostics: [] }),
+      },
+    },
+    sessionManager: { getCwd: () => cwd },
+  });
+  instance.showLoadedResources();
+
+  const rendered = instance.loadedResourcesContainer.children[0];
+  assert.equal(
+    rendered.text,
+    "<mdHeading>[Skills]</mdHeading>\n  <error>hidden</error>, <dim>visible</dim>",
+  );
+  assert.equal(rendered.getCollapsedText(), rendered.text);
 });
 
 test.after(async () => {

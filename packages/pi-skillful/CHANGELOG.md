@@ -20,7 +20,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - Let an explicit project `toggleModifier: "alt"` override a non-default global modifier; unsupported explicit values now follow the documented `"alt"` fallback.
 - Consume only configured modifier-slot combinations in the prompt editor instead of registering all 54 possible shortcuts.
 - Propagate focus and custom-editor hooks through the session-toggle editor wrapper for IME and extension compatibility.
-- Remove the private `InteractiveMode.prototype` startup skill-list patch; visibility now uses only documented Pi APIs.
+- Restore red/dim coloring for hidden and visible skills in Pi's startup `[Skills]` list while preserving project-trust-aware settings.
 - Remove the stale package-local `package-lock.json` in favor of the monorepo root lockfile.
 - Preserve configured hidden skills at session start. Skillful no longer treats a temporarily incomplete loaded-skill list as authoritative and removes global or project visibility settings.
 
