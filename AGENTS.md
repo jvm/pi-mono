@@ -17,10 +17,13 @@ Package instructions must not repeat root policy. If guidance conflicts with exe
 ## Required workflow
 
 1. Read affected package `AGENTS.md` and inspect worktree/branch.
-2. Keep changes scoped; update tests with behavior.
-3. Update user docs only when triggers below apply.
-4. Run validation from the matrix.
-5. Inspect `git diff --check`, `git diff --stat`, and packed files when publishing changes.
+2. Map impact across package-local, cross-package, and root artifacts before editing.
+3. Keep changes scoped; update tests with behavior.
+4. Update user docs only when triggers below apply.
+5. Run validation from the matrix.
+6. Inspect `git diff --check`, `git diff --stat`, and packed files when publishing changes.
+
+Impact scan includes root README/index, `AGENTS.md`, root manifest/lockfile, shared scripts/templates, workflows, release metadata, and security policy. Update only artifacts affected by the change; keep package listings, versions, commands, and policy synchronized.
 
 Bug fixes require regression coverage of the broken integration path. Helper-only tests are insufficient when removing feature wiring would still pass. Private Pi API patches require render/contract tests and a documented smoke test when automation cannot cover runtime behavior.
 
