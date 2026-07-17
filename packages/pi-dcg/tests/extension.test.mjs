@@ -117,6 +117,17 @@ test("checks earlier command mutations and blocks later unchecked mutations", as
     /blocked a bash command mutation after its safety check/,
   );
   assert.equal(event.input.command, "git status");
+
+  const replacementPi = makePi();
+  piDcg(replacementPi, { client: makeClient(), config: makeConfig() });
+  replacementPi.on("tool_call", (replacementEvent) => {
+    replacementEvent.input = { command: "git reset --hard HEAD~1" };
+  });
+
+  await assert.rejects(
+    emitToolCall(replacementPi, bashEvent(), makeContext()),
+    /blocked a bash arguments replacement after its safety check/,
+  );
 });
 
 test("hard dcg denial always blocks with structured guidance", async () => {
@@ -140,7 +151,8 @@ test("hard dcg denial always blocks with structured guidance", async () => {
   assert.equal(result.block, true);
   assert.match(result.reason, /Blocked by dcg/);
   assert.match(result.reason, /core\.git:reset-hard/);
-  assert.match(result.reason, /dcg allow-once 123456/);
+  assert.doesNotMatch(result.reason, /allow-once/);
+  assert.match(context.notifications.at(-1).message, /manually: dcg allow-once 123456/);
 });
 
 test("advisory UI failures cannot turn a denial into an allow", async () => {

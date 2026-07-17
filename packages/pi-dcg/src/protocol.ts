@@ -88,6 +88,10 @@ function truncate(value: string, maxChars: number): string {
   return `${value.slice(0, Math.max(0, maxChars - 1))}…`;
 }
 
+function redactAllowOnceCommands(value: string): string {
+  return value.replace(/\bdcg\s+allow-once\b[^\r\n]*/gi, "[manual authorization command hidden]");
+}
+
 function extractReason(message: string | undefined): string | undefined {
   if (!message) return undefined;
   const match = message.match(/(?:^|\n)Reason:\s*([^\n]*(?:\n(?!\s*(?:Explanation|Rule|Pack|Command):)[^\n]*)*)/i);
@@ -99,6 +103,14 @@ function metadata(hook: DcgHookOutput): string | undefined {
   const fields = [hook.severity, hook.ruleId ?? hook.packId].filter(Boolean);
   if (hook.confidence !== undefined) fields.push(`confidence ${hook.confidence.toFixed(2)}`);
   return fields.length > 0 ? fields.join(" · ") : undefined;
+}
+
+export function getDcgAllowOnceCommand(
+  result: Exclude<DcgDecision, { decision: "allow" }>,
+): string | undefined {
+  const command = result.hook.remediation?.allowOnceCommand
+    ?? (result.hook.allowOnceCode ? `dcg allow-once ${result.hook.allowOnceCode}` : undefined);
+  return command ? truncate(command.trim(), MAX_FIELD_CHARS) : undefined;
 }
 
 export function formatDcgDecision(result: Exclude<DcgDecision, { decision: "allow" }>): string {
@@ -118,9 +130,5 @@ export function formatDcgDecision(result: Exclude<DcgDecision, { decision: "allo
   const alternative = hook.remediation?.safeAlternative?.trim();
   if (alternative) lines.push(`Safer alternative: ${truncate(alternative, MAX_FIELD_CHARS)}`);
 
-  const allowOnce = hook.remediation?.allowOnceCommand
-    ?? (hook.allowOnceCode ? `dcg allow-once ${hook.allowOnceCode}` : undefined);
-  if (allowOnce) lines.push(`To authorize this exact command: ${allowOnce}`);
-
-  return truncate(lines.join("\n\n"), MAX_REASON_CHARS);
+  return truncate(redactAllowOnceCommands(lines.join("\n\n")), MAX_REASON_CHARS);
 }

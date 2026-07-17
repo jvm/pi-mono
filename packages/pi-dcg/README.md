@@ -47,7 +47,7 @@ Pi's separate RPC control-channel `{"type":"bash"}` command does not emit either
 
 For every non-empty command, the extension starts dcg directly without a shell, sends a Claude-compatible `PreToolUse` payload on stdin, and waits for dcg's decision before Pi executes the command.
 
-Pi allows `tool_call` handlers to rewrite tool arguments in sequence. `pi-dcg` checks mutations made by earlier handlers, then seals the approved `command` value. If a later handler attempts to replace it, Pi blocks the tool call rather than executing a command dcg did not check.
+Pi allows `tool_call` handlers to rewrite tool arguments in sequence. `pi-dcg` checks mutations made by earlier handlers, then seals both the approved `command` value and its input reference. If a later handler attempts to replace either one, Pi blocks the tool call rather than executing a command dcg did not check.
 
 | dcg response | Pi behavior |
 | --- | --- |
@@ -56,7 +56,7 @@ Pi allows `tool_call` handlers to rewrite tool arguments in sequence. `pi-dcg` c
 | `permissionDecision: "ask"` | Ask for confirmation when UI is available; otherwise block |
 | Bridge failure | Allow by default, visibly marking dcg unavailable; configurable to block |
 
-Hard denials are never converted into one-click approvals. When dcg provides an allow-once code, the blocked result shows the exact `dcg allow-once ...` command so the user can review and run it explicitly.
+Hard denials are never converted into one-click approvals. When dcg provides an allow-once code, `pi-dcg` shows the exact `dcg allow-once ...` command only in a user-facing UI notification. It is deliberately excluded from the model-visible blocked tool result so an agent cannot redeem the exception itself.
 
 Run `/dcg` to probe the binary and show the active bridge configuration.
 

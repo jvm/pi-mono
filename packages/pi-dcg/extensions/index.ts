@@ -12,7 +12,7 @@ import {
   type DcgClientLike,
 } from "../src/dcg-client.js";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
-import { formatDcgDecision } from "../src/protocol.js";
+import { formatDcgDecision, getDcgAllowOnceCommand } from "../src/protocol.js";
 
 const STATUS_KEY = "pi-dcg";
 const MAX_COMMAND_PREVIEW_CHARS = 4_000;
@@ -36,13 +36,25 @@ function errorMessage(error: unknown): string {
   return "dcg failed for an unknown reason";
 }
 
-function sealCheckedBashCommand(input: { command: string }, command: string): void {
+function sealCheckedBashCommand(
+  event: { input: { command: string } },
+  command: string,
+): void {
+  const input = event.input;
   Object.defineProperty(input, "command", {
     configurable: false,
     enumerable: true,
     get: () => command,
     set: () => {
       throw new Error("pi-dcg blocked a bash command mutation after its safety check");
+    },
+  });
+  Object.defineProperty(event, "input", {
+    configurable: false,
+    enumerable: true,
+    get: () => input,
+    set: () => {
+      throw new Error("pi-dcg blocked a bash arguments replacement after its safety check");
     },
   });
 }
@@ -148,7 +160,13 @@ export default function piDcg(
 
     if (result.decision === "allow") return { block: false };
     const reason = formatDcgDecision(result);
-    if (result.decision === "deny") return { block: true, reason };
+    if (result.decision === "deny") {
+      const allowOnce = getDcgAllowOnceCommand(result);
+      if (allowOnce) {
+        notify(ctx, `dcg blocked the command. To authorize this exact command manually: ${allowOnce}`, "warning");
+      }
+      return { block: true, reason };
+    }
 
     if (!ctx.hasUI) {
       return { block: true, reason: `${reason}\n\nNo interactive UI is available to confirm this warning.` };
@@ -193,7 +211,7 @@ export default function piDcg(
 
     // Pi executes this same input object after all tool_call handlers finish.
     // Seal the checked value so a later extension cannot replace it unchecked.
-    sealCheckedBashCommand(event.input, command);
+    sealCheckedBashCommand(event, command);
     return undefined;
   });
 

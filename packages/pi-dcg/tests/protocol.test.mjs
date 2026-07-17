@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { formatDcgDecision, parseDcgHookResponse } from "../src/protocol.ts";
+import {
+  formatDcgDecision,
+  getDcgAllowOnceCommand,
+  parseDcgHookResponse,
+} from "../src/protocol.ts";
 
 test("treats empty hook stdout as allow", () => {
   assert.deepEqual(parseDcgHookResponse(" \n"), { decision: "allow" });
@@ -35,7 +39,8 @@ test("parses structured denial metadata without regex extraction", () => {
   assert.match(reason, /critical · core\.git:reset-hard · confidence 0\.95/);
   assert.match(reason, /Reason: destructive reset/);
   assert.match(reason, /Safer alternative: git stash/);
-  assert.match(reason, /dcg allow-once 123456/);
+  assert.doesNotMatch(reason, /dcg allow-once/);
+  assert.equal(getDcgAllowOnceCommand(result), "dcg allow-once 123456");
   assert.doesNotMatch(reason, /Command: git reset/);
 });
 
@@ -55,14 +60,16 @@ test("parses ask and explicit allow decisions", () => {
   })), { decision: "allow" });
 });
 
-test("uses allow-once code when remediation is absent", () => {
+test("keeps fallback allow-once commands separate from model-visible denials", () => {
   const result = parseDcgHookResponse(JSON.stringify({
     hookSpecificOutput: {
       permissionDecision: "deny",
+      permissionDecisionReason: "Blocked. Run dcg allow-once leaked-code to bypass.",
       allowOnceCode: "654321",
     },
   }));
-  assert.match(formatDcgDecision(result), /dcg allow-once 654321/);
+  assert.equal(getDcgAllowOnceCommand(result), "dcg allow-once 654321");
+  assert.doesNotMatch(formatDcgDecision(result), /dcg allow-once|leaked-code/);
 });
 
 test("rejects malformed, unsupported, and unknown responses", () => {
