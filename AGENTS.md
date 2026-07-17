@@ -48,6 +48,16 @@ Every package must include these files at its root:
 
 Use conventional Pi resource directories inside a package: `extensions/`, `skills/`, `prompts/`, and `themes/`. Include only directories the package actually uses.
 
+### README product guidance
+
+Package READMEs should lead with a clear user problem and outcome, then present a short list of high-signal features that explain why readers need the package. Write feature copy around user value, not internal architecture.
+
+- Make the opening useful to someone deciding whether to install the package.
+- Highlight meaningful capabilities, workflow improvements, and differentiators.
+- Keep implementation details, edge-case semantics, exhaustive parameters, and operational diagnostics in later reference sections.
+- Do not inflate minor behavior into headline features.
+- Preserve necessary installation, usage, configuration, security, troubleshooting, development, and license details after the product overview.
+
 ### Extension entry point
 
 Every package with extensions must include a root-level `index.ts` that re-exports the extension default export, and configure the `pi` manifest to reference `./index.ts` (not `./extensions/index.ts`). This ensures Pi displays the extension as the package name (e.g., "pi-agentsmd") rather than the internal path.

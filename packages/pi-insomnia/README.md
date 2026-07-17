@@ -1,18 +1,19 @@
 # pi-insomnia
 
-A source-distributed [Pi](https://pi.dev) package that prevents macOS idle sleep while the Pi agent is working.
+Keep long-running [Pi](https://pi.dev) tasks alive when you step away from your Mac.
+
+`pi-insomnia` automatically prevents idle system sleep while Pi is working, then releases the sleep assertion as soon as the agent fully settles. No commands or manual activation needed.
 
 > [!WARNING]
 > Pi packages can execute arbitrary code through extensions. Review package source before installing any third-party Pi package.
 
 ## Features
 
-- Automatically starts a macOS sleep assertion when a Pi agent run starts.
-- Automatically releases the assertion when Pi settles after all retries, compaction, and queued follow-up work.
-- Cleans up on Pi session shutdown, reloads, and quits.
-- Uses the macOS built-in `/usr/bin/caffeinate` command; no third-party runtime dependency is required.
-- Shows a small `☕ sleep inhibited` footer status while active in UI modes.
-- No slash commands, tools, or manual activation needed.
+- **Automatic protection** — inhibit idle sleep only while Pi has active work.
+- **Full-run awareness** — stay awake through retries, compaction, and queued follow-up work, then release when Pi settles.
+- **Zero setup** — use macOS built-in `caffeinate`; no commands, configuration, or third-party runtime dependency.
+- **Visible state** — show a small `☕ sleep inhibited` footer status while active.
+- **Safe cleanup** — release assertions on session shutdown, reload, and quit.
 
 ## Platform support
 

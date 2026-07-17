@@ -1,22 +1,20 @@
 # pi-compound-engineering
 
-> Compound Engineering for Pi: brainstorm, plan, work, review, and compound.
+> Turn each engineering task into leverage for the next one.
 
-`pi-compound-engineering` brings [Every Inc.'s `compound-engineering-plugin`](https://github.com/EveryInc/compound-engineering-plugin) to [Pi](https://pi.dev). It mirrors the upstream plugin's `ce-*` skills so you can use the same compound engineering workflow in Pi that the CE team uses in Claude Code and Codex.
+`pi-compound-engineering` brings [Every Inc.'s Compound Engineering workflow](https://github.com/EveryInc/compound-engineering-plugin) to [Pi](https://pi.dev): brainstorm deeply, plan from evidence, execute with discipline, review from multiple angles, then capture what the work taught your system.
 
 > [!WARNING]
 > Pi packages can execute arbitrary code through extensions. Review package source before installing any third-party Pi package.
 
 ## Features
 
-- **`ce-*` skills** — the full set of upstream CE skills: planning, code review, work execution, brainstorming, debugging, strategy, product pulse, and more.
-- **Skills-only upstream alignment** — CE v3.14.0+ packages specialist prompts inside their owning skills. Pi follows that model and keeps the installed surface aligned with upstream.
-- **`/ce-status`** — a slash command that reports the synced CE version, skill count, and detected peer packages.
-- **One-shot dependency warnings** — gentle notifications on first session start when peer packages are missing.
-- **Install-script warning** — fires when the `skills/` directory is empty and provides recovery steps for skipped or npm-blocked lifecycle scripts.
-- **Skill resource paths** — bundled CE skill resources like `scripts/`, `references/`, and `assets/` are rewritten at conversion time to resolve under `skills/<skill-name>/...`, matching the package-root base path Pi injects for package-sourced skills. No runtime guidance is needed.
+- **Complete engineering loop** — move from brainstorming and research through planning, implementation, review, and knowledge capture.
+- **Specialist workflows on demand** — use focused `ce-*` skills for debugging, code review, strategy, product work, and more.
+- **Parallel execution when useful** — pair with `pi-subagents` to dispatch independent investigation and review work concurrently.
+- **Upstream CE workflow in Pi** — stay aligned with Compound Engineering releases while working in your preferred agent.
 
-The exact skill list is visible in Pi's startup `[Skills]` list after install.
+The exact skill list is visible in Pi's startup `[Skills]` list after install. Run `/ce-status` to inspect the synced CE version and package readiness.
 
 ## Installation
 

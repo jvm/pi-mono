@@ -4,9 +4,9 @@
 
 # pi-skillful
 
-`pi-skillful` is a [Pi](https://pi.dev) package that improves skill workflows.
+Make [Pi](https://pi.dev) skills easier to invoke, curate, and control without editing their source files.
 
-It currently provides three extensions:
+`pi-skillful` provides three focused upgrades:
 
 - **Inline skill invocation**: invoke one or more skills anywhere in a prompt with `/skill:name`.
 - **Skill prompt visibility**: choose which skills are hidden from the model's automatic skill-discovery prompt while keeping them explicitly invokable.

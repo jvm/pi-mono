@@ -1,17 +1,19 @@
 # pi-scout
 
-A source-distributed [Pi](https://pi.dev) package for registering local reference codebases for agent exploration.
+Give [Pi](https://pi.dev) proven codebases to learn from before it changes yours.
+
+`pi-scout` clones and registers reference repositories, then exposes their local paths to the agent for fast, tool-native exploration across sessions.
 
 > [!WARNING]
 > Pi packages can execute arbitrary code through extensions. Review package source before installing any third-party Pi package.
 
 ## Features
 
-- `/scout` slash command with a simple TUI flow for registering, listing, and removing reference repositories.
-- `scout_add` tool for cloning a Git repository into a local temporary cache.
-- `scout_rm` tool for agent-driven removal once repositories exist.
-- Compact per-turn system prompt guidance with registered repo names and local clone paths.
-- Automatic pruning: if the OS cleans a temporary clone, Pi Scout removes that stale entry before adding prompt context.
+- **Reference-driven coding** — let Pi inspect real implementations, conventions, and patterns instead of guessing.
+- **One-step registration** — add Git URLs, local paths, or GitHub `owner/repo` shorthand from `/scout` or natural-language requests.
+- **Fast local exploration** — shallow-clone references into a reusable private cache compatible with Pi's normal file tools.
+- **Cross-session memory** — keep registered references available while their cached clones exist.
+- **Clean context** — tell the agent only which references exist and where to inspect them; stale clones are pruned automatically.
 
 Registered repositories are cloned in a private, per-user directory under the OS temp directory (`<temp>/pi-scout-<uid>` on Unix-like systems). Root and clone permissions are restricted to the current user on Unix. Set `PI_SCOUT_TMPDIR` to override the parent temp directory. Pi Scout uses shallow clones with depth `1` by default because it is for code exploration, not history exploration. Pi Scout keeps records in Pi's agent directory and reuses them across sessions while the cloned directories still exist.
 

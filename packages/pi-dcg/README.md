@@ -1,6 +1,16 @@
 # pi-dcg
 
-Guard Pi shell commands with [Destructive Command Guard (dcg)](https://github.com/Dicklesworthstone/destructive_command_guard) before they execute.
+Stop destructive shell commands before they damage your system.
+
+`pi-dcg` brings [Destructive Command Guard (dcg)](https://github.com/Dicklesworthstone/destructive_command_guard) policy checks into Pi, screening both agent-generated shell calls and your own `!` commands before execution.
+
+## Features
+
+- **Pre-execution protection** — block dangerous commands before Pi runs them.
+- **Guard agent and user commands** — cover built-in `bash` tool calls plus `!command` and `!!command` invocations.
+- **Actionable decisions** — surface matched rules and remediation while keeping hard denials non-overridable by the agent.
+- **Your policy stays yours** — honor dcg's Pi-specific profiles, packs, allowlists, exceptions, and audit history.
+- **Configurable failure posture** — choose fail-open convenience or fail-closed protection when dcg is unavailable.
 
 `pi-dcg` is a Pi extension bridge. It does not bundle dcg, replace dcg policy, or provide a sandbox.
 
