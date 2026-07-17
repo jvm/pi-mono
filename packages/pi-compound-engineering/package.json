@@ -1,6 +1,6 @@
 {
   "name": "pi-compound-engineering",
-  "version": "3.19.1",
+  "version": "3.19.2",
   "ceVersion": "3.19.0",
   "description": "Compound Engineering for Pi: brainstorm, plan, work, review, and compound.",
   "type": "module",
