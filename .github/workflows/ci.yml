@@ -28,6 +28,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate package consistency
+        run: npm run validate:packages
+
       - name: Type check
         run: npm run check
 

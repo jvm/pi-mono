@@ -1,6 +1,16 @@
 # @mocito/pi-goal
 
-Persistent long-running goals for Pi, modeled after Codex `/goal`.
+Give Pi a durable objective and let it keep working until the job is verified done.
+
+`pi-goal` adds branch-aware, long-running goals modeled after Codex `/goal`, with automatic continuation, token budgets, progress visibility, and explicit completion checks.
+
+## Features
+
+- **Work beyond one turn** — Pi continues an active goal whenever it becomes idle.
+- **Persistent branch-aware state** — goals survive reloads and follow session trees, forks, and clones without leaking across divergent branches.
+- **Budget control** — cap token use, monitor remaining budget, and pause or resume work at any time.
+- **Visible progress** — track status, active time, token usage, and budget from Pi's UI.
+- **Verified endings** — model tools require explicit completion evidence and stop repeated retries when work is blocked or provider limits intervene.
 
 ## Install
 

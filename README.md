@@ -1,20 +1,34 @@
 # pi-mono
 
-Monorepo for Pi-related projects: installable Pi packages, skills, prompt templates, extensions, themes, and supporting artifacts.
+Packages that make [Pi](https://pi.dev) better at sustained engineering work: stronger workflows, richer research, safer execution, and less friction.
 
-## Packages
+Each package installs independently. Pick the capability you need, then follow its linked README for setup and usage.
 
-| Package | Description |
-| --- | --- |
-| [pi-agentsmd](./packages/pi-agentsmd) | Generate AGENTS.md contributor guides for Pi repositories. |
-| [pi-codex-image-gen](./packages/pi-codex-image-gen) | Image generation for Pi using the ChatGPT Images 2.0 model. |
-| [pi-compound-engineering](./packages/pi-compound-engineering) | Compound Engineering for Pi: brainstorm, plan, work, review, and compound. |
-| [pi-dcg](./packages/pi-dcg) | Guard Pi shell commands with Destructive Command Guard. |
-| [pi-goal](./packages/pi-goal) | Persistent long-running goals for Pi. |
-| [pi-insomnia](./packages/pi-insomnia) | Prevent macOS idle sleep while Pi agents are working. |
-| [pi-scout](./packages/pi-scout) | Register local reference codebases for Pi agent exploration. |
-| [pi-skillful](./packages/pi-skillful) | Pi package with skill invocation and visibility improvements. |
-| [pi-web-kit](./packages/pi-web-kit) | Context-efficient web search and fetch tools for Pi. |
+## Find a package
+
+### Build and manage work
+
+| Need | Package | What it adds |
+| --- | --- | --- |
+| Keep Pi working toward a durable objective | [pi-goal](./packages/pi-goal) | Long-running, branch-aware goals with automatic continuation, budgets, and progress tracking. |
+| Use a complete engineering workflow | [pi-compound-engineering](./packages/pi-compound-engineering) | Compound Engineering skills for brainstorming, planning, execution, review, and learning. |
+| Help agents understand a repository | [pi-agentsmd](./packages/pi-agentsmd) | One-command generation of project-aware `AGENTS.md` guidance. |
+| Control how skills are invoked and discovered | [pi-skillful](./packages/pi-skillful) | Inline invocation, prompt visibility controls, and session skill toggles. |
+| Learn from reference implementations | [pi-scout](./packages/pi-scout) | Reusable local reference repositories for agent exploration. |
+
+### Research and create
+
+| Need | Package | What it adds |
+| --- | --- | --- |
+| Search the web, docs, and real code | [pi-web-kit](./packages/pi-web-kit) | Context-efficient web search, page fetch, library docs, and code search tools. |
+| Generate or edit images | [pi-codex-image-gen](./packages/pi-codex-image-gen) | Conversational image generation and editing through `gpt-image-2` and ChatGPT Codex auth. |
+
+### Safety and continuity
+
+| Need | Package | What it adds |
+| --- | --- | --- |
+| Stop destructive shell commands | [pi-dcg](./packages/pi-dcg) | Destructive Command Guard checks before agent or user shell commands execute. |
+| Keep a Mac awake while Pi works | [pi-insomnia](./packages/pi-insomnia) | Automatic macOS idle-sleep prevention for active agent runs. |
 
 ## Development
 

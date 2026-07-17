@@ -1,6 +1,15 @@
 # pi-codex-image-gen
 
-Image generation and editing for [Pi](https://pi.dev) using the ChatGPT Images 2.0 model via the OpenAI Codex Responses backend.
+Create and edit images without leaving [Pi](https://pi.dev).
+
+`pi-codex-image-gen` turns natural-language requests and reference images into PNG, JPEG, or WebP assets through **gpt-image-2**, using your existing ChatGPT Codex login instead of a separate API key.
+
+## Features
+
+- **Generate images in conversation** — describe the asset you need and let Pi create it.
+- **Edit from references** — transform up to five local or recent conversation images.
+- **Save where work happens** — return images inline or organize them by project, session, or custom directory.
+- **No separate API setup** — reuse your existing ChatGPT Plus/Pro Codex authentication.
 
 ## Install
 

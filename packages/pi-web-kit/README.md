@@ -1,20 +1,16 @@
 # pi-web-kit
 
-Context-efficient web and developer search tools for [Pi](https://pi.dev): `web_search`, `web_fetch`, `library_search`, `library_docs`, and `code_search`.
+Give [Pi](https://pi.dev) current web knowledge, authoritative library docs, and real-world code examples without flooding model context.
 
-`pi-web-kit` provides provider-backed search, page fetching, library docs lookup, and code-context search with bounded output, chunked reads, URL validation, and an in-memory fetch cache designed for agent workflows.
+`pi-web-kit` combines search, page reading, version-aware documentation, and code research behind five agent-ready tools with bounded, cache-aware output.
 
 ## Features
 
-- `web_search` for current/external web information, including multi-query searches.
-- `web_fetch` for reading one or more URLs, with `offset` / `limit` chunk reads for long pages.
-- `library_search` and `library_docs` for library resolution and current, version-aware documentation/code examples.
-- `code_search` for practical examples and implementation context.
-- Multiple provider backends: Exa MCP, Exa API, TinyFish, Brave Search, Firecrawl, markdown.new, Context7, and Exa Code.
-- Provider-tailored tool schemas at Pi startup/reload.
-- URL validation: HTTP(S)-only, no embedded credentials, fragment stripping, duplicate removal, and length/count limits.
-- In-memory fetch cache with TTL, LRU eviction, max entry count, max byte count, and cache keys based on provider/config/fetch-affecting options.
-- Bounded provider concurrency and network timeouts.
+- **Research the live web** — search current information and read single or multiple pages without leaving Pi.
+- **Use docs that match the task** — resolve libraries and retrieve focused, version-aware documentation with code examples.
+- **Find proven implementation patterns** — search practical usage, setup, migrations, and error context across real code.
+- **Spend context wisely** — compact search results, chunked page reads, bounded output, and fetch caching keep research useful without overwhelming the model.
+- **Choose your providers** — mix Exa, TinyFish, Brave, Firecrawl, markdown.new, Context7, and Exa Code based on coverage, cost, and credentials.
 
 ## Installation
 

@@ -1,15 +1,15 @@
 # pi-agentsmd
 
-Generate `AGENTS.md` contributor guides for [Pi](https://pi.dev) repositories.
+Teach [Pi](https://pi.dev) and other coding agents how your repository works with one command.
 
-`pi-agentsmd` provides a `/init` command that analyzes the current repository and generates a concise, well-structured `AGENTS.md` file with repository-specific guidelines for contributors and AI agents.
+`pi-agentsmd` analyzes your project and creates a tailored `AGENTS.md` with the commands, conventions, and contribution guidance agents need to make better changes from their first turn.
 
 ## Features
 
-- `/init` command to generate an `AGENTS.md` file at the repository root.
-- Refuses to overwrite existing files unless `--force` is passed.
-- Delegates generation to the AI model, which analyzes the repository structure, tooling, and conventions to produce tailored guidelines.
-- Prompt adapted from [OpenAI Codex](https://github.com/openai/codex) (Apache 2.0).
+- **One-command repository onboarding** — run `/init` to generate guidance at the repository root.
+- **Project-aware instructions** — the active model studies your structure, tooling, tests, and conventions instead of producing a generic template.
+- **Safe regeneration** — existing guidance stays untouched unless you explicitly pass `--force`.
+- **Proven foundation** — generation prompt is adapted from [OpenAI Codex](https://github.com/openai/codex) (Apache 2.0).
 
 ## Installation
 

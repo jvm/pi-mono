@@ -13,7 +13,8 @@
     "test": "npm test --workspaces --if-present",
     "pack:dry-run": "npm run pack:dry-run --workspaces --if-present",
     "security:audit": "npm audit --omit=dev",
-    "validate": "npm run check && npm test && npm run security:audit && npm run pack:dry-run"
+    "validate:packages": "node scripts/validate-packages.mjs",
+    "validate": "npm run validate:packages && npm run check && npm test && npm run security:audit && npm run pack:dry-run"
   },
   "repository": {
     "type": "git",
