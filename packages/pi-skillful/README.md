@@ -33,6 +33,7 @@ Hide skills from the `<available_skills>` section of the system prompt without e
 
 Hidden skills:
 
+- appear in the startup `[Skills]` list in the theme's error color, while visible skills appear dimmed;
 - are not advertised to the model for automatic skill selection;
 - remain loaded by Pi;
 - remain available for explicit invocation with `/skill:name`, including inline invocation.
