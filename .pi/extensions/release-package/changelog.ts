@@ -1,6 +1,8 @@
 export function prepareChangelogRelease(changelog: string, version: string, date: string): string {
-  const versionHeading = new RegExp(`^## \\[?${escapeRegExp(version)}\\]? - `, "m");
-  if (versionHeading.test(changelog)) return changelog;
+  const hasVersion = changelog
+    .split("\n")
+    .some((line) => line.startsWith(`## ${version} - `) || line.startsWith(`## [${version}] - `));
+  if (hasVersion) return changelog;
 
   const unreleasedHeading = /^## (\[Unreleased\]|Unreleased)$/m;
   const match = changelog.match(unreleasedHeading);
@@ -11,8 +13,4 @@ export function prepareChangelogRelease(changelog: string, version: string, date
   }
 
   return changelog.replace("# Changelog\n", `# Changelog\n\n## ${version} - ${date}\n`);
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
