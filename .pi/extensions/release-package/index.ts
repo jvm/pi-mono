@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { prepareChangelogRelease } from "./changelog.js";
 import { DynamicBorder, keyHint } from "@earendil-works/pi-coding-agent";
 import { CancellableLoader, Container, Spacer, Text } from "@earendil-works/pi-tui";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
@@ -136,13 +137,8 @@ function prepareSuggestedVersion(cwd: string, packageInfo: PackageInfo, version:
 
   if (!existsSync(changelogPath)) return;
   const changelog = readFileSync(changelogPath, "utf8");
-  if (changelog.includes(`## ${version}`)) return;
   const today = new Date().toISOString().slice(0, 10);
-  const unreleased = "## Unreleased";
-  const next = changelog.includes(unreleased)
-    ? changelog.replace(unreleased, `## Unreleased\n\n## ${version} - ${today}`)
-    : changelog.replace("# Changelog\n", `# Changelog\n\n## ${version} - ${today}\n`);
-  writeFileSync(changelogPath, next);
+  writeFileSync(changelogPath, prepareChangelogRelease(changelog, version, today));
 }
 
 async function run(command: string, cwd: string): Promise<CommandResult> {

@@ -1,12 +1,12 @@
 # Changelog
 
-## 0.1.3 - 2026-07-17
-
 All notable changes to this project will be documented in this file.
 
 This project follows the spirit of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and uses semantic versioning for releases.
 
 ## [Unreleased]
+
+## [0.1.3] - 2026-07-17
 
 ### Fixed
 
@@ -20,7 +20,11 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [0.1.1] - 2026-06-09
 
-## [0.1.0] - TBD
+### Changed
+
+- Replace the static footer icon with an animated Braille spinner while sleep inhibition is active.
+
+## [0.1.0] - 2026-06-08
 
 ### Added
 

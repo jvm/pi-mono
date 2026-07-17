@@ -1,12 +1,12 @@
 # Changelog
 
-## 0.1.4 - 2026-07-17
-
 All notable changes to this project will be documented in this file.
 
 This project follows the spirit of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and uses semantic versioning for releases.
 
 ## [Unreleased]
+
+## [0.1.4] - 2026-07-17
 
 ### Fixed
 
@@ -25,13 +25,13 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 - Update `author` field to full name for monorepo consistency.
 
-## [0.1.1] - TBD
+## [0.1.1] - 2026-05-22
 
 ### Added
 
 - Add install/update telemetry ping to `mocito.dev`, gated by Pi telemetry/offline settings and disabled in CI.
 
-## [0.1.0] - TBD
+## [0.1.0] - 2026-05-21
 
 ### Added
 

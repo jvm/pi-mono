@@ -1,12 +1,12 @@
 # Changelog
 
-## 0.1.12 - 2026-07-17
-
 All notable changes to this project will be documented in this file.
 
 This project follows the spirit of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and uses semantic versioning for releases.
 
 ## [Unreleased]
+
+## [0.1.12] - 2026-07-17
 
 ### Added
 
