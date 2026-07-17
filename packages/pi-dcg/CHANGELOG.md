@@ -20,6 +20,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Fixed
 
+- Made checked-command sealing idempotent when the package is loaded at more than one Pi scope.
 - Avoided empty stdin writes for probe commands, which could race with fast-exiting dcg binaries and falsely report that dcg was unavailable.
 
 ### Security

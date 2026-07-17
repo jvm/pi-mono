@@ -128,6 +128,15 @@ test("checks earlier command mutations and blocks later unchecked mutations", as
     emitToolCall(replacementPi, bashEvent(), makeContext()),
     /blocked a bash arguments replacement after its safety check/,
   );
+
+  const duplicatePi = makePi();
+  const firstClient = makeClient();
+  const secondClient = makeClient();
+  piDcg(duplicatePi, { client: firstClient, config: makeConfig() });
+  piDcg(duplicatePi, { client: secondClient, config: makeConfig() });
+  await emitToolCall(duplicatePi, bashEvent(), makeContext());
+  assert.equal(firstClient.checks.length, 1);
+  assert.equal(secondClient.checks.length, 1);
 });
 
 test("hard dcg denial always blocks with structured guidance", async () => {

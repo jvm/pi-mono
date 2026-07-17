@@ -16,6 +16,7 @@ import { formatDcgDecision, getDcgAllowOnceCommand } from "../src/protocol.js";
 
 const STATUS_KEY = "pi-dcg";
 const MAX_COMMAND_PREVIEW_CHARS = 4_000;
+const CHECKED_BASH_SEAL = Symbol.for("pi-dcg.checked-bash-seal");
 
 type GuardOutcome = { block: false } | { block: true; reason: string };
 type Health = "active" | "degraded" | "unknown";
@@ -41,6 +42,21 @@ function sealCheckedBashCommand(
   command: string,
 ): void {
   const input = event.input;
+  const seal = (event as unknown as Record<PropertyKey, unknown>)[CHECKED_BASH_SEAL];
+  if (seal !== undefined) {
+    if (
+      typeof seal === "object"
+      && seal !== null
+      && "input" in seal
+      && "command" in seal
+      && seal.input === input
+      && seal.command === command
+    ) {
+      return;
+    }
+    throw new Error("pi-dcg found an inconsistent existing bash command seal");
+  }
+
   Object.defineProperty(input, "command", {
     configurable: false,
     enumerable: true,
@@ -56,6 +72,12 @@ function sealCheckedBashCommand(
     set: () => {
       throw new Error("pi-dcg blocked a bash arguments replacement after its safety check");
     },
+  });
+  Object.defineProperty(event, CHECKED_BASH_SEAL, {
+    configurable: false,
+    enumerable: false,
+    value: { input, command },
+    writable: false,
   });
 }
 
