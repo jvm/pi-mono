@@ -1,7 +1,5 @@
 # Changelog
 
-## 3.19.2 - 2026-07-17
-
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
@@ -10,6 +8,12 @@ and this project aims to follow [Semantic Versioning](https://semver.org/spec/v2
 The package normally tracks the upstream [`compound-engineering`](https://github.com/EveryInc/compound-engineering-plugin) component version. Pi-specific hotfixes may increment the package patch while retaining the pinned upstream version; see `package.json` → `ceVersion` and `src/ce-version.ts`.
 
 ## [Unreleased]
+
+## [3.19.2] - 2026-07-17
+
+### Changed
+
+- Refreshed shared TypeScript and Node development dependencies; runtime behavior and the pinned Compound Engineering v3.19.0 content are unchanged.
 
 ## [3.19.1] - 2026-07-12
 

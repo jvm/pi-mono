@@ -1,12 +1,12 @@
 # Changelog
 
-## 0.2.3 - 2026-07-17
-
 All notable changes to this project will be documented in this file.
 
 This project follows the spirit of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and uses semantic versioning for releases.
 
 ## [Unreleased]
+
+## [0.2.3] - 2026-07-17
 
 ### Fixed
 
@@ -23,6 +23,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - Update Pi core development dependencies for Pi 0.80 compatibility.
 
 ## [0.2.1] - 2026-06-14
+
+### Changed
+
+- Simplify provider, configuration, cache, and URL handling while preserving the public tool surface.
 
 ## [0.2.0] - 2026-06-13
 

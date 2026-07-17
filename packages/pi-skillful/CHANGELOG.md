@@ -1,20 +1,18 @@
 # Changelog
 
-## 0.3.14 - 2026-07-17
-
-## 0.3.13 - 2026-07-17
-
-## 0.3.12 - 2026-07-12
-
-## 0.3.11 - 2026-07-01
-
-## 0.3.9 - 2026-06-14
-
 All notable changes to this project will be documented in this file.
 
 This project follows the spirit of [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and uses semantic versioning for releases.
 
 ## [Unreleased]
+
+## [0.3.14] - 2026-07-17
+
+### Fixed
+
+- Restore red/dim coloring for hidden and visible skills in Pi's startup `[Skills]` list while preserving project-trust-aware settings.
+
+## [0.3.13] - 2026-07-17
 
 ### Fixed
 
@@ -22,16 +20,23 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - Let an explicit project `toggleModifier: "alt"` override a non-default global modifier; unsupported explicit values now follow the documented `"alt"` fallback.
 - Consume only configured modifier-slot combinations in the prompt editor instead of registering all 54 possible shortcuts.
 - Propagate focus and custom-editor hooks through the session-toggle editor wrapper for IME and extension compatibility.
-- Restore red/dim coloring for hidden and visible skills in Pi's startup `[Skills]` list while preserving project-trust-aware settings.
 - Remove the stale package-local `package-lock.json` in favor of the monorepo root lockfile.
-- Preserve configured hidden skills at session start. Skillful no longer treats a temporarily incomplete loaded-skill list as authoritative and removes global or project visibility settings.
 
-## [0.3.10] - 2026-07-01
+## [0.3.12] - 2026-07-13
 
 ### Fixed
 
-- Color hidden skills in the startup `[Skills]` list on `@earendil-works/pi-coding-agent` 0.80+. The 0.80 release moved the loaded-resources container out of `chatContainer`, so the existing prototype patch walked the wrong container and the red/dim colorization no longer applied. The patch now also walks `loadedResourcesContainer`, where 0.80 actually renders the `[Skills]` section.
-- Bumped dev dependency range to `^0.80.0` to match the new floor.
+- Preserve configured hidden skills at session start instead of pruning settings from a temporarily incomplete loaded-skill list.
+
+## [0.3.11] - 2026-07-01
+
+### Fixed
+
+- Color hidden skills in the startup `[Skills]` list on Pi 0.80+, which moved the rendered resources into `loadedResourcesContainer`.
+
+### Changed
+
+- Raise the Pi development dependency floor to `^0.80.0`.
 
 ## [0.3.9] - 2026-06-14
 
