@@ -57,6 +57,7 @@ Package READMEs should lead with a clear user problem and outcome, then present 
 - Keep implementation details, edge-case semantics, exhaustive parameters, and operational diagnostics in later reference sections.
 - Do not inflate minor behavior into headline features.
 - Preserve necessary installation, usage, configuration, security, troubleshooting, development, and license details after the product overview.
+- Treat the root README as the monorepo landing page: keep a concise, need-oriented package index that helps users find the right package, then link to package READMEs for details.
 
 ### Extension entry point
 
