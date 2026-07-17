@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.11 - 2026-07-17
+
 ### Fixed
 
 - Preserve accumulated wall-clock time when `/goal resume` is used on an already-active goal.
