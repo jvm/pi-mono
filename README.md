@@ -9,6 +9,7 @@ Monorepo for Pi-related projects: installable Pi packages, skills, prompt templa
 | [pi-agentsmd](./packages/pi-agentsmd) | Generate AGENTS.md contributor guides for Pi repositories. |
 | [pi-codex-image-gen](./packages/pi-codex-image-gen) | Image generation for Pi using the ChatGPT Images 2.0 model. |
 | [pi-compound-engineering](./packages/pi-compound-engineering) | Compound Engineering for Pi: brainstorm, plan, work, review, and compound. |
+| [pi-dcg](./packages/pi-dcg) | Guard Pi shell commands with Destructive Command Guard. |
 | [pi-goal](./packages/pi-goal) | Persistent long-running goals for Pi. |
 | [pi-insomnia](./packages/pi-insomnia) | Prevent macOS idle sleep while Pi agents are working. |
 | [pi-scout](./packages/pi-scout) | Register local reference codebases for Pi agent exploration. |
