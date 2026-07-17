@@ -81,6 +81,14 @@ for (const slug of slugs) {
     else sharedVersions.set(dependency, { slug, range });
   }
 
+  const changelog = entries.has("CHANGELOG.md") ? await text(new URL("CHANGELOG.md", dir)) : "";
+  const changelogHeadings = changelog.match(/^## .+$/gm) ?? [];
+  const unreleasedCount = changelogHeadings.filter((heading) => /^## (?:\[Unreleased\]|Unreleased)$/.test(heading)).length;
+  if (unreleasedCount !== 1) errors.push(`${slug}: CHANGELOG.md must contain one Unreleased heading`);
+  if (!/^## (?:\[Unreleased\]|Unreleased)$/.test(changelogHeadings[0] ?? "")) errors.push(`${slug}: Unreleased must be first CHANGELOG.md section`);
+  const currentRelease = new RegExp(`^## \\[?${manifest.version.replaceAll(".", "\\.")}\\]? - \\d{4}-\\d{2}-\\d{2}$`);
+  if (!currentRelease.test(changelogHeadings[1] ?? "")) errors.push(`${slug}: current version must be first CHANGELOG.md release`);
+
   const agents = entries.has("AGENTS.md") ? await text(new URL("AGENTS.md", dir)) : "";
   for (const heading of ["## Invariants", "## Validation"]) {
     if (!agents.includes(heading)) errors.push(`${slug}: AGENTS.md missing ${heading}`);

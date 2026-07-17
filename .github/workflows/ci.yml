@@ -35,7 +35,7 @@ jobs:
         run: npm run check
 
       - name: Test
-        run: npm test --workspaces --if-present
+        run: npm test
 
       - name: Audit production dependencies
         run: npm audit --omit=dev
