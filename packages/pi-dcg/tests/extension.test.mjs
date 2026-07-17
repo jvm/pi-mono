@@ -74,6 +74,14 @@ function bashEvent(command = "git status") {
   return { type: "tool_call", toolCallId: "call-1", toolName: "bash", input: { command } };
 }
 
+async function emitToolCall(pi, event, context) {
+  for (const handler of pi.handlers.get("tool_call") ?? []) {
+    const result = await handler(event, context);
+    if (result?.block) return result;
+  }
+  return undefined;
+}
+
 test("guards agent bash in Pi's cwd and ignores non-bash tools", async () => {
   const pi = makePi();
   const client = makeClient();
@@ -84,6 +92,31 @@ test("guards agent bash in Pi's cwd and ignores non-bash tools", async () => {
   assert.equal(await handler({ type: "tool_call", toolCallId: "read-1", toolName: "read", input: { path: "x" } }, context), undefined);
   assert.equal(await handler(bashEvent(), context), undefined);
   assert.deepEqual(client.checks[0], { command: "git status", cwd: "/work/project", signal: undefined });
+});
+
+test("checks earlier command mutations and blocks later unchecked mutations", async () => {
+  const earlierPi = makePi();
+  const earlierClient = makeClient();
+  earlierPi.on("tool_call", (event) => {
+    event.input.command = "git reset --hard HEAD~1";
+  });
+  piDcg(earlierPi, { client: earlierClient, config: makeConfig() });
+
+  await emitToolCall(earlierPi, bashEvent(), makeContext());
+  assert.equal(earlierClient.checks[0].command, "git reset --hard HEAD~1");
+
+  const laterPi = makePi();
+  piDcg(laterPi, { client: makeClient(), config: makeConfig() });
+  laterPi.on("tool_call", (event) => {
+    event.input.command = "git reset --hard HEAD~1";
+  });
+  const event = bashEvent();
+
+  await assert.rejects(
+    emitToolCall(laterPi, event, makeContext()),
+    /blocked a bash command mutation after its safety check/,
+  );
+  assert.equal(event.input.command, "git status");
 });
 
 test("hard dcg denial always blocks with structured guidance", async () => {

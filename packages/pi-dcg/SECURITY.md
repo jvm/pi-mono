@@ -19,6 +19,7 @@ The bridge:
 - sends command text to that local child process on stdin;
 - sets the child cwd to Pi's current working directory;
 - validates dcg's structured stdout decision;
+- seals an approved agent `bash` command so later `tool_call` handlers cannot replace it unchecked;
 - captures but does not log or forward dcg stderr;
 - bounds child output and denial text;
 - blocks a command when its check is cancelled;

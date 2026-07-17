@@ -24,4 +24,5 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Security
 
+- Sealed approved agent `bash` commands so later Pi handlers cannot replace them after the dcg check.
 - Documented that Pi's RPC control-channel `bash` command does not emit an extension event and therefore cannot be guarded by `pi-dcg`.

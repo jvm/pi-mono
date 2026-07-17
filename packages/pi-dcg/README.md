@@ -47,6 +47,8 @@ Pi's separate RPC control-channel `{"type":"bash"}` command does not emit either
 
 For every non-empty command, the extension starts dcg directly without a shell, sends a Claude-compatible `PreToolUse` payload on stdin, and waits for dcg's decision before Pi executes the command.
 
+Pi allows `tool_call` handlers to rewrite tool arguments in sequence. `pi-dcg` checks mutations made by earlier handlers, then seals the approved `command` value. If a later handler attempts to replace it, Pi blocks the tool call rather than executing a command dcg did not check.
+
 | dcg response | Pi behavior |
 | --- | --- |
 | Empty stdout / explicit `allow` | Execute the command |

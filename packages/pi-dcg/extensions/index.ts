@@ -36,6 +36,17 @@ function errorMessage(error: unknown): string {
   return "dcg failed for an unknown reason";
 }
 
+function sealCheckedBashCommand(input: { command: string }, command: string): void {
+  Object.defineProperty(input, "command", {
+    configurable: false,
+    enumerable: true,
+    get: () => command,
+    set: () => {
+      throw new Error("pi-dcg blocked a bash command mutation after its safety check");
+    },
+  });
+}
+
 function notify(
   ctx: ExtensionContext,
   message: string,
@@ -176,8 +187,14 @@ export default function piDcg(
 
   pi.on("tool_call", async (event, ctx) => {
     if (!isToolCallEventType("bash", event)) return undefined;
-    const outcome = await guard(event.input.command, ctx.cwd, ctx);
-    return outcome.block ? { block: true, reason: outcome.reason } : undefined;
+    const command = event.input.command;
+    const outcome = await guard(command, ctx.cwd, ctx);
+    if (outcome.block) return { block: true, reason: outcome.reason };
+
+    // Pi executes this same input object after all tool_call handlers finish.
+    // Seal the checked value so a later extension cannot replace it unchecked.
+    sealCheckedBashCommand(event.input, command);
+    return undefined;
   });
 
   if (config.guardUserBash) {
