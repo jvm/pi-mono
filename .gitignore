@@ -29,3 +29,6 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# Compound Engineering runtime config (output of upstream CE; regenerable)
+.compound-engineering/
