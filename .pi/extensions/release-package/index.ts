@@ -274,8 +274,9 @@ async function buildPlan(cwd: string, packageIdentifier: PackageName, version: s
   }
 
   commands.push(
+    `git push origin main`,
     `git tag ${shellQuote(tag)}`,
-    `git push origin main ${shellQuote(tag)}`,
+    `git push origin ${shellQuote(tag)}`,
     `gh release create ${shellQuote(tag)} --title ${shellQuote(tag)} --notes ${shellQuote(`Release ${packageName} ${version}.`)}`,
   );
 
@@ -316,10 +317,12 @@ async function executePlan(cwd: string, plan: ReleasePlan, onProgress?: (label: 
     await run(`git commit -m ${shellQuote(`Release ${plan.packageName} ${plan.version}`)}`, cwd);
   }
 
+  onProgress?.("Pushing main");
+  await run(`git push origin main`, cwd);
   onProgress?.("Creating git tag");
   await run(`git tag ${shellQuote(plan.tag)}`, cwd);
-  onProgress?.("Pushing to remote");
-  await run(`git push origin main ${shellQuote(plan.tag)}`, cwd);
+  onProgress?.("Pushing tag");
+  await run(`git push origin ${shellQuote(plan.tag)}`, cwd);
   onProgress?.("Creating GitHub release");
   await run(
     `gh release create ${shellQuote(plan.tag)} --title ${shellQuote(plan.tag)} --notes ${shellQuote(
