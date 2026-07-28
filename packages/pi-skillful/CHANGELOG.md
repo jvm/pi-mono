@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-28
+
 ### Added
 
 - Progressive skill loading: discover `.agents/skills/` directories from all ancestor directories (like `AGENTS.md`), not just within the git repo boundary. Uses the `resources_discover` event to contribute missed paths.
