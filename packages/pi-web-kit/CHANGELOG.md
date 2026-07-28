@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Changed
+
+- Rewrite `library_search`, `library_docs`, `web_search`, and `code_search` prompts so `library_docs` is the default for versioned library/framework/SDK docs (even familiar libraries), `library_search` is reserved for inspecting candidate matches, and `web_search`/`code_search` defer to it. Removes the "ambiguous library" wording that suppressed calls to well-known libraries. Provider behavior and tool schemas are unchanged.
+
 ## [0.2.3] - 2026-07-17
 
 ### Fixed

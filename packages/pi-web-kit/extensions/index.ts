@@ -38,8 +38,8 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
     name: "web_search",
     label: "Web Search",
     description: buildSearchDescription(startupConfig.provider_search),
-    promptSnippet: "Find current or external web information.",
-    promptGuidelines: ["Use web_search to find current or external web information."],
+    promptSnippet: "Search the live web for current events, news, and non-library topics.",
+    promptGuidelines: ["Use web_search for current events, news, and non-library topics.", "Prefer library_docs over web_search for versioned library/framework/SDK documentation."],
     parameters: buildSearchSchema(startupConfig.provider_search),
     async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
       const params = rawParams as Record<string, any>;
@@ -108,9 +108,9 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
     pi.registerTool({
       name: "library_search",
       label: "Library Search",
-      description: "Resolve library, package, framework, SDK, API, or CLI names to canonical library IDs.",
-      promptSnippet: "Resolve a library name to a canonical library ID before querying docs.",
-      promptGuidelines: ["Use library_search when a library/framework/package is ambiguous or you need a canonical library ID."],
+      description: "Resolve library, package, framework, SDK, API, or CLI names to canonical library IDs with version, trust, and snippet metadata. Use when you need to inspect candidate matches (official sources, versions, forks); library_docs resolves names automatically.",
+      promptSnippet: "List candidate library IDs; library_docs resolves names on its own.",
+      promptGuidelines: ["Use library_search only to inspect matching libraries (official source, versions, forks) before a precise library_docs call.", "Not needed for ordinary doc lookups — library_docs resolves a libraryName for you."],
       parameters: buildLibrarySearchSchema(),
       async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
         const params = rawParams as Record<string, any>;
@@ -126,9 +126,9 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
     pi.registerTool({
       name: "library_docs",
       label: "Library Docs",
-      description: "Fetch current, version-aware documentation and code examples for a library.",
-      promptSnippet: "Get current library documentation and code examples.",
-      promptGuidelines: ["Use library_docs for current APIs, framework behavior, SDK examples, package docs, and version-specific library questions."],
+      description: "Fetch current, version-aware documentation and code examples for a library. Pass libraryName to resolve it automatically, or a known libraryId.",
+      promptSnippet: "Get current, version-aware library/framework/SDK docs and code examples.",
+      promptGuidelines: ["Use library_docs for any library, framework, SDK, API, or CLI — even familiar ones like React, Next.js, Prisma, or Express. Training data may be outdated; this returns version-specific docs.", "Prefer library_docs over web_search or your own knowledge for library/API questions. Pass libraryName and query; you rarely need library_search first."],
       parameters: buildLibraryDocsSchema(),
       async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
         const params = rawParams as Record<string, any>;
@@ -154,7 +154,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
       label: "Code Search",
       description: "Find practical code examples, usage patterns, setup snippets, migrations, and error context.",
       promptSnippet: "Find real-world code examples, usage patterns, migrations, and error context.",
-      promptGuidelines: ["Use code_search for real-world code examples, GitHub/open-source usage patterns, API syntax examples, setup snippets, migrations, and error messages."],
+      promptGuidelines: ["Use code_search for real-world code examples, usage patterns, setup snippets, migrations, and error context from open source.", "Prefer library_docs for official API/reference documentation."],
       parameters: buildCodeSearchSchema(),
       async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
         const params = rawParams as Record<string, any>;
