@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "code-security": {
+      "source": "semgrep/skills",
+      "sourceType": "github",
+      "skillPath": "skills/code-security/SKILL.md",
+      "computedHash": "56cbeeac5ccf346461e60f08fde411aa1f6e97ffed94fc83d871c2e4ce2ee4a6"
+    },
+    "codeguard": {
+      "source": "cosai-oasis/project-codeguard",
+      "sourceType": "github",
+      "skillPath": "skills/codeguard/SKILL.md",
+      "computedHash": "e91f0d77cea054c02dfee9f2befee881af94d89cc709d5847c49637a719ba098"
+    },
+    "semgrep": {
+      "source": "semgrep/skills",
+      "sourceType": "github",
+      "skillPath": "skills/semgrep/SKILL.md",
+      "computedHash": "2ea1b9502a5cebbc74b5791dcabac00090bb00fc9a67d87a54bbd895c74a1cd6"
+    }
+  }
+}
