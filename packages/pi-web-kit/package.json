@@ -1,6 +1,6 @@
 {
   "name": "pi-web-kit",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Context-efficient web search and fetch tools for Pi.",
   "type": "module",
   "license": "MIT",
