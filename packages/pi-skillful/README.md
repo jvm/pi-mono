@@ -6,8 +6,9 @@
 
 Make [Pi](https://pi.dev) skills easier to invoke, curate, and control without editing their source files.
 
-`pi-skillful` provides three focused upgrades:
+`pi-skillful` provides four focused upgrades:
 
+- **Progressive skill loading**: discover `.agents/skills/` from every ancestor directory (like `AGENTS.md`), not just within the git repo boundary.
 - **Inline skill invocation**: invoke one or more skills anywhere in a prompt with `/skill:name`.
 - **Skill prompt visibility**: choose which skills are hidden from the model's automatic skill-discovery prompt while keeping them explicitly invokable.
 - **Session skill toggles**: assign up to nine skills to number slots and toggle model visibility while writing a prompt.
@@ -16,6 +17,14 @@ Make [Pi](https://pi.dev) skills easier to invoke, curate, and control without e
 > Pi packages can execute arbitrary code through extensions. Review package source before installing any third-party Pi package.
 
 ## Features
+
+### Progressive skill loading
+
+Pi discovers `.agents/skills/` directories in ancestor folders, but stops at the git repo root — skills above the repo boundary are invisible. `pi-skillful` removes that boundary by walking the full ancestor chain to the filesystem root, mirroring how `AGENTS.md` context files work.
+
+No configuration needed. When a git repo is detected, `pi-skillful` automatically contributes `.agents/skills/` directories from parent directories above the repo root (excluding `~/.agents/skills/`, which Pi already loads globally). In projects without a git repo, Pi already walks to the filesystem root and this feature has no effect.
+
+Skill name collisions follow Pi's first-wins rule: skills discovered closer to the working directory take precedence over skills with the same name found higher up.
 
 ### Inline skill invocation
 
