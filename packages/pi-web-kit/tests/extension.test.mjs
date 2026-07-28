@@ -143,6 +143,37 @@ test("developer-search tools are hidden unless backing API keys are available", 
   }
 });
 
+// Regression: web_search and code_search may only defer to library_docs when
+// library_docs is actually registered (CONTEXT7_API_KEY set). Otherwise they
+// would steer documentation requests toward a missing tool and, for web_search,
+// exclude library topics from its own lane.
+test("library_docs deferral guidance only appears when Context7 is configured", () => {
+  const oldExa = process.env.EXA_API_KEY;
+  const oldContext7 = process.env.CONTEXT7_API_KEY;
+  const defers = (tool) => (tool?.promptGuidelines ?? []).some((g) => g.includes("library_docs"));
+  try {
+    delete process.env.EXA_API_KEY;
+    delete process.env.CONTEXT7_API_KEY;
+    let web = registerWithFlags({}).find((t) => t.name === "web_search");
+    assert(!defers(web), "web_search must not defer to library_docs when Context7 is absent");
+    assert((web.promptGuidelines ?? []).every((g) => !g.includes("non-library")), "web_search must stay usable for library docs when Context7 is absent");
+
+    process.env.EXA_API_KEY = "exa-test";
+    const code = registerWithFlags({}).find((t) => t.name === "code_search");
+    assert(!defers(code), "code_search must not defer to library_docs when Context7 is absent");
+
+    process.env.CONTEXT7_API_KEY = "ctx7sk_test";
+    const tools = registerWithFlags({});
+    assert(defers(tools.find((t) => t.name === "web_search")), "web_search defers to library_docs when Context7 is present");
+    assert(defers(tools.find((t) => t.name === "code_search")), "code_search defers to library_docs when Context7 is present");
+  } finally {
+    if (oldExa === undefined) delete process.env.EXA_API_KEY;
+    else process.env.EXA_API_KEY = oldExa;
+    if (oldContext7 === undefined) delete process.env.CONTEXT7_API_KEY;
+    else process.env.CONTEXT7_API_KEY = oldContext7;
+  }
+});
+
 test("web_search returns grouped multi-query output with bounded details", async () => {
   const tools = registerWithFlags({});
   const searchTool = tools.find((t) => t.name === "web_search");

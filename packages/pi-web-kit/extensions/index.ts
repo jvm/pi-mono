@@ -38,8 +38,17 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
     name: "web_search",
     label: "Web Search",
     description: buildSearchDescription(startupConfig.provider_search),
-    promptSnippet: "Search the live web for current events, news, and non-library topics.",
-    promptGuidelines: ["Use web_search for current events, news, and non-library topics.", "Prefer library_docs over web_search for versioned library/framework/SDK documentation."],
+    promptSnippet: startupConfig.apiKeys.context7
+      ? "Search the live web for current events, news, and non-library topics."
+      : "Find current or external web information.",
+    promptGuidelines: [
+      startupConfig.apiKeys.context7
+        ? "Use web_search for current events, news, and non-library topics."
+        : "Use web_search to find current or external web information.",
+      ...(startupConfig.apiKeys.context7
+        ? ["Prefer library_docs over web_search for versioned library/framework/SDK documentation."]
+        : []),
+    ],
     parameters: buildSearchSchema(startupConfig.provider_search),
     async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
       const params = rawParams as Record<string, any>;
@@ -154,7 +163,10 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
       label: "Code Search",
       description: "Find practical code examples, usage patterns, setup snippets, migrations, and error context.",
       promptSnippet: "Find real-world code examples, usage patterns, migrations, and error context.",
-      promptGuidelines: ["Use code_search for real-world code examples, usage patterns, setup snippets, migrations, and error context from open source.", "Prefer library_docs for official API/reference documentation."],
+      promptGuidelines: [
+        "Use code_search for real-world code examples, usage patterns, setup snippets, migrations, and error context from open source.",
+        ...(startupConfig.apiKeys.context7 ? ["Prefer library_docs for official API/reference documentation."] : []),
+      ],
       parameters: buildCodeSearchSchema(),
       async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
         const params = rawParams as Record<string, any>;
