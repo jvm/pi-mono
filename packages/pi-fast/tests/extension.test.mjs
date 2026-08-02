@@ -33,6 +33,7 @@ function makeContext(model, hasUI = true) {
   const notifications = [];
   return {
     model,
+    mode: hasUI ? "tui" : "print",
     hasUI,
     statuses,
     notifications,
@@ -82,6 +83,21 @@ test("keeps Fast off by default and rewrites supported provider requests after t
 
   await pi.shortcuts.get("ctrl+shift+f").handler(context);
   assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast off" });
+
+  await pi.commands.get("fast").handler("on", context);
+  await pi.handlers.get("session_start")[0]({}, context);
+  assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast off" });
+  assert.deepEqual(await beforeRequest({ payload: { model: "gpt-5.4" } }, context), undefined);
+});
+
+test("does not render footer status outside TUI", async () => {
+  const pi = makePi();
+  piFast(pi);
+  const context = makeContext({ provider: "openai-codex", id: "gpt-5.4" }, false);
+
+  await pi.handlers.get("session_start")[0]({}, context);
+
+  assert.deepEqual(context.statuses, []);
 });
 
 test("does not enable Fast for unsupported models", async () => {

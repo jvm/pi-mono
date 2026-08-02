@@ -8,7 +8,7 @@ Security fixes are provided for the latest released version of `pi-fast`.
 
 Please do not open a public issue for suspected security vulnerabilities.
 
-Report privately by contacting the repository maintainer through GitHub. Include:
+Report privately through [GitHub Security Advisories](https://github.com/jvm/pi-mono/security/advisories/new) or by contacting the repository maintainer through GitHub. Include:
 
 - a description of the issue;
 - steps to reproduce;

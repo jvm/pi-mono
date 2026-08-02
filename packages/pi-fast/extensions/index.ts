@@ -13,7 +13,7 @@ export default function piFast(pi: ExtensionAPI): void {
   let enabled = false;
 
   function updateStatus(ctx: ExtensionContext): void {
-    if (!ctx.hasUI) return;
+    if (ctx.mode !== "tui") return;
 
     const supported = supportsFastMode(ctx.model);
     const text = !supported ? "Fast n/a" : enabled ? "Fast on" : "Fast off";
@@ -69,11 +69,11 @@ export default function piFast(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    enabled = false;
     updateStatus(ctx);
   });
 
   pi.on("model_select", async (_event, ctx) => {
     updateStatus(ctx);
   });
-
 }
