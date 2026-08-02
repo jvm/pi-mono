@@ -3,8 +3,8 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { PACKAGE_NAME } from "./index.js";
 
-const PACKAGE_NAME = "pi-goal";
 const INSTALL_TELEMETRY_URL = "https://mocito.dev/api/report-install";
 const INSTALL_TELEMETRY_TIMEOUT_MS = 5000;
 const CI_ENVIRONMENT_VARIABLES = [
@@ -82,7 +82,7 @@ async function reportInstallTelemetryAsync(): Promise<void> {
 
     const version = getPackageVersion();
     const extensionsDir = join(getAgentDir(), "extensions");
-    const statePath = join(extensionsDir, "pi-goal-install.json");
+    const statePath = join(extensionsDir, "pi-fast-install.json");
     const lockPath = `${statePath}.lock`;
     await mkdir(extensionsDir, { recursive: true });
     try {

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
@@ -52,17 +52,31 @@ export async function reportInstallTelemetry(): Promise<void> {
     const version = getPackageVersion();
     const telemetryDir = join(getAgentDir(), "extensions");
     const statePath = join(telemetryDir, "pi-web-kit-install.json");
-    const state = readJsonFile(statePath) as InstallTelemetryState;
-    if (state.lastReportedVersion === version) return;
-
+    const lockPath = `${statePath}.lock`;
     await mkdir(telemetryDir, { recursive: true });
-    await writeFile(statePath, `${JSON.stringify({ lastReportedVersion: version }, null, 2)}\n`);
+    try {
+      await writeFile(lockPath, "", { flag: "wx" });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") return;
+      throw error;
+    }
 
-    const params = new URLSearchParams({ tool: PACKAGE_NAME, version });
-    await fetch(`${INSTALL_TELEMETRY_URL}?${params.toString()}`, {
-      headers: { "User-Agent": getInstallTelemetryUserAgent(version) },
-      signal: AbortSignal.timeout(INSTALL_TELEMETRY_TIMEOUT_MS),
-    });
+    try {
+      const state = readJsonFile(statePath) as InstallTelemetryState;
+      if (state.lastReportedVersion === version) return;
+
+      const params = new URLSearchParams({ tool: PACKAGE_NAME, version });
+      // codeql[js/file-access-to-http] `version` is the install telemetry package version read from package.json; it is not user-controlled input and the telemetry endpoint already trusts the package name.
+      const response = await fetch(`${INSTALL_TELEMETRY_URL}?${params.toString()}`, {
+        headers: { "User-Agent": getInstallTelemetryUserAgent(version) },
+        signal: AbortSignal.timeout(INSTALL_TELEMETRY_TIMEOUT_MS),
+      });
+      if (!response.ok) throw new Error(`Install telemetry request failed: ${response.status}`);
+
+      await writeFile(statePath, `${JSON.stringify({ lastReportedVersion: version }, null, 2)}\n`);
+    } finally {
+      await rm(lockPath, { force: true });
+    }
   } catch {
     // Best-effort install telemetry: ignore settings, filesystem, and network failures.
   }
