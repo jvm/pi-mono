@@ -97,6 +97,7 @@ async function reportInstallTelemetryAsync(): Promise<void> {
       if (state.lastReportedVersion === version) return;
 
       const params = new URLSearchParams({ tool: PACKAGE_NAME, version });
+      // codeql[js/file-access-to-http] `version` is the install telemetry package version read from package.json; it is not user-controlled input and the telemetry endpoint already trusts the package name.
       const response = await fetch(`${INSTALL_TELEMETRY_URL}?${params.toString()}`, {
         headers: { "User-Agent": getInstallTelemetryUserAgent(version) },
         signal: AbortSignal.timeout(INSTALL_TELEMETRY_TIMEOUT_MS),
