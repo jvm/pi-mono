@@ -11,8 +11,6 @@ import {
   supportsRemoteCompaction,
 } from "../src/remote-compaction.js";
 
-const BETA_HEADER = "x-codex-beta-features";
-
 export default function piCodexCompaction(pi: ExtensionAPI): void {
   reportInstallTelemetry();
 
@@ -38,8 +36,8 @@ export default function piCodexCompaction(pi: ExtensionAPI): void {
 
   pi.on("before_provider_headers", (event, ctx) => {
     if (!supportsRemoteCompaction(ctx.model)) return;
-    const existing = event.headers[BETA_HEADER];
-    event.headers[BETA_HEADER] = existing && existing !== "remote_compaction_v2"
+    const existing = event.headers["x-codex-beta-features"];
+    event.headers["x-codex-beta-features"] = existing && existing !== "remote_compaction_v2"
       ? `${existing},remote_compaction_v2`
       : "remote_compaction_v2";
   });
