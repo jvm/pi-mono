@@ -63,5 +63,8 @@
   },
   "engines": {
     "node": ">=20.6.0"
+  },
+  "dependencies": {
+    "@mocito/install-telemetry": "0.1.0"
   }
 }

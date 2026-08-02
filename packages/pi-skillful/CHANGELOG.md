@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Changed
+
+- Share install telemetry mechanics through `@mocito/install-telemetry` while preserving Pi-specific settings and state paths.
+
 ## [0.4.0] - 2026-07-28
 
 ### Added

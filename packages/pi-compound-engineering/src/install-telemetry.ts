@@ -1,118 +1,76 @@
 import { readFileSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { reportInstallTelemetry as report } from "@mocito/install-telemetry";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const PACKAGE_NAME = "pi-compound-engineering";
-const INSTALL_TELEMETRY_URL = "https://mocito.dev/api/report-install";
-const INSTALL_TELEMETRY_TIMEOUT_MS = 5000;
+const INSTALL_TELEMETRY_ENDPOINT = "https://mocito.dev/api/report-install";
 const CI_ENVIRONMENT_VARIABLES = [
-	"APPVEYOR",
-	"BITBUCKET_BUILD_NUMBER",
-	"BUILDKITE",
-	"CIRCLECI",
-	"CODESPACES",
-	"DRONE",
-	"GITHUB_ACTIONS",
-	"GITLAB_CI",
-	"JENKINS_URL",
-	"NETLIFY",
-	"TEAMCITY_VERSION",
-	"TF_BUILD",
-	"TRAVIS",
-	"VERCEL",
+  "APPVEYOR",
+  "BITBUCKET_BUILD_NUMBER",
+  "BUILDKITE",
+  "CIRCLECI",
+  "CODESPACES",
+  "DRONE",
+  "GITHUB_ACTIONS",
+  "GITLAB_CI",
+  "JENKINS_URL",
+  "NETLIFY",
+  "TEAMCITY_VERSION",
+  "TF_BUILD",
+  "TRAVIS",
+  "VERCEL",
 ];
 
-interface InstallTelemetryState {
-	lastReportedVersion?: string;
-}
-
 interface PiSettingsDocument {
-	enableInstallTelemetry?: unknown;
+  enableInstallTelemetry?: unknown;
 }
 
 function readJsonFile(path: string): unknown {
-	try {
-		return JSON.parse(readFileSync(path, "utf8")) as unknown;
-	} catch {
-		return {};
-	}
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as unknown;
+  } catch {
+    return {};
+  }
 }
 
 function isTruthyEnvFlag(value: string | undefined): boolean {
-	if (!value) return false;
-	return value === "1" || value.toLowerCase() === "true" || value.toLowerCase() === "yes";
+  if (!value) return false;
+  return value === "1" || value.toLowerCase() === "true" || value.toLowerCase() === "yes";
 }
 
 function isPresentEnvFlag(value: string | undefined): boolean {
-	if (!value) return false;
-	const normalized = value.toLowerCase();
-	return normalized !== "0" && normalized !== "false" && normalized !== "no";
-}
-
-function isCiEnvironment(): boolean {
-	if (isTruthyEnvFlag(process.env.CI)) return true;
-	return CI_ENVIRONMENT_VARIABLES.some((name) => isPresentEnvFlag(process.env[name]));
+  if (!value) return false;
+  const normalized = value.toLowerCase();
+  return normalized !== "0" && normalized !== "false" && normalized !== "no";
 }
 
 function isInstallTelemetryEnabled(): boolean {
-	if (isCiEnvironment()) return false;
-	if (isTruthyEnvFlag(process.env.PI_OFFLINE)) return false;
-	if (process.env.PI_TELEMETRY !== undefined) return isTruthyEnvFlag(process.env.PI_TELEMETRY);
+  if (isTruthyEnvFlag(process.env.CI)) return false;
+  if (CI_ENVIRONMENT_VARIABLES.some((name) => isPresentEnvFlag(process.env[name]))) return false;
+  if (isTruthyEnvFlag(process.env.PI_OFFLINE)) return false;
+  if (process.env.PI_TELEMETRY !== undefined) return isTruthyEnvFlag(process.env.PI_TELEMETRY);
 
-	const settings = readJsonFile(join(getAgentDir(), "settings.json")) as PiSettingsDocument;
-	return settings.enableInstallTelemetry !== false;
+  const settings = readJsonFile(join(getAgentDir(), "settings.json")) as PiSettingsDocument;
+  return settings.enableInstallTelemetry !== false;
 }
 
 function getPackageVersion(): string {
-	const packageJson = readJsonFile(fileURLToPath(new URL("../package.json", import.meta.url))) as { version?: unknown };
-	return typeof packageJson.version === "string" && packageJson.version.length > 0 ? packageJson.version : "0.0.0";
-}
-
-function getInstallTelemetryUserAgent(version: string): string {
-	const runtimeVersions = process.versions as NodeJS.ProcessVersions & { bun?: string };
-	const runtime = runtimeVersions.bun ? `bun/${runtimeVersions.bun}` : `node/${process.version}`;
-	return `${PACKAGE_NAME}/${version} (${process.platform}; ${runtime}; ${process.arch})`;
-}
-
-async function reportInstallTelemetryAsync(): Promise<void> {
-	try {
-		if (!isInstallTelemetryEnabled()) return;
-
-		const version = getPackageVersion();
-		const extensionsDir = join(getAgentDir(), "extensions");
-		const statePath = join(extensionsDir, "compound-engineering-install.json");
-		const lockPath = `${statePath}.lock`;
-		await mkdir(extensionsDir, { recursive: true });
-		try {
-			await writeFile(lockPath, "", { flag: "wx" });
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "EEXIST") return;
-			throw error;
-		}
-
-		try {
-			const state = readJsonFile(statePath) as InstallTelemetryState;
-			if (state.lastReportedVersion === version) return;
-
-			const params = new URLSearchParams({ tool: PACKAGE_NAME, version });
-			// codeql[js/file-access-to-http] `version` is the install telemetry package version read from package.json; it is not user-controlled input and the telemetry endpoint already trusts the package name.
-			const response = await fetch(`${INSTALL_TELEMETRY_URL}?${params.toString()}`, {
-				headers: { "User-Agent": getInstallTelemetryUserAgent(version) },
-				signal: AbortSignal.timeout(INSTALL_TELEMETRY_TIMEOUT_MS),
-			});
-			if (!response.ok) throw new Error(`Install telemetry request failed: ${response.status}`);
-
-			await writeFile(statePath, `${JSON.stringify({ lastReportedVersion: version }, null, 2)}\n`, "utf8");
-		} finally {
-			await rm(lockPath, { force: true });
-		}
-	} catch {
-		// Best-effort telemetry: ignore settings, filesystem, and network failures.
-	}
+  const packageJson = readJsonFile(fileURLToPath(new URL("../package.json", import.meta.url))) as { version?: unknown };
+  return typeof packageJson.version === "string" && packageJson.version.length > 0 ? packageJson.version : "0.0.0";
 }
 
 export function reportInstallTelemetry(): void {
-	void reportInstallTelemetryAsync();
+  try {
+    void report({
+      endpoint: INSTALL_TELEMETRY_ENDPOINT,
+      tool: PACKAGE_NAME,
+      version: getPackageVersion(),
+      statePath: join(getAgentDir(), "extensions", "compound-engineering-install.json"),
+      enabled: isInstallTelemetryEnabled(),
+    });
+  } catch {
+    // Best-effort telemetry: ignore local policy and filesystem failures.
+  }
 }
