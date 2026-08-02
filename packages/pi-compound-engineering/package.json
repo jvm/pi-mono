@@ -78,6 +78,6 @@
   },
   "homepage": "https://github.com/jvm/pi-mono/tree/main/packages/pi-compound-engineering#readme",
   "dependencies": {
-    "@mocito/install-telemetry": "0.1.0"
+    "@mocito/install-telemetry": "0.1.1"
   }
 }

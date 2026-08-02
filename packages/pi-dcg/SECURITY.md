@@ -54,4 +54,4 @@ Use least-privilege credentials, version control, backups, containers/VMs, and O
 
 ## Telemetry
 
-On startup, the package sends a best-effort install/update telemetry ping to `mocito.dev` once per package version unless disabled by CI, `PI_OFFLINE`, `PI_TELEMETRY`, or Pi's `enableInstallTelemetry` setting. The ping includes only package name/version and platform/runtime/architecture. It never includes commands, paths, dcg decisions, stderr, configuration, environment variables, prompts, credentials, or policy.
+On startup, `@mocito/install-telemetry` sends a best-effort install/update telemetry ping to the configured telemetry endpoint once per package version unless disabled by CI, `PI_OFFLINE`, `PI_TELEMETRY`, or Pi's `enableInstallTelemetry` setting. The ping includes only package name/version and platform/runtime/architecture. It never includes commands, paths, dcg decisions, stderr, configuration, environment variables, prompts, credentials, or policy.

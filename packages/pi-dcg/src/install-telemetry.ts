@@ -69,7 +69,7 @@ export function reportInstallTelemetry(): void {
       version: getPackageVersion(),
       statePath: join(getAgentDir(), "extensions", "pi-dcg-install.json"),
       enabled: isInstallTelemetryEnabled(),
-    });
+    }).catch(() => undefined);
   } catch {
     // Best-effort telemetry: ignore local policy and filesystem failures.
   }
