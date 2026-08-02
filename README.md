@@ -16,6 +16,12 @@ Each package installs independently. Pick the capability you need, then follow i
 | Control how skills are invoked and discovered | [pi-skillful](./packages/pi-skillful) | Inline invocation, prompt visibility controls, and session skill toggles. |
 | Learn from reference implementations | [pi-scout](./packages/pi-scout) | Reusable local reference repositories for agent exploration. |
 
+### Performance and providers
+
+| Need | Package | What it adds |
+| --- | --- | --- |
+| Use supported provider fast modes on demand | [pi-fast](./packages/pi-fast) | Session-local Fast toggles for provider/model pairs that advertise faster processing. |
+
 ### Research and create
 
 | Need | Package | What it adds |
