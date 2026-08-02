@@ -21,6 +21,7 @@ Each package installs independently. Pick the capability you need, then follow i
 | Need | Package | What it adds |
 | --- | --- | --- |
 | Use supported provider fast modes on demand | [pi-fast](./packages/pi-fast) | Session-local Fast toggles for provider/model pairs that advertise faster processing. |
+| Use Codex provider-side compaction | [pi-codex-compaction](./packages/pi-codex-compaction) | RemoteCompactionV2 checkpoints for supported OpenAI Codex sessions. |
 
 ### Research and create
 
