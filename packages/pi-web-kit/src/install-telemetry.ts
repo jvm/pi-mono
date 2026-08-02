@@ -55,14 +55,15 @@ export async function reportInstallTelemetry(): Promise<void> {
     const state = readJsonFile(statePath) as InstallTelemetryState;
     if (state.lastReportedVersion === version) return;
 
-    await mkdir(telemetryDir, { recursive: true });
-    await writeFile(statePath, `${JSON.stringify({ lastReportedVersion: version }, null, 2)}\n`);
-
     const params = new URLSearchParams({ tool: PACKAGE_NAME, version });
-    await fetch(`${INSTALL_TELEMETRY_URL}?${params.toString()}`, {
+    const response = await fetch(`${INSTALL_TELEMETRY_URL}?${params.toString()}`, {
       headers: { "User-Agent": getInstallTelemetryUserAgent(version) },
       signal: AbortSignal.timeout(INSTALL_TELEMETRY_TIMEOUT_MS),
     });
+    if (!response.ok) throw new Error(`Install telemetry request failed: ${response.status}`);
+
+    await mkdir(telemetryDir, { recursive: true });
+    await writeFile(statePath, `${JSON.stringify({ lastReportedVersion: version }, null, 2)}\n`);
   } catch {
     // Best-effort install telemetry: ignore settings, filesystem, and network failures.
   }

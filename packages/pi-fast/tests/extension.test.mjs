@@ -28,12 +28,12 @@ function makePi() {
   };
 }
 
-function makeContext(model, hasUI = true) {
+function makeContext(model, hasUI = true, mode = hasUI ? "tui" : "print") {
   const statuses = [];
   const notifications = [];
   return {
     model,
-    mode: hasUI ? "tui" : "print",
+    mode,
     hasUI,
     statuses,
     notifications,
@@ -93,7 +93,7 @@ test("keeps Fast off by default and rewrites supported provider requests after t
 test("does not render footer status outside TUI", async () => {
   const pi = makePi();
   piFast(pi);
-  const context = makeContext({ provider: "openai-codex", id: "gpt-5.4" }, false);
+  const context = makeContext({ provider: "openai-codex", id: "gpt-5.4" }, true, "print");
 
   await pi.handlers.get("session_start")[0]({}, context);
 
