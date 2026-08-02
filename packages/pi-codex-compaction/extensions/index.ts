@@ -3,6 +3,7 @@ import type {
   ExtensionHandler,
   SessionBeforeCompactEvent,
 } from "@earendil-works/pi-coding-agent";
+import { BETA_FEATURE } from "../src/codex-wire.js";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import {
   applyRemoteCompactionMarker,
@@ -37,9 +38,9 @@ export default function piCodexCompaction(pi: ExtensionAPI): void {
   pi.on("before_provider_headers", (event, ctx) => {
     if (!supportsRemoteCompaction(ctx.model)) return;
     const existing = event.headers["x-codex-beta-features"];
-    event.headers["x-codex-beta-features"] = existing && existing !== "remote_compaction_v2"
-      ? `${existing},remote_compaction_v2`
-      : "remote_compaction_v2";
+    const features = existing?.split(",").map((feature) => feature.trim()).filter(Boolean) ?? [];
+    if (!features.includes(BETA_FEATURE)) features.push(BETA_FEATURE);
+    event.headers["x-codex-beta-features"] = features.join(",");
   });
 
   pi.on("before_provider_request", (event, ctx) => {

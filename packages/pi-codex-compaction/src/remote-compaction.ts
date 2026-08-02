@@ -138,22 +138,29 @@ export function boundCompactionInput(
 ): unknown[] | undefined {
   const budget = Math.max(1, contextWindow - COMPACTION_RESPONSE_RESERVE_TOKENS);
   const bounded = input.map((item) => item);
-  const fits = () => estimatePayloadTokens({ instructions, input: bounded, tools }) <= budget;
+  let payloadBytes = estimateJsonBytes({ instructions, input: bounded, tools });
+  const fits = () => Math.ceil(payloadBytes / 4) <= budget;
   if (fits()) return bounded;
 
   // ponytail: trim tool outputs first; if structural content still exceeds the active model window,
   // let Pi's standard compaction path handle the request instead of inventing a lossy transcript rewrite.
-  for (let index = bounded.length - 1; index >= 0 && !fits(); index--) {
+  for (let index = bounded.length - 1; index >= 0; index--) {
     const item = bounded[index];
     if (!isRecord(item)) continue;
-    if (item.type === "function_call_output") {
-      bounded[index] = { ...item, output: TRUNCATED_TOOL_OUTPUT };
-    } else if (item.type === "tool_search_output") {
-      bounded[index] = { ...item, tools: [] };
-    }
+
+    const replacement = item.type === "function_call_output"
+      ? { ...item, output: TRUNCATED_TOOL_OUTPUT }
+      : item.type === "tool_search_output"
+        ? { ...item, tools: [] }
+        : undefined;
+    if (!replacement) continue;
+
+    payloadBytes += estimateJsonBytes(replacement) - estimateJsonBytes(item);
+    bounded[index] = replacement;
+    if (fits()) return bounded;
   }
 
-  return fits() ? bounded : undefined;
+  return undefined;
 }
 
 export function buildFallbackSummary(preparation: SessionBeforeCompactEvent["preparation"], messages: AgentMessage[]): string {
@@ -361,8 +368,8 @@ function isRemoteCompactionDetails(value: unknown): value is RemoteCompactionDet
   );
 }
 
-function estimatePayloadTokens(payload: unknown): number {
-  return Math.ceil(new TextEncoder().encode(JSON.stringify(payload) ?? "").byteLength / 4);
+function estimateJsonBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value) ?? "").byteLength;
 }
 
 function limitText(text: string, maxChars: number): string {

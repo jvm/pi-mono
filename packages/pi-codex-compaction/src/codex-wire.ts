@@ -2,7 +2,7 @@ const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_ENCRYPTED_CONTENT_CHARS = 2_000_000;
 const REQUEST_TIMEOUT_MS = 120_000;
 const ACCOUNT_ID_CLAIM = "https://api.openai.com/auth";
-const BETA_FEATURE = "remote_compaction_v2";
+export const BETA_FEATURE = "remote_compaction_v2";
 
 export interface CodexCompactionRequest {
   model: {
@@ -31,6 +31,7 @@ export async function requestRemoteCompaction(request: CodexCompactionRequest): 
     });
 
     if (!response.ok) {
+      if (response.body) await response.body.cancel().catch(() => undefined);
       throw new Error(`Codex compaction request returned HTTP ${response.status}`);
     }
 
@@ -190,6 +191,7 @@ function requestSignal(signal: AbortSignal | undefined): { signal: AbortSignal; 
   const controller = new AbortController();
   const onAbort = () => controller.abort(signal?.reason);
   signal?.addEventListener("abort", onAbort, { once: true });
+  if (signal?.aborted) onAbort();
   const timeout = setTimeout(() => controller.abort(new Error("Codex compaction request timed out")), REQUEST_TIMEOUT_MS);
 
   return {

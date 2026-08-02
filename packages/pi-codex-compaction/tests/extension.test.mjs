@@ -11,6 +11,7 @@ const {
   buildFallbackSummary,
   createRemoteCompaction,
   parseCompactionSse,
+  requestRemoteCompaction,
   resolveCodexResponsesUrl,
   supportsRemoteCompaction,
 } = await import("../src/index.ts");
@@ -93,6 +94,7 @@ test("resolves only HTTPS Codex Responses endpoints", () => {
   assert.equal(resolveCodexResponsesUrl("https://chatgpt.com/backend-api"), "https://chatgpt.com/backend-api/codex/responses");
   assert.equal(resolveCodexResponsesUrl("https://chatgpt.com/backend-api/codex"), "https://chatgpt.com/backend-api/codex/responses");
   assert.throws(() => resolveCodexResponsesUrl("http://localhost:1234"), /HTTPS/);
+  assert.throws(() => resolveCodexResponsesUrl("https://user:pass@chatgpt.com/backend-api"), /credentials/);
 });
 
 test("parses the completed remote compaction checkpoint", () => {
@@ -118,9 +120,18 @@ test("uses the remote checkpoint and keeps Pi's retained user out of the request
   };
 
   try {
+    const context = makeContext({
+      sessionManager: {
+        getSessionId: () => "session_test",
+        buildContextEntries: () => [{
+          type: "message",
+          message: { role: "user", content: "retained", timestamp: 0 },
+        }],
+      },
+    });
     const result = await createRemoteCompaction(
       { preparation: preparation(), signal: new AbortController().signal },
-      makeContext(),
+      context,
       () => [],
     );
 
@@ -132,6 +143,27 @@ test("uses the remote checkpoint and keeps Pi's retained user out of the request
     assert.equal(body.input.some((item) => JSON.stringify(item).includes("retained")), false);
     assert.equal(requests[0].init.headers.get("x-codex-beta-features"), "remote_compaction_v2");
     assert.equal(requests[0].init.headers.get("chatgpt-account-id"), "acct_test");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("honors an already-aborted compaction signal", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedSignal;
+  globalThis.fetch = async (_url, init) => {
+    capturedSignal = init.signal;
+    throw new Error("fetch called");
+  };
+
+  const controller = new AbortController();
+  controller.abort(new Error("cancelled"));
+  try {
+    await assert.rejects(
+      () => requestRemoteCompaction({ model, apiKey: token, body: {}, signal: controller.signal }),
+      /fetch called/,
+    );
+    assert.equal(capturedSignal.aborted, true);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -198,6 +230,10 @@ test("registers and wires the compaction/request hooks", async () => {
   const headers = {};
   await pi.handlers.get("before_provider_headers")({ headers }, makeContext());
   assert.equal(headers["x-codex-beta-features"], "remote_compaction_v2");
+
+  const existingHeaders = { "x-codex-beta-features": "other, remote_compaction_v2" };
+  await pi.handlers.get("before_provider_headers")({ headers: existingHeaders }, makeContext());
+  assert.equal(existingHeaders["x-codex-beta-features"], "other,remote_compaction_v2");
 
   const details = {
     kind: "pi-codex-compaction",
