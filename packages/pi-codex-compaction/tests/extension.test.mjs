@@ -140,6 +140,7 @@ test("uses the remote checkpoint and keeps Pi's retained user out of the request
     assert.equal(requests.length, 1);
     const body = JSON.parse(requests[0].init.body);
     assert.equal(body.input.at(-1).type, "compaction_trigger");
+    assert.equal(body.input.some((item) => JSON.stringify(item).includes("discard this")), true);
     assert.equal(body.input.some((item) => JSON.stringify(item).includes("retained")), false);
     assert.equal(requests[0].init.headers.get("x-codex-beta-features"), "remote_compaction_v2");
     assert.equal(requests[0].init.headers.get("chatgpt-account-id"), "acct_test");
@@ -210,6 +211,7 @@ test("reduces tool outputs before rejecting an input that cannot fit the active 
   assert.equal(bounded[0].output.startsWith("[Tool output omitted"), true);
   assert.deepEqual(bounded[1].tools, []);
   assert.equal(boundCompactionInput([{ type: "message", content: [{ text: "x".repeat(100_000) }] }], "system", [], 1_000), undefined);
+  assert.equal(boundCompactionInput([{ type: "message", content: [{ text: "a".repeat(2_000) }] }], "system", [], 1_000), undefined);
 });
 
 test("keeps a bounded readable fallback for model switches", () => {

@@ -190,8 +190,11 @@ async function readBoundedBody(response: Response): Promise<string> {
 function requestSignal(signal: AbortSignal | undefined): { signal: AbortSignal; cleanup: () => void } {
   const controller = new AbortController();
   const onAbort = () => controller.abort(signal?.reason);
-  signal?.addEventListener("abort", onAbort, { once: true });
-  if (signal?.aborted) onAbort();
+  if (signal?.aborted) {
+    controller.abort(signal.reason);
+  } else {
+    signal?.addEventListener("abort", onAbort, { once: true });
+  }
   const timeout = setTimeout(() => controller.abort(new Error("Codex compaction request timed out")), REQUEST_TIMEOUT_MS);
 
   return {

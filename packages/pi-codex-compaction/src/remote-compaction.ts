@@ -138,8 +138,8 @@ export function boundCompactionInput(
 ): unknown[] | undefined {
   const budget = Math.max(1, contextWindow - COMPACTION_RESPONSE_RESERVE_TOKENS);
   const bounded = input.map((item) => item);
-  let payloadBytes = estimateJsonBytes({ instructions, input: bounded, tools });
-  const fits = () => Math.ceil(payloadBytes / 4) <= budget;
+  let estimatedTokens = estimateConservativeTokens({ instructions, input: bounded, tools });
+  const fits = () => estimatedTokens <= budget;
   if (fits()) return bounded;
 
   // ponytail: trim tool outputs first; if structural content still exceeds the active model window,
@@ -155,7 +155,7 @@ export function boundCompactionInput(
         : undefined;
     if (!replacement) continue;
 
-    payloadBytes += estimateJsonBytes(replacement) - estimateJsonBytes(item);
+    estimatedTokens += estimateConservativeTokens(replacement) - estimateConservativeTokens(item);
     bounded[index] = replacement;
     if (fits()) return bounded;
   }
@@ -368,7 +368,8 @@ function isRemoteCompactionDetails(value: unknown): value is RemoteCompactionDet
   );
 }
 
-function estimateJsonBytes(value: unknown): number {
+function estimateConservativeTokens(value: unknown): number {
+  // One UTF-8 byte per token is deliberately conservative without a provider tokenizer.
   return new TextEncoder().encode(JSON.stringify(value) ?? "").byteLength;
 }
 
