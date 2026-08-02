@@ -22,3 +22,5 @@ The maintainer will acknowledge reports as soon as practical and coordinate disc
 `pi-codex-image-gen` is a Pi package. Pi extensions execute with the same permissions as the local user running Pi. Users should review installed Pi packages and only install packages from sources they trust.
 
 The extension uses Pi's existing `openai-codex` login to obtain a short-lived JWT. The token is used only for requests to the Codex Responses API and is never written to disk or logged. Do not commit API keys, tokens, or decoded JWT payloads.
+
+At startup, `@mocito/install-telemetry` sends a best-effort install/update ping to the configured telemetry endpoint once per package version unless CI, Pi offline/telemetry settings, or `enableInstallTelemetry: false` disables it. It contains only the package name/version and parsed platform/runtime/architecture; it does not include prompts, file paths, configuration values, credentials, or provider responses.

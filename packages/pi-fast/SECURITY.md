@@ -23,6 +23,6 @@ The extension does not read or log prompts, credentials, auth headers, or provid
 
 Fast mode is off by default and is never persisted. Models without an advertised Fast tier are not modified. The `priority` tier can increase provider usage, so the footer and toggle notifications make the active state visible.
 
-On startup, the package sends a best-effort install/update telemetry ping to `mocito.dev` once per package version unless Pi telemetry is disabled, offline mode is enabled, or Pi runs in CI. The ping contains only the package name, version, and parsed platform/runtime/architecture from its User-Agent; it does not include prompts, file paths, config values, environment variables, or API keys.
+On startup, `@mocito/install-telemetry` sends a best-effort install/update telemetry ping to the configured telemetry endpoint once per package version unless Pi telemetry is disabled, offline mode is enabled, or Pi runs in CI. The ping contains only the package name, version, and parsed platform/runtime/architecture from its User-Agent; it does not include prompts, file paths, config values, environment variables, or API keys.
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development and validation instructions.

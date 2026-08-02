@@ -1,17 +1,35 @@
 import { readFileSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { reportInstallTelemetry as report } from "@mocito/install-telemetry";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const PACKAGE_NAME = "pi-web-kit";
-const INSTALL_TELEMETRY_URL = "https://mocito.dev/api/report-install";
-const INSTALL_TELEMETRY_TIMEOUT_MS = 5000;
+const INSTALL_TELEMETRY_ENDPOINT = "https://mocito.dev/api/report-install";
+const CI_ENVIRONMENT_VARIABLES = [
+  "APPVEYOR",
+  "BITBUCKET_BUILD_NUMBER",
+  "BUILDKITE",
+  "CIRCLECI",
+  "CODESPACES",
+  "DRONE",
+  "GITHUB_ACTIONS",
+  "GITLAB_CI",
+  "JENKINS_URL",
+  "NETLIFY",
+  "TEAMCITY_VERSION",
+  "TF_BUILD",
+  "TRAVIS",
+  "VERCEL",
+];
 
-type InstallTelemetryState = { lastReportedVersion?: string };
+interface PiSettingsDocument {
+  enableInstallTelemetry?: unknown;
+}
 
 function readJsonFile(path: string): unknown {
   try {
-    return JSON.parse(readFileSync(path, "utf8"));
+    return JSON.parse(readFileSync(path, "utf8")) as unknown;
   } catch {
     return {};
   }
@@ -22,62 +40,37 @@ function isTruthyEnvFlag(value: string | undefined): boolean {
   return value === "1" || value.toLowerCase() === "true" || value.toLowerCase() === "yes";
 }
 
+function isPresentEnvFlag(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.toLowerCase();
+  return normalized !== "0" && normalized !== "false" && normalized !== "no";
+}
+
 function isInstallTelemetryEnabled(): boolean {
+  if (isTruthyEnvFlag(process.env.CI)) return false;
+  if (CI_ENVIRONMENT_VARIABLES.some((name) => isPresentEnvFlag(process.env[name]))) return false;
   if (isTruthyEnvFlag(process.env.PI_OFFLINE)) return false;
-  if (isTruthyEnvFlag(process.env.CI) || isTruthyEnvFlag(process.env.GITHUB_ACTIONS)) return false;
   if (process.env.PI_TELEMETRY !== undefined) return isTruthyEnvFlag(process.env.PI_TELEMETRY);
-  const settings = readJsonFile(join(getAgentDir(), "settings.json")) as { enableInstallTelemetry?: unknown };
+
+  const settings = readJsonFile(join(getAgentDir(), "settings.json")) as PiSettingsDocument;
   return settings.enableInstallTelemetry !== false;
 }
 
 function getPackageVersion(): string {
-  try {
-    const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version?: unknown };
-    return typeof packageJson.version === "string" && packageJson.version.length > 0 ? packageJson.version : "0.0.0";
-  } catch {
-    return "0.0.0";
-  }
+  const packageJson = readJsonFile(fileURLToPath(new URL("../package.json", import.meta.url))) as { version?: unknown };
+  return typeof packageJson.version === "string" && packageJson.version.length > 0 ? packageJson.version : "0.0.0";
 }
 
-function getInstallTelemetryUserAgent(version: string): string {
-  const runtimeVersions = process.versions as NodeJS.ProcessVersions & { bun?: string };
-  const runtime = runtimeVersions.bun ? `bun/${runtimeVersions.bun}` : `node/${process.version}`;
-  return `${PACKAGE_NAME}/${version} (${process.platform}; ${runtime}; ${process.arch})`;
-}
-
-export async function reportInstallTelemetry(): Promise<void> {
+export function reportInstallTelemetry(): void {
   try {
-    if (!isInstallTelemetryEnabled()) return;
-
-    const version = getPackageVersion();
-    const telemetryDir = join(getAgentDir(), "extensions");
-    const statePath = join(telemetryDir, "pi-web-kit-install.json");
-    const lockPath = `${statePath}.lock`;
-    await mkdir(telemetryDir, { recursive: true });
-    try {
-      await writeFile(lockPath, "", { flag: "wx" });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") return;
-      throw error;
-    }
-
-    try {
-      const state = readJsonFile(statePath) as InstallTelemetryState;
-      if (state.lastReportedVersion === version) return;
-
-      const params = new URLSearchParams({ tool: PACKAGE_NAME, version });
-      // codeql[js/file-access-to-http] `version` is the install telemetry package version read from package.json; it is not user-controlled input and the telemetry endpoint already trusts the package name.
-      const response = await fetch(`${INSTALL_TELEMETRY_URL}?${params.toString()}`, {
-        headers: { "User-Agent": getInstallTelemetryUserAgent(version) },
-        signal: AbortSignal.timeout(INSTALL_TELEMETRY_TIMEOUT_MS),
-      });
-      if (!response.ok) throw new Error(`Install telemetry request failed: ${response.status}`);
-
-      await writeFile(statePath, `${JSON.stringify({ lastReportedVersion: version }, null, 2)}\n`);
-    } finally {
-      await rm(lockPath, { force: true });
-    }
+    void report({
+      endpoint: INSTALL_TELEMETRY_ENDPOINT,
+      tool: PACKAGE_NAME,
+      version: getPackageVersion(),
+      statePath: join(getAgentDir(), "extensions", "pi-web-kit-install.json"),
+      enabled: isInstallTelemetryEnabled(),
+    }).catch(() => undefined);
   } catch {
-    // Best-effort install telemetry: ignore settings, filesystem, and network failures.
+    // Best-effort telemetry: ignore local policy and filesystem failures.
   }
 }

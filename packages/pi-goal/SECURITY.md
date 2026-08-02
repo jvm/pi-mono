@@ -25,6 +25,6 @@ The maintainer will acknowledge reports as soon as practical and coordinate disc
 
 The package does not require API keys and does not read provider credentials. Its model tools can only inspect the current goal, create a new explicitly requested goal when none exists, or mark the current goal `complete`/`blocked`.
 
-On startup, the extension sends a best-effort install/update telemetry ping to `mocito.dev` once per package version unless Pi telemetry is disabled, offline mode is enabled, or Pi runs in CI. The ping includes only the package name, version, and parsed platform/runtime/architecture from its User-Agent; it does not include prompts, goal objectives, file paths, session data, config values, or API keys. Telemetry writes a local deduplication marker under Pi's agent extensions directory.
+On startup, `@mocito/install-telemetry` sends a best-effort install/update telemetry ping to the configured telemetry endpoint once per package version unless Pi telemetry is disabled, offline mode is enabled, or Pi runs in CI. The ping includes only the package name, version, and parsed platform/runtime/architecture from its User-Agent; it does not include prompts, goal objectives, file paths, session data, config values, or API keys. Telemetry writes a local deduplication marker under Pi's agent extensions directory.
 
 Goal objectives are treated as untrusted user-provided task data when continuation context is built. They are JSON-encoded before being embedded in the hidden context message to reduce prompt-injection risk from delimiter-breaking text.
