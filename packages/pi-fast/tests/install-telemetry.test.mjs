@@ -44,40 +44,21 @@ async function waitFor(predicate) {
   }
 }
 
-test("retries telemetry after failed and non-OK reports", async () => {
+async function withTelemetryEnvironment(callback) {
   const agentDir = await mkdtemp(join(tmpdir(), "pi-fast-telemetry-"));
   const statePath = join(agentDir, "extensions", "pi-fast-install.json");
+  const lockPath = `${statePath}.lock`;
   const previousEnv = Object.fromEntries(
     CI_ENVIRONMENT_VARIABLES.map((name) => [name, process.env[name]]),
   );
   const previousFetch = globalThis.fetch;
-  let calls = 0;
 
   for (const name of CI_ENVIRONMENT_VARIABLES) delete process.env[name];
   process.env.PI_TELEMETRY = "1";
   process.env.PI_CODING_AGENT_DIR = agentDir;
-  globalThis.fetch = async () => {
-    calls += 1;
-    if (calls === 1) throw new Error("temporary network failure");
-    return { ok: calls !== 2, status: calls === 2 ? 503 : 204 };
-  };
 
   try {
-    reportInstallTelemetry();
-    await waitFor(() => calls === 1);
-    assert.equal(await exists(statePath), false);
-
-    reportInstallTelemetry();
-    await waitFor(() => calls === 2);
-    assert.equal(await exists(statePath), false);
-
-    reportInstallTelemetry();
-    await waitFor(() => calls === 3 && exists(statePath));
-    assert.deepEqual(JSON.parse(await readFile(statePath, "utf8")), { lastReportedVersion: "0.1.0" });
-
-    reportInstallTelemetry();
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.equal(calls, 3);
+    await callback({ statePath, lockPath });
   } finally {
     globalThis.fetch = previousFetch;
     for (const [name, value] of Object.entries(previousEnv)) {
@@ -86,4 +67,58 @@ test("retries telemetry after failed and non-OK reports", async () => {
     }
     await rm(agentDir, { recursive: true, force: true });
   }
+}
+
+test("retries telemetry after failed and non-OK reports", async () => {
+  await withTelemetryEnvironment(async ({ statePath, lockPath }) => {
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("temporary network failure");
+      return { ok: calls !== 2, status: calls === 2 ? 503 : 204 };
+    };
+
+    reportInstallTelemetry();
+    await waitFor(() => calls === 1);
+    await waitFor(async () => !(await exists(lockPath)));
+    assert.equal(await exists(statePath), false);
+
+    reportInstallTelemetry();
+    await waitFor(() => calls === 2);
+    await waitFor(async () => !(await exists(lockPath)));
+    assert.equal(await exists(statePath), false);
+
+    reportInstallTelemetry();
+    await waitFor(async () => calls === 3 && (await exists(statePath)));
+    assert.deepEqual(JSON.parse(await readFile(statePath, "utf8")), { lastReportedVersion: "0.1.0" });
+
+    reportInstallTelemetry();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(calls, 3);
+  });
+});
+
+test("serializes concurrent telemetry reports", async () => {
+  await withTelemetryEnvironment(async ({ statePath, lockPath }) => {
+    let calls = 0;
+    let release;
+    globalThis.fetch = async () => {
+      calls += 1;
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+      return { ok: true, status: 204 };
+    };
+
+    reportInstallTelemetry();
+    await waitFor(() => calls === 1);
+    reportInstallTelemetry();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(calls, 1);
+
+    release();
+    await waitFor(async () => await exists(statePath));
+    await waitFor(async () => !(await exists(lockPath)));
+    assert.equal(calls, 1);
+  });
 });
