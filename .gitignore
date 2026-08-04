@@ -36,3 +36,4 @@ coverage/
 # Project-scoped agent skills (regenerable via npx skills)
 .agents/
 .claude/
+.kata.local.toml
