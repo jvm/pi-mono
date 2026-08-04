@@ -36,6 +36,9 @@ export default function piCodexTools(pi: ExtensionAPI): void {
     constrainedSampling: createOpenAILarkSampling(APPLY_PATCH_GRAMMAR),
     executionMode: "sequential",
     async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
+      if (!supportsOpenAIGrammarTools(ctx.model)) {
+        throw new Error("apply_patch is only available for OpenAI models that advertise grammar-tool support.");
+      }
       const patch = (rawParams as { patch?: unknown }).patch;
       if (typeof patch !== "string") throw new Error("apply_patch requires raw patch text.");
       const result = await applyPatch(patch, { cwd: ctx.cwd, signal });

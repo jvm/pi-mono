@@ -6,6 +6,16 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-04
+
+### Fixed
+
+- Guard `apply_patch` execution when the active model does not advertise grammar-tool support.
+- Require the Pi runtime grammar-tool contract and fail closed on unsupported filesystem platforms.
+- Preflight repeated file hunks sequentially without rejecting valid Codex patches.
+- Respect `enableInstallTelemetry: false` even when `PI_TELEMETRY` is enabled.
+- Document credential-containing target reads, telemetry controls, runtime requirements, and line-oriented compatibility.
+
 ## [0.1.0] - 2026-08-03
 
 ### Added

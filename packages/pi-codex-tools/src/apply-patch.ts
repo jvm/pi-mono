@@ -10,7 +10,7 @@ export const MAX_PATCH_HUNKS = 1_000;
 export const MAX_TARGET_FILE_BYTES = 64 * 1024 * 1024;
 
 const O_NOFOLLOW = constants.O_NOFOLLOW ?? 0;
-const SECURE_FD_DIRECTORY = process.platform === "linux" ? "/proc/self/fd" : process.platform === "darwin" ? "/dev/fd" : undefined;
+const SECURE_FD_DIRECTORY = process.platform === "linux" ? "/proc/self/fd" : undefined;
 const SECURE_FILESYSTEM_SUPPORTED = SECURE_FD_DIRECTORY !== undefined && O_NOFOLLOW !== 0;
 const SECURE_DIRECTORY_FLAGS = constants.O_RDONLY | O_NOFOLLOW | (constants.O_DIRECTORY ?? 0) | (constants.O_NONBLOCK ?? 0);
 const SECURE_READ_FLAGS = constants.O_RDONLY | O_NOFOLLOW | (constants.O_NONBLOCK ?? 0);
@@ -225,6 +225,7 @@ type PlannedOperation =
   | { kind: "update"; path: string; displayPath: string; moveTo?: string; moveDisplayPath?: string; chunkGroups: UpdateChunk[][]; content: string };
 
 type SafePath = { absolute: string; exists: boolean; isDirectory: boolean; isFile: boolean };
+type VirtualFile = Omit<SafePath, "absolute"> & { content?: string };
 
 export async function applyPatch(input: string, options: ApplyPatchOptions): Promise<ApplyPatchResult> {
   requireSecureFilesystem();
@@ -271,77 +272,108 @@ export async function applyPatch(input: string, options: ApplyPatchOptions): Pro
 
 async function planOperations(hunks: ApplyPatchHunk[], root: string, rootHandle: FileHandle, signal?: AbortSignal): Promise<PlannedOperation[]> {
   const operations: PlannedOperation[] = [];
-  const byPath = new Map<string, PlannedOperation>();
-  const occupied = new Set<string>();
+  const virtualFiles = new Map<string, VirtualFile>();
+
+  const getVirtualFile = async (rawPath: string): Promise<{ absolute: string; file: VirtualFile }> => {
+    const absolute = resolvePatchPath(rawPath, root);
+    const existing = virtualFiles.get(absolute);
+    if (existing) return { absolute, file: existing };
+    const safe = await safePath(rawPath, root, signal);
+    const file: VirtualFile = {
+      exists: safe.exists,
+      isDirectory: safe.isDirectory,
+      isFile: safe.isFile,
+    };
+    virtualFiles.set(absolute, file);
+    return { absolute, file };
+  };
+
+  const getVirtualContent = async (absolute: string, file: VirtualFile): Promise<string> => {
+    if (!file.exists || !file.isFile) throw new Error(`Cannot read non-file '${absolute}'.`);
+    if (file.content === undefined) file.content = await readSecureFile(rootHandle, root, absolute, signal);
+    return file.content;
+  };
 
   for (const hunk of hunks) {
     throwIfAborted(signal);
-    const source = await safePath(hunk.path, root, signal);
-    if (occupied.has(source.absolute) && !(hunk.kind === "update" && byPath.get(source.absolute)?.kind === "update")) {
-      throw new Error(`Patch addresses '${hunk.path}' more than once.`);
-    }
+    const source = await getVirtualFile(hunk.path);
 
     if (hunk.kind === "add") {
-      if (source.isDirectory || (source.exists && !source.isFile)) throw new Error(`Cannot add file over non-file '${hunk.path}'.`);
-      const operation: PlannedOperation = { kind: "add", path: source.absolute, displayPath: displayPath(root, source.absolute, hunk.path), content: hunk.content };
-      operations.push(operation);
-      byPath.set(source.absolute, operation);
-      occupied.add(source.absolute);
+      if (source.file.isDirectory || (source.file.exists && !source.file.isFile)) {
+        throw new Error(`Cannot add file over non-file '${hunk.path}'.`);
+      }
+      source.file.exists = true;
+      source.file.isDirectory = false;
+      source.file.isFile = true;
+      source.file.content = hunk.content;
+      operations.push({
+        kind: "add",
+        path: source.absolute,
+        displayPath: displayPath(root, source.absolute, hunk.path),
+        content: hunk.content,
+      });
       continue;
     }
 
     if (hunk.kind === "delete") {
-      if (!source.exists) throw new Error(`Cannot delete missing file '${hunk.path}'.`);
-      if (source.isDirectory || !source.isFile) throw new Error(`Cannot delete non-file '${hunk.path}'.`);
-      const operation: PlannedOperation = { kind: "delete", path: source.absolute, displayPath: displayPath(root, source.absolute, hunk.path) };
-      operations.push(operation);
-      byPath.set(source.absolute, operation);
-      occupied.add(source.absolute);
+      if (!source.file.exists) throw new Error(`Cannot delete missing file '${hunk.path}'.`);
+      if (source.file.isDirectory || !source.file.isFile) throw new Error(`Cannot delete non-file '${hunk.path}'.`);
+      operations.push({ kind: "delete", path: source.absolute, displayPath: displayPath(root, source.absolute, hunk.path) });
+      source.file.exists = false;
+      source.file.content = undefined;
       continue;
     }
 
-    if (!source.exists) throw new Error(`Cannot update missing file '${hunk.path}'.`);
-    if (source.isDirectory || !source.isFile) throw new Error(`Cannot update non-file '${hunk.path}'.`);
-    const original = await readSecureFile(rootHandle, root, source.absolute, signal);
-    const moveTo = hunk.moveTo ? (await safePath(hunk.moveTo, root, signal)).absolute : undefined;
+    if (!source.file.exists) throw new Error(`Cannot update missing file '${hunk.path}'.`);
+    if (source.file.isDirectory || !source.file.isFile) throw new Error(`Cannot update non-file '${hunk.path}'.`);
+    const original = await getVirtualContent(source.absolute, source.file);
+    const moveTo = hunk.moveTo ? resolvePatchPath(hunk.moveTo, root) : undefined;
     if (moveTo === source.absolute) throw new Error(`Cannot move '${hunk.path}' onto itself.`);
+
+    let destination: { absolute: string; file: VirtualFile } | undefined;
     if (moveTo) {
-      const destination = await safePath(hunk.moveTo!, root, signal);
-      if (destination.isDirectory || (destination.exists && !destination.isFile)) throw new Error(`Cannot move file over non-file '${hunk.moveTo}'.`);
-      if (occupied.has(moveTo)) throw new Error(`Patch addresses move destination '${hunk.moveTo}' more than once.`);
-      occupied.add(moveTo);
+      destination = await getVirtualFile(hunk.moveTo!);
+      if (destination.file.isDirectory || (destination.file.exists && !destination.file.isFile)) {
+        throw new Error(`Cannot move file over non-file '${hunk.moveTo}'.`);
+      }
     }
 
-    const existing = byPath.get(source.absolute);
-    if (existing?.kind === "update") {
-      if (existing.moveTo || moveTo) throw new Error(`A file can only be moved once in a patch: '${hunk.path}'.`);
-      existing.chunkGroups.push(hunk.chunks);
-      existing.content = existing.chunkGroups.reduce(
-        (content, chunks) => applyUpdateContent(content, chunks, hunk.path),
-        original,
-      );
+    const content = applyUpdateContent(original, hunk.chunks, hunk.path);
+    if (destination) {
+      operations.push({
+        kind: "update",
+        path: source.absolute,
+        displayPath: displayPath(root, source.absolute, hunk.path),
+        moveTo: moveTo!,
+        moveDisplayPath: displayPath(root, moveTo!, hunk.moveTo!),
+        chunkGroups: [[...hunk.chunks]],
+        content,
+      });
+      source.file.exists = false;
+      source.file.content = undefined;
+      destination.file.exists = true;
+      destination.file.isDirectory = false;
+      destination.file.isFile = true;
+      destination.file.content = content;
       continue;
     }
 
-    const operation: PlannedOperation = {
-      kind: "update",
-      path: source.absolute,
-      displayPath: displayPath(root, source.absolute, hunk.path),
-      moveTo,
-      moveDisplayPath: moveTo ? displayPath(root, moveTo, hunk.moveTo!) : undefined,
-      chunkGroups: [[...hunk.chunks]],
-      content: applyUpdateContent(original, hunk.chunks, hunk.path),
-    };
-    operations.push(operation);
-    byPath.set(source.absolute, operation);
-    occupied.add(source.absolute);
+    const previous = operations.at(-1);
+    if (previous?.kind === "update" && previous.path === source.absolute && !previous.moveTo) {
+      previous.content = content;
+      previous.chunkGroups.push([...hunk.chunks]);
+    } else {
+      operations.push({
+        kind: "update",
+        path: source.absolute,
+        displayPath: displayPath(root, source.absolute, hunk.path),
+        chunkGroups: [[...hunk.chunks]],
+        content,
+      });
+    }
+    source.file.content = content;
   }
 
-  for (const operation of operations) {
-    if (operation.kind === "update" && operation.moveTo && byPath.has(operation.moveTo)) {
-      throw new Error(`Move destination '${operation.moveDisplayPath}' is also changed by this patch.`);
-    }
-  }
   return operations;
 }
 

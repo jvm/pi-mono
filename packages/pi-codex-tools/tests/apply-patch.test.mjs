@@ -9,7 +9,7 @@ process.env.CI = "1";
 const { applyPatch, MAX_TARGET_FILE_BYTES, parseApplyPatch } = await import("../src/apply-patch.ts");
 
 const patch = (body) => `*** Begin Patch\n${body}\n*** End Patch`;
-const supportsSecureFilesystem = process.platform === "linux" || process.platform === "darwin";
+const supportsSecureFilesystem = process.platform === "linux";
 const applyTest = (name, fn) => test(name, { skip: !supportsSecureFilesystem }, fn);
 
 test("parses Codex add, delete, update, and move hunks", () => {
@@ -76,6 +76,74 @@ applyTest("applies a multi-file patch after preflighting all hunks", async () =>
     assert.equal(await readFile(join(cwd, "nested", "new.txt"), "utf8"), "created\n");
     assert.equal(await readFile(join(cwd, "src", "old.txt"), "utf8"), "first\nchanged\nthird\nlast\n");
     await assert.rejects(readFile(join(cwd, "delete.txt")));
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+applyTest("applies move hunks by writing the destination and removing the source", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
+  try {
+    await writeFile(join(cwd, "source.txt"), "old\n");
+    await applyPatch(
+      patch(`*** Update File: source.txt
+*** Move to: destination.txt
+@@
+-old
++new`),
+      { cwd },
+    );
+    assert.equal(await readFile(join(cwd, "destination.txt"), "utf8"), "new\n");
+    await assert.rejects(readFile(join(cwd, "source.txt")));
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+applyTest("allows Add File to overwrite an existing regular file", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
+  try {
+    await writeFile(join(cwd, "existing.txt"), "old\n");
+    await applyPatch(
+      patch(`*** Add File: existing.txt
++new`),
+      { cwd },
+    );
+    assert.equal(await readFile(join(cwd, "existing.txt"), "utf8"), "new\n");
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+applyTest("keeps Codex pure additions at the end of the file", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
+  try {
+    await writeFile(join(cwd, "file.txt"), "first\nsecond\n");
+    await applyPatch(
+      patch(`*** Update File: file.txt
+@@ first
++inserted`),
+      { cwd },
+    );
+    assert.equal(await readFile(join(cwd, "file.txt"), "utf8"), "first\nsecond\ninserted\n");
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+applyTest("preflights repeated Add File and Update File hunks sequentially", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
+  try {
+    await applyPatch(
+      patch(`*** Add File: repeated.txt
++one
+*** Update File: repeated.txt
+@@
+-one
++two`),
+      { cwd },
+    );
+    assert.equal(await readFile(join(cwd, "repeated.txt"), "utf8"), "two\n");
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

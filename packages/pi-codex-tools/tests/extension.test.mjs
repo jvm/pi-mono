@@ -70,6 +70,16 @@ test("replaces edit and write while preserving unrelated active tools", async ()
   assert.equal(await pi.handlers.get("before_provider_request")[0]({ payload: { parallel_tool_calls: true } }, { model: ordinaryModel }), undefined);
 });
 
+test("rejects apply_patch execution for unsupported models", async () => {
+  const pi = makePi();
+  piCodexTools(pi);
+  const tool = pi.tools.get("apply_patch");
+  await assert.rejects(
+    tool.execute("call", { patch: "*** Begin Patch\n*** End Patch" }, undefined, undefined, { model: ordinaryModel, cwd: process.cwd() }),
+    /only available for OpenAI models that advertise grammar-tool support/,
+  );
+});
+
 test("restores only file tools that were active before replacement", async () => {
   const pi = makePi(["read", "edit", "bash"]);
   piCodexTools(pi);

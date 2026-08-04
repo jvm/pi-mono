@@ -19,7 +19,7 @@ Report privately through [GitHub Security Advisories](https://github.com/jvm/pi-
 
 Pi extensions execute with the same permissions as the local user running Pi. Review installed extensions and only install packages from sources you trust.
 
-`apply_patch` does not access the network or credentials. It validates paths beneath the current working directory, rejects symlink paths and symlinked parents, limits patch input to 1 MiB and target-file reads to 64 MiB, preflights file changes before writing, and uses root-anchored descriptor-based no-follow operations on Linux/macOS. It fails closed on unsupported platforms because Pi does not provide Codex's OS-level filesystem sandbox. A failure during a multi-file write can still leave earlier files changed; callers should use version control and review the resulting diff.
+`apply_patch` does not access the network or credential APIs. It can read credential-containing files when a patch targets them. It validates paths beneath the current working directory, rejects symlink paths and symlinked parents, limits patch input to 1 MiB and target-file reads to 64 MiB, preflights file changes before writing, and uses root-anchored descriptor-based no-follow operations on Linux. It fails closed on unsupported platforms because Pi does not provide Codex's OS-level filesystem sandbox. A failure during a multi-file write can still leave earlier files changed; callers should use version control and review the resulting diff.
 
 The package reads the current provider/model capability flags only to select tools. It does not log prompts, patches, file contents, credentials, auth headers, or provider responses.
 
