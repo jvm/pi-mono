@@ -19,20 +19,56 @@ const packageNames = [
   "pi-web-kit",
 ];
 
-test("settings telemetry opt-out overrides PI_TELEMETRY for every package", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "pi-mono-telemetry-"));
-  const env = { PI_TELEMETRY: "1" };
-  try {
-    for (const packageName of packageNames) {
-      const { isInstallTelemetryEnabled } = await import(`../packages/${packageName}/src/install-telemetry.ts`);
-      const settingsPath = join(cwd, `${packageName}.json`);
-      await writeFile(settingsPath, JSON.stringify({ enableInstallTelemetry: false }));
-      assert.equal(isInstallTelemetryEnabled(env, settingsPath), false, packageName);
+const policyEnvironmentVariables = [
+  "CI",
+  "APPVEYOR",
+  "BITBUCKET_BUILD_NUMBER",
+  "BUILDKITE",
+  "CIRCLECI",
+  "CODESPACES",
+  "DRONE",
+  "GITHUB_ACTIONS",
+  "GITLAB_CI",
+  "JENKINS_URL",
+  "NETLIFY",
+  "TEAMCITY_VERSION",
+  "TF_BUILD",
+  "TRAVIS",
+  "VERCEL",
+  "PI_OFFLINE",
+  "PI_TELEMETRY",
+  "PI_CODING_AGENT_DIR",
+];
 
-      await writeFile(settingsPath, "{}");
-      assert.equal(isInstallTelemetryEnabled(env, settingsPath), true, packageName);
+test("settings telemetry opt-out prevents requests through every package reporting path", async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pi-mono-telemetry-"));
+  const previousEnv = Object.fromEntries(policyEnvironmentVariables.map((name) => [name, process.env[name]]));
+  const previousFetch = globalThis.fetch;
+  let calls = 0;
+
+  try {
+    for (const name of policyEnvironmentVariables) delete process.env[name];
+    process.env.PI_TELEMETRY = "1";
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ enableInstallTelemetry: false }));
+    globalThis.fetch = async () => {
+      calls += 1;
+      return { ok: true, status: 204 };
+    };
+
+    for (const packageName of packageNames) {
+      const { reportInstallTelemetry } = await import(`../packages/${packageName}/src/install-telemetry.ts`);
+      reportInstallTelemetry();
     }
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(calls, 0);
   } finally {
-    await rm(cwd, { recursive: true, force: true });
+    globalThis.fetch = previousFetch;
+    for (const [name, value] of Object.entries(previousEnv)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await rm(agentDir, { recursive: true, force: true });
   }
 });
