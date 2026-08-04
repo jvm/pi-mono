@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Let `enableInstallTelemetry: false` override an enabled `PI_TELEMETRY` environment flag.
+
 ## [0.1.0] - 2026-08-02
 
 ### Added
