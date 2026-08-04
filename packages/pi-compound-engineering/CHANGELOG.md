@@ -13,6 +13,10 @@ The package normally tracks the upstream [`compound-engineering`](https://github
 
 - Share install telemetry mechanics through `@mocito/install-telemetry` while preserving Pi-specific settings and state paths.
 
+### Fixed
+
+- Let `enableInstallTelemetry: false` override an enabled `PI_TELEMETRY` environment flag.
+
 ## [3.19.2] - 2026-07-17
 
 ### Changed

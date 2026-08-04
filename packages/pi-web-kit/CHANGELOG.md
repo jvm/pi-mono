@@ -10,6 +10,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 - Share install telemetry mechanics through `@mocito/install-telemetry` while preserving Pi-specific settings and state paths.
 
+### Fixed
+
+- Let `enableInstallTelemetry: false` override an enabled `PI_TELEMETRY` environment flag.
+
 ## [0.2.4] - 2026-07-28
 
 ### Changed

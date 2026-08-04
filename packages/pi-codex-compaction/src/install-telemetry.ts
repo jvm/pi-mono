@@ -46,14 +46,15 @@ function isPresentEnvFlag(value: string | undefined): boolean {
   return normalized !== "0" && normalized !== "false" && normalized !== "no";
 }
 
-function isInstallTelemetryEnabled(): boolean {
-  if (isTruthyEnvFlag(process.env.CI)) return false;
-  if (CI_ENVIRONMENT_VARIABLES.some((name) => isPresentEnvFlag(process.env[name]))) return false;
-  if (isTruthyEnvFlag(process.env.PI_OFFLINE)) return false;
-  if (process.env.PI_TELEMETRY !== undefined) return isTruthyEnvFlag(process.env.PI_TELEMETRY);
+export function isInstallTelemetryEnabled(env: NodeJS.ProcessEnv = process.env, settingsPath = join(getAgentDir(), "settings.json")): boolean {
+  if (isTruthyEnvFlag(env.CI)) return false;
+  if (CI_ENVIRONMENT_VARIABLES.some((name) => isPresentEnvFlag(env[name]))) return false;
+  if (isTruthyEnvFlag(env.PI_OFFLINE)) return false;
 
-  const settings = readJsonFile(join(getAgentDir(), "settings.json")) as PiSettingsDocument;
-  return settings.enableInstallTelemetry !== false;
+  const settings = readJsonFile(settingsPath) as PiSettingsDocument;
+  if (settings.enableInstallTelemetry === false) return false;
+  if (env.PI_TELEMETRY !== undefined) return isTruthyEnvFlag(env.PI_TELEMETRY);
+  return true;
 }
 
 function getPackageVersion(): string {
