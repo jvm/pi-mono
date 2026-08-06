@@ -201,7 +201,9 @@ export function boundCompactionInput(
   requestPayload?: Record<string, unknown>,
 ): unknown[] | undefined {
   const budget = Math.max(1, Math.floor(contextWindow - COMPACTION_RESPONSE_RESERVE_TOKENS));
-  const budgetBytes = budget * 4;
+  // A byte-level bound is conservative when the active model's tokenizer is unavailable:
+  // a token can be represented by a single UTF-8 byte, but not fewer.
+  const budgetBytes = budget;
   const bounded = input.map((item) => item);
   let requestBytes = estimateConservativeBytes(
     buildCompactionRequest(requestPayload, bounded, instructions, tools),

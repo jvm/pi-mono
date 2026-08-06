@@ -433,6 +433,11 @@ test("reduces tool outputs before rejecting an input that cannot fit the active 
   assert.equal(boundCompactionInput([{ type: "message", content: [{ text: "a".repeat(2_000) }] }], "system", [], 1_000), undefined);
 });
 
+test("rejects token-dense input with the conservative byte bound", () => {
+  const input = [{ type: "message", content: [{ text: "😀".repeat(100) }] }];
+  assert.equal(boundCompactionInput(input, "system", [], 8_292), undefined);
+});
+
 test("keeps a bounded readable fallback for model switches", () => {
   const summary = buildFallbackSummary(
     preparation({ messagesToSummarize: [{ role: "user", content: "x".repeat(50_000), timestamp: 1 }] }),
