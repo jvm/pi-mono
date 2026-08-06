@@ -1,6 +1,6 @@
 {
   "name": "pi-codex-tools",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Codex-compatible apply_patch tooling for Pi's grammar-capable OpenAI models.",
   "type": "module",
   "license": "Apache-2.0",
