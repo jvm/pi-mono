@@ -10,8 +10,11 @@ const {
   boundCompactionInput,
   buildFallbackSummary,
   createRemoteCompaction,
+  getCodexAccountFingerprint,
   parseCompactionSse,
+  parseCompactionSseResult,
   requestRemoteCompaction,
+  requestRemoteCompactionWithUsage,
   resolveCodexResponsesUrl,
   supportsRemoteCompaction,
 } = await import("../src/index.ts");
@@ -33,6 +36,14 @@ const token = [
   Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct_test" } })).toString("base64url"),
   "signature",
 ].join(".");
+
+function tokenForAccount(accountId) {
+  return [
+    "header",
+    Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: accountId } })).toString("base64url"),
+    "signature",
+  ].join(".");
+}
 
 function preparation(overrides = {}) {
   return {
@@ -60,6 +71,9 @@ function makePi() {
     getAllTools() {
       return [];
     },
+    getThinkingLevel() {
+      return "high";
+    },
   };
   piCodexCompaction(pi);
   return pi;
@@ -74,6 +88,9 @@ function makeContext(overrides = {}) {
     modelRegistry: {
       async getApiKeyAndHeaders() {
         return { ok: true, apiKey: token, headers: { "x-test": "yes" } };
+      },
+      isUsingOAuth() {
+        return false;
       },
     },
     sessionManager: {
@@ -94,6 +111,7 @@ test("resolves only HTTPS Codex Responses endpoints", () => {
   assert.equal(resolveCodexResponsesUrl("https://chatgpt.com/backend-api"), "https://chatgpt.com/backend-api/codex/responses");
   assert.equal(resolveCodexResponsesUrl("https://chatgpt.com/backend-api/codex"), "https://chatgpt.com/backend-api/codex/responses");
   assert.throws(() => resolveCodexResponsesUrl("http://localhost:1234"), /HTTPS/);
+  assert.throws(() => resolveCodexResponsesUrl("https://example.com/backend-api"), /trusted Codex origin/);
   assert.throws(() => resolveCodexResponsesUrl("https://user:pass@chatgpt.com/backend-api"), /credentials/);
 });
 
@@ -105,6 +123,57 @@ test("parses the completed remote compaction checkpoint", () => {
   ].join("\n\n");
   assert.equal(parseCompactionSse(sse), "opaque-checkpoint");
   assert.throws(() => parseCompactionSse("data: {}\n\n"), /before response completion/);
+  assert.throws(() => parseCompactionSse("data: not-json\n\n"), /invalid SSE data/);
+});
+
+test("parses usage without exposing the opaque checkpoint", () => {
+  const result = parseCompactionSseResult([
+    `data: ${JSON.stringify({ type: "response.output_item.done", item: { type: "compaction", encrypted_content: "opaque-checkpoint" } })}`,
+    `data: ${JSON.stringify({
+      type: "response.completed",
+      response: {
+        status: "completed",
+        output: [],
+        usage: {
+          input_tokens: 123,
+          output_tokens: 7,
+          total_tokens: 130,
+          input_tokens_details: { cached_tokens: 80 },
+          output_tokens_details: { reasoning_tokens: 4 },
+        },
+      },
+    })}`,
+    "",
+  ].join("\n\n"));
+  assert.deepEqual(result, {
+    encryptedContent: "opaque-checkpoint",
+    usage: {
+      inputTokens: 123,
+      outputTokens: 7,
+      totalTokens: 130,
+      cachedInputTokens: 80,
+      reasoningTokens: 4,
+    },
+  });
+});
+
+test("rejects multiple compaction output items", () => {
+  const item = (encrypted_content) => `data: ${JSON.stringify({
+    type: "response.output_item.done",
+    item: { type: "compaction", encrypted_content },
+  })}`;
+  assert.throws(
+    () => parseCompactionSse([
+      item("one"),
+      item("two"),
+      `data: ${JSON.stringify({
+        type: "response.completed",
+        response: { status: "completed", output: [] },
+      })}`,
+      "",
+    ].join("\n\n")),
+    /2 checkpoint items/,
+  );
 });
 
 test("uses the remote checkpoint and keeps Pi's retained user out of the request", async () => {
@@ -114,7 +183,10 @@ test("uses the remote checkpoint and keeps Pi's retained user out of the request
     requests.push({ url, init });
     return new Response([
       `data: ${JSON.stringify({ type: "response.output_item.done", item: { type: "compaction", encrypted_content: "opaque-checkpoint" } })}`,
-      `data: ${JSON.stringify({ type: "response.completed", response: { status: "completed", output: [] } })}`,
+      `data: ${JSON.stringify({
+        type: "response.completed",
+        response: { status: "completed", output: [], usage: { input_tokens: 12, total_tokens: 12 } },
+      })}`,
       "",
     ].join("\n\n"), { status: 200 });
   };
@@ -136,6 +208,9 @@ test("uses the remote checkpoint and keeps Pi's retained user out of the request
     );
 
     assert.equal(result.details.encryptedContent, "opaque-checkpoint");
+    assert.equal(result.details.usage.inputTokens, 12);
+    assert.equal(result.details.authKind, "api-key");
+    assert.equal(JSON.stringify(result.details).includes("acct_test"), false);
     assert.equal(result.summary.includes(REMOTE_SUMMARY_MARKER), true);
     assert.equal(requests.length, 1);
     const body = JSON.parse(requests[0].init.body);
@@ -144,6 +219,97 @@ test("uses the remote checkpoint and keeps Pi's retained user out of the request
     assert.equal(body.input.some((item) => JSON.stringify(item).includes("retained")), false);
     assert.equal(requests[0].init.headers.get("x-codex-beta-features"), "remote_compaction_v2");
     assert.equal(requests[0].init.headers.get("chatgpt-account-id"), "acct_test");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("sends a complete previous textual summary when its checkpoint is incompatible", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url, init });
+    return new Response([
+      `data: ${JSON.stringify({ type: "response.output_item.done", item: { type: "compaction", encrypted_content: "new-checkpoint" } })}`,
+      `data: ${JSON.stringify({ type: "response.completed", response: { status: "completed", output: [] } })}`,
+      "",
+    ].join("\n\n"), { status: 200 });
+  };
+
+  const previousSummary = "previous summary ".repeat(2_000);
+  const incompatibleDetails = {
+    kind: "pi-codex-compaction",
+    version: 2,
+    provider: "openai-codex",
+    model: "gpt-5.5",
+    endpoint: resolveCodexResponsesUrl(model.baseUrl),
+    accountFingerprint: getCodexAccountFingerprint(token),
+    authKind: "api-key",
+    encryptedContent: "old-checkpoint",
+  };
+  try {
+    const result = await createRemoteCompaction(
+      {
+        preparation: preparation({ previousSummary }),
+        signal: new AbortController().signal,
+      },
+      makeContext({
+        sessionManager: {
+          getSessionId: () => "session_test",
+          buildContextEntries: () => [{ type: "compaction", details: incompatibleDetails }],
+        },
+      }),
+      () => [],
+    );
+    const body = JSON.parse(requests[0].init.body);
+    assert.equal(result.details.encryptedContent, "new-checkpoint");
+    assert.equal(body.input[0].type, "message");
+    assert.equal(body.input[0].content[0].text, previousSummary);
+    assert.equal(body.input.some((item) => item.type === "compaction"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("keeps the normal prompt envelope while compacting only discardable history", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url, init });
+    return new Response([
+      `data: ${JSON.stringify({ type: "response.output_item.done", item: { type: "compaction", encrypted_content: "opaque-checkpoint" } })}`,
+      `data: ${JSON.stringify({ type: "response.completed", response: { status: "completed", output: [] } })}`,
+      "",
+    ].join("\n\n"), { status: 200 });
+  };
+
+  try {
+    const context = makeContext({
+      model: { ...model, contextWindow: 20_000 },
+      getSystemPrompt: () => "fixed system prompt",
+    });
+    const result = await createRemoteCompaction(
+      { preparation: preparation(), signal: new AbortController().signal },
+      context,
+      () => [{
+        name: "fixed-tool",
+        description: "fixed tool definition",
+        parameters: { type: "object", properties: {} },
+      }],
+      "high",
+    );
+
+    assert.equal(result.details.encryptedContent, "opaque-checkpoint");
+    assert.equal(requests.length, 1);
+    const body = JSON.parse(requests[0].init.body);
+    assert.equal(body.instructions, "fixed system prompt");
+    assert.equal(body.tools[0].name, "fixed-tool");
+    assert.equal(body.reasoning.effort, "high");
+    assert.equal(body.parallel_tool_calls, true);
+    assert.equal(body.prompt_cache_key, "session_test");
+    assert.equal(body.text.verbosity, "low");
+    assert.deepEqual(body.include, ["reasoning.encrypted_content"]);
+    assert.equal(body.input.some((item) => JSON.stringify(item).includes("discard this")), true);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -170,6 +336,51 @@ test("honors an already-aborted compaction signal", async () => {
   }
 });
 
+test("retries transient responses and parses split SSE chunks", async () => {
+  const originalFetch = globalThis.fetch;
+  let attempts = 0;
+  const frames = [
+    `data: ${JSON.stringify({ type: "response.output_item.done", item: { type: "compaction", encrypted_content: "opaque-checkpoint" } })}`,
+    `data: ${JSON.stringify({
+      type: "response.completed",
+      response: {
+        status: "completed",
+        output: [],
+        usage: { input_tokens: 10, total_tokens: 10 },
+      },
+    })}`,
+    "",
+  ].join("\r\n\r\n");
+  globalThis.fetch = async (_url, init) => {
+    attempts++;
+    assert.equal(init.redirect, "error");
+    if (attempts === 1) return new Response("busy", { status: 503 });
+    const encoder = new TextEncoder();
+    const split = Math.floor(frames.length / 2);
+    return new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(frames.slice(0, split)));
+        controller.enqueue(encoder.encode(frames.slice(split)));
+        controller.close();
+      },
+    }), { status: 200 });
+  };
+
+  try {
+    const result = await requestRemoteCompactionWithUsage({
+      model,
+      apiKey: token,
+      body: { input: [] },
+      signal: new AbortController().signal,
+    });
+    assert.equal(attempts, 2);
+    assert.equal(result.encryptedContent, "opaque-checkpoint");
+    assert.equal(result.usage.inputTokens, 10);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("rehydrates an opaque checkpoint only in the textual compaction slot", () => {
   const payload = {
     model: model.id,
@@ -180,9 +391,12 @@ test("rehydrates an opaque checkpoint only in the textual compaction slot", () =
   };
   const updated = applyRemoteCompactionMarker(payload, {
     kind: "pi-codex-compaction",
-    version: 1,
+    version: 2,
     provider: "openai-codex",
     model: model.id,
+    endpoint: resolveCodexResponsesUrl(model.baseUrl),
+    accountFingerprint: getCodexAccountFingerprint(token),
+    authKind: "api-key",
     encryptedContent: "opaque-checkpoint",
   });
 
@@ -194,9 +408,12 @@ test("rehydrates an opaque checkpoint only in the textual compaction slot", () =
   };
   assert.equal(applyRemoteCompactionMarker(summarizationPrompt, {
     kind: "pi-codex-compaction",
-    version: 1,
+    version: 2,
     provider: "openai-codex",
     model: model.id,
+    endpoint: resolveCodexResponsesUrl(model.baseUrl),
+    accountFingerprint: getCodexAccountFingerprint(token),
+    authKind: "api-key",
     encryptedContent: "opaque-checkpoint",
   }), undefined);
 });
@@ -223,6 +440,30 @@ test("keeps a bounded readable fallback for model switches", () => {
   assert.match(summary, /codex-compaction-fallback/);
 });
 
+test("keeps file-operation metadata in the readable fallback", () => {
+  const summary = buildFallbackSummary(
+    preparation({
+      fileOps: { read: new Set(["src/a.ts"]), edited: new Set(["src/b.ts"]) },
+    }),
+    [],
+  );
+  assert.match(summary, /Read: src\/a\.ts/);
+  assert.match(summary, /Modified: src\/b\.ts/);
+});
+
+test("uses the standard compactor when custom instructions are supplied", async () => {
+  const result = await createRemoteCompaction(
+    {
+      preparation: preparation(),
+      customInstructions: "Focus on API decisions",
+      signal: new AbortController().signal,
+    },
+    makeContext(),
+    () => [],
+  );
+  assert.equal(result, undefined);
+});
+
 test("registers and wires the compaction/request hooks", async () => {
   const pi = makePi();
   assert.equal(typeof pi.handlers.get("session_before_compact"), "function");
@@ -239,9 +480,12 @@ test("registers and wires the compaction/request hooks", async () => {
 
   const details = {
     kind: "pi-codex-compaction",
-    version: 1,
+    version: 2,
     provider: "openai-codex",
     model: model.id,
+    endpoint: resolveCodexResponsesUrl(model.baseUrl),
+    accountFingerprint: getCodexAccountFingerprint(token),
+    authKind: "api-key",
     encryptedContent: "opaque-checkpoint",
   };
   const context = makeContext({
@@ -260,4 +504,64 @@ test("registers and wires the compaction/request hooks", async () => {
     },
   }, context);
   assert.deepEqual(rewritten.input[0], { type: "compaction", encrypted_content: "opaque-checkpoint" });
+});
+
+test("does not reuse a checkpoint across account, auth-mode, or model changes", async () => {
+  const pi = makePi();
+  const details = {
+    kind: "pi-codex-compaction",
+    version: 2,
+    provider: "openai-codex",
+    model: model.id,
+    endpoint: resolveCodexResponsesUrl(model.baseUrl),
+    accountFingerprint: getCodexAccountFingerprint(token),
+    authKind: "api-key",
+    encryptedContent: "opaque-checkpoint",
+  };
+  const payload = {
+    input: [{
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text: `The conversation history before this point was compacted into the following summary:\n${REMOTE_SUMMARY_MARKER}` }],
+    }],
+  };
+  const entries = [{ type: "compaction", details }];
+
+  const differentAccount = makeContext({
+    modelRegistry: {
+      async getApiKeyAndHeaders() {
+        return { ok: true, apiKey: tokenForAccount("acct_other") };
+      },
+    },
+    sessionManager: {
+      getSessionId: () => "session_test",
+      buildContextEntries: () => entries,
+    },
+  });
+  assert.equal(await pi.handlers.get("before_provider_request")({ payload }, differentAccount), undefined);
+
+  const differentAuthMode = makeContext({
+    modelRegistry: {
+      async getApiKeyAndHeaders() {
+        return { ok: true, apiKey: token };
+      },
+      isUsingOAuth() {
+        return true;
+      },
+    },
+    sessionManager: {
+      getSessionId: () => "session_test",
+      buildContextEntries: () => entries,
+    },
+  });
+  assert.equal(await pi.handlers.get("before_provider_request")({ payload }, differentAuthMode), undefined);
+
+  const differentModel = makeContext({
+    model: { ...model, id: "gpt-5.5" },
+    sessionManager: {
+      getSessionId: () => "session_test",
+      buildContextEntries: () => entries,
+    },
+  });
+  assert.equal(await pi.handlers.get("before_provider_request")({ payload }, differentModel), undefined);
 });

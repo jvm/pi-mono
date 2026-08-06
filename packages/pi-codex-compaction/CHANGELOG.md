@@ -9,6 +9,14 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 ### Fixed
 
 - Let `enableInstallTelemetry: false` override an enabled `PI_TELEMETRY` environment flag.
+- Keep the normal Codex Responses request envelope while excluding Pi's retained user input from compaction history.
+- Avoid reusing opaque checkpoints across model, endpoint, account, or authentication-mode changes.
+- Fall back to Pi's standard compactor when custom compaction instructions are supplied.
+
+### Added
+
+- Incremental bounded SSE parsing, transient request retries, response idle timeouts, provider usage capture, and file-operation fallback metadata.
+- Trusted-origin and redirect protections for direct Codex compaction requests.
 
 ## [0.1.0] - 2026-08-02
 
