@@ -1,6 +1,6 @@
 {
   "name": "pi-codex-compaction",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Use OpenAI Codex RemoteCompactionV2 for supported Pi sessions.",
   "type": "module",
   "license": "MIT",
