@@ -11,6 +11,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - Let `enableInstallTelemetry: false` override an enabled `PI_TELEMETRY` environment flag.
 - Keep the normal Codex Responses request envelope while excluding Pi's retained user input from compaction history.
 - Avoid reusing opaque checkpoints across model, endpoint, account, or authentication-mode changes.
+- Avoid reusing opaque checkpoints when the authentication mode cannot be verified.
 - Reject version 1 opaque checkpoints from existing sessions and use readable fallback context until a new checkpoint is created.
 - Fall back to Pi's standard compactor when custom compaction instructions are supplied.
 

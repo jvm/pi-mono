@@ -66,6 +66,7 @@ export function isRemoteCompactionCompatible(
 ): boolean {
   if (!supportsRemoteCompaction(model) || details.model !== model.id) return false;
   if (details.accountFingerprint !== accountFingerprint) return false;
+  if (details.authKind === "unknown" || authKind === "unknown") return false;
   if (details.authKind !== authKind) return false;
   try {
     return details.endpoint === resolveCodexResponsesUrl(model.baseUrl);

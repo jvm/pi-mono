@@ -356,9 +356,11 @@ test("retries transient responses and parses split SSE chunks", async () => {
     assert.equal(init.redirect, "error");
     if (attempts === 1) return new Response("busy", { status: 503 });
     const encoder = new TextEncoder();
-    const firstCrLf = frames.indexOf("\r\n");
-    assert.notEqual(firstCrLf, -1);
-    const split = firstCrLf + 1;
+    const delimiter = frames.indexOf("\r\n\r\n");
+    assert.notEqual(delimiter, -1);
+    const split = delimiter + 3;
+    assert.equal(frames[split - 1], "\r");
+    assert.equal(frames[split], "\n");
     return new Response(new ReadableStream({
       start(controller) {
         controller.enqueue(encoder.encode(frames.slice(0, split)));
@@ -574,4 +576,17 @@ test("does not reuse a checkpoint across account, auth-mode, or model changes", 
     },
   });
   assert.equal(await pi.handlers.get("before_provider_request")({ payload }, differentModel), undefined);
+
+  const unknownAuthMode = makeContext({
+    modelRegistry: {
+      async getApiKeyAndHeaders() {
+        return { ok: true, apiKey: token };
+      },
+    },
+    sessionManager: {
+      getSessionId: () => "session_test",
+      buildContextEntries: () => [{ type: "compaction", details: { ...details, authKind: "unknown" } }],
+    },
+  });
+  assert.equal(await pi.handlers.get("before_provider_request")({ payload }, unknownAuthMode), undefined);
 });
