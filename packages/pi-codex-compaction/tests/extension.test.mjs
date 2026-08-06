@@ -356,7 +356,9 @@ test("retries transient responses and parses split SSE chunks", async () => {
     assert.equal(init.redirect, "error");
     if (attempts === 1) return new Response("busy", { status: 503 });
     const encoder = new TextEncoder();
-    const split = Math.floor(frames.length / 2);
+    const firstCrLf = frames.indexOf("\r\n");
+    assert.notEqual(firstCrLf, -1);
+    const split = firstCrLf + 1;
     return new Response(new ReadableStream({
       start(controller) {
         controller.enqueue(encoder.encode(frames.slice(0, split)));
@@ -531,6 +533,9 @@ test("does not reuse a checkpoint across account, auth-mode, or model changes", 
     modelRegistry: {
       async getApiKeyAndHeaders() {
         return { ok: true, apiKey: tokenForAccount("acct_other") };
+      },
+      isUsingOAuth() {
+        return false;
       },
     },
     sessionManager: {

@@ -229,7 +229,8 @@ class CompactionSseParser {
   private usage: CodexCompactionUsage | undefined;
 
   push(chunk: string): void {
-    this.buffer += chunk.replace(/\r\n/g, "\n");
+    this.buffer += chunk;
+    this.buffer = this.buffer.replace(/\r\n/g, "\n");
     while (true) {
       const separator = this.buffer.indexOf("\n\n");
       if (separator < 0) break;

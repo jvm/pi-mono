@@ -201,11 +201,12 @@ export function boundCompactionInput(
   requestPayload?: Record<string, unknown>,
 ): unknown[] | undefined {
   const budget = Math.max(1, Math.floor(contextWindow - COMPACTION_RESPONSE_RESERVE_TOKENS));
+  const budgetBytes = budget * 4;
   const bounded = input.map((item) => item);
-  const fits = () => estimateConservativeTokens(
+  let requestBytes = estimateConservativeBytes(
     buildCompactionRequest(requestPayload, bounded, instructions, tools),
-  ) <= budget;
-  if (fits()) return bounded;
+  );
+  if (requestBytes <= budgetBytes) return bounded;
 
   // ponytail: trim tool outputs first; if structural content still exceeds the active model window,
   // let Pi's standard compaction path handle the request instead of inventing a lossy transcript rewrite.
@@ -214,8 +215,9 @@ export function boundCompactionInput(
     const replacement = trimToolOutput(item);
     if (!replacement) continue;
 
+    requestBytes += estimateConservativeBytes(replacement) - estimateConservativeBytes(item);
     bounded[index] = replacement;
-    if (fits()) return bounded;
+    if (requestBytes <= budgetBytes) return bounded;
   }
 
   return undefined;
@@ -494,10 +496,10 @@ function trimToolOutput(value: unknown): unknown | undefined {
   return undefined;
 }
 
-function estimateConservativeTokens(value: unknown): number {
+function estimateConservativeBytes(value: unknown): number {
   try {
     const json = JSON.stringify(value) ?? "";
-    return Math.max(1, Math.ceil(new TextEncoder().encode(json).byteLength / 4));
+    return new TextEncoder().encode(json).byteLength;
   } catch {
     return Number.POSITIVE_INFINITY;
   }
