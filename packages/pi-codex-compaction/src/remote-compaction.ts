@@ -3,7 +3,12 @@ import type { Model, Tool } from "@earendil-works/pi-ai";
 import type { ExtensionContext, SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
 import { convertToLlm, serializeConversation, sessionEntryToContextMessages } from "@earendil-works/pi-coding-agent";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import { requestRemoteCompaction } from "./codex-wire.js";
+import {
+  getCodexAccountFingerprint,
+  requestRemoteCompactionWithUsage,
+  resolveCodexResponsesUrl,
+  type CodexCompactionUsage,
+} from "./codex-wire.js";
 
 export const REMOTE_SUMMARY_MARKER = "[pi-codex-compaction:v1]";
 export const REMOTE_COMPACTION_KIND = "pi-codex-compaction";
@@ -16,14 +21,24 @@ const PI_COMPACTION_SUMMARY_PREFIX = "The conversation history before this point
 
 export interface RemoteCompactionDetails {
   kind: typeof REMOTE_COMPACTION_KIND;
-  version: 1;
+  version: 2;
   provider: "openai-codex";
   model: string;
+  endpoint: string;
+  accountFingerprint: string;
+  authKind: CodexAuthKind;
   encryptedContent: string;
+  usage?: CodexCompactionUsage;
 }
 
-type CodexModel = Pick<Model<any>, "id" | "api" | "provider" | "baseUrl" | "contextWindow" | "headers">;
+export type CodexAuthKind = "oauth" | "api-key" | "unknown";
+
+type CodexModel = Pick<
+  Model<any>,
+  "id" | "api" | "provider" | "baseUrl" | "contextWindow" | "headers" | "reasoning"
+>;
 type AgentMessage = ReturnType<typeof sessionEntryToContextMessages>[number];
+type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export function supportsRemoteCompaction(model: Pick<CodexModel, "api" | "provider"> | undefined): boolean {
   return model?.provider === "openai-codex" && model.api === "openai-codex-responses";
@@ -36,6 +51,28 @@ export function findActiveRemoteCompaction(entries: readonly SessionEntry[]): Re
     return isRemoteCompactionDetails(entry.details) ? entry.details : undefined;
   }
   return undefined;
+}
+
+/**
+ * Check the model, endpoint, and account before reusing an opaque checkpoint.
+ * The checkpoint is intentionally not treated as portable across those
+ * boundaries because the service can bind its encryption to them.
+ */
+export function isRemoteCompactionCompatible(
+  details: RemoteCompactionDetails,
+  model: Pick<CodexModel, "id" | "api" | "provider" | "baseUrl">,
+  accountFingerprint: string,
+  authKind: CodexAuthKind = "unknown",
+): boolean {
+  if (!supportsRemoteCompaction(model) || details.model !== model.id) return false;
+  if (details.accountFingerprint !== accountFingerprint) return false;
+  if (details.authKind === "unknown" || authKind === "unknown") return false;
+  if (details.authKind !== authKind) return false;
+  try {
+    return details.endpoint === resolveCodexResponsesUrl(model.baseUrl);
+  } catch {
+    return false;
+  }
 }
 
 export function applyRemoteCompactionMarker(payload: unknown, details: RemoteCompactionDetails): unknown | undefined {
@@ -57,19 +94,31 @@ export async function createRemoteCompaction(
   event: SessionBeforeCompactEvent,
   ctx: ExtensionContext,
   getTools: () => readonly ToolInfoLike[],
+  thinkingLevel?: string,
 ): Promise<{
   summary: string;
   firstKeptEntryId: string;
   tokensBefore: number;
   details: RemoteCompactionDetails;
 } | undefined> {
+  // Pi's custom focus is part of the standard summarizer contract. The
+  // Responses compaction envelope has no documented equivalent, so do not
+  // silently discard it.
+  if (event.customInstructions?.trim()) return undefined;
+
   const model = ctx.model as CodexModel | undefined;
   if (!model || !supportsRemoteCompaction(model)) return undefined;
 
+  const endpoint = resolveCodexResponsesUrl(model.baseUrl);
   const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model as Model<any>);
   if (!auth.ok || !auth.apiKey) return undefined;
+  const accountFingerprint = getCodexAccountFingerprint(auth.apiKey);
+  const authKind = getCodexAuthKind(ctx.modelRegistry, model as Model<any>);
 
   const previous = findActiveRemoteCompaction(ctx.sessionManager.buildContextEntries());
+  const compatiblePrevious = previous && isRemoteCompactionCompatible(previous, model, accountFingerprint, authKind)
+    ? previous
+    : undefined;
   const messages = [...event.preparation.messagesToSummarize, ...event.preparation.turnPrefixMessages];
   const instructions = ctx.getSystemPrompt() || "You are a helpful assistant.";
   const sessionId = ctx.sessionManager.getSessionId();
@@ -79,28 +128,39 @@ export async function createRemoteCompaction(
     convertToLlm(messages),
     getTools(),
     auth.apiKey,
+    auth.headers,
     sessionId,
     event.signal,
+    thinkingLevel,
   );
   if (!providerPayload) return undefined;
   const providerInput = providerPayload.input;
   if (!Array.isArray(providerInput)) return undefined;
   const providerTools = Array.isArray(providerPayload.tools) ? providerPayload.tools : [];
 
-  const input = appendCompactionItems(providerInput, event.preparation, previous);
-  const boundedInput = boundCompactionInput(input, instructions, providerTools, model.contextWindow);
+  const input = appendCompactionItems(providerInput, event.preparation, compatiblePrevious);
+  const requestBody = {
+    ...providerPayload,
+    model: model.id,
+    store: false,
+    stream: true,
+  };
+  const boundedInput = boundCompactionInput(
+    input,
+    instructions,
+    providerTools,
+    model.contextWindow,
+    requestBody,
+  );
   if (!boundedInput) return undefined;
 
-  const encryptedContent = await requestRemoteCompaction({
+  const result = await requestRemoteCompactionWithUsage({
     model,
     apiKey: auth.apiKey,
     authHeaders: auth.headers,
     sessionId,
     body: {
-      ...providerPayload,
-      model: model.id,
-      store: false,
-      stream: true,
+      ...requestBody,
       input: boundedInput,
     },
     signal: event.signal,
@@ -113,10 +173,14 @@ export async function createRemoteCompaction(
     tokensBefore: event.preparation.tokensBefore,
     details: {
       kind: REMOTE_COMPACTION_KIND,
-      version: 1,
+      version: 2,
       provider: "openai-codex",
       model: model.id,
-      encryptedContent,
+      endpoint,
+      accountFingerprint,
+      authKind,
+      encryptedContent: result.encryptedContent,
+      ...(result.usage ? { usage: result.usage } : {}),
     },
   };
 }
@@ -135,29 +199,28 @@ export function boundCompactionInput(
   instructions: string,
   tools: readonly unknown[],
   contextWindow: number,
+  requestPayload?: Record<string, unknown>,
 ): unknown[] | undefined {
-  const budget = Math.max(1, contextWindow - COMPACTION_RESPONSE_RESERVE_TOKENS);
+  const budget = Math.max(1, Math.floor(contextWindow - COMPACTION_RESPONSE_RESERVE_TOKENS));
+  // A byte-level bound is conservative when the active model's tokenizer is unavailable:
+  // a token can be represented by a single UTF-8 byte, but not fewer.
+  const budgetBytes = budget;
   const bounded = input.map((item) => item);
-  let estimatedTokens = estimateConservativeTokens({ instructions, input: bounded, tools });
-  const fits = () => estimatedTokens <= budget;
-  if (fits()) return bounded;
+  let requestBytes = estimateConservativeBytes(
+    buildCompactionRequest(requestPayload, bounded, instructions, tools),
+  );
+  if (requestBytes <= budgetBytes) return bounded;
 
   // ponytail: trim tool outputs first; if structural content still exceeds the active model window,
   // let Pi's standard compaction path handle the request instead of inventing a lossy transcript rewrite.
   for (let index = bounded.length - 1; index >= 0; index--) {
     const item = bounded[index];
-    if (!isRecord(item)) continue;
-
-    const replacement = item.type === "function_call_output"
-      ? { ...item, output: TRUNCATED_TOOL_OUTPUT }
-      : item.type === "tool_search_output"
-        ? { ...item, tools: [] }
-        : undefined;
+    const replacement = trimToolOutput(item);
     if (!replacement) continue;
 
-    estimatedTokens += estimateConservativeTokens(replacement) - estimateConservativeTokens(item);
+    requestBytes += estimateConservativeBytes(replacement) - estimateConservativeBytes(item);
     bounded[index] = replacement;
-    if (fits()) return bounded;
+    if (requestBytes <= budgetBytes) return bounded;
   }
 
   return undefined;
@@ -166,10 +229,12 @@ export function boundCompactionInput(
 export function buildFallbackSummary(preparation: SessionBeforeCompactEvent["preparation"], messages: AgentMessage[]): string {
   const transcript = serializeConversation(convertToLlm(messages));
   const previous = preparation.previousSummary ? `Previous checkpoint fallback:\n${preparation.previousSummary}` : "";
+  const fileOperations = formatFileOperations(preparation.fileOps);
   const content = [
     "This checkpoint is opaque to non-Codex providers. Use the transcript excerpt below when continuing this session.",
     previous,
     transcript ? `Discarded conversation excerpt:\n${transcript}` : "",
+    fileOperations,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -182,26 +247,34 @@ async function captureCodexPayload(
   messages: ReturnType<typeof convertToLlm>,
   tools: readonly ToolInfoLike[],
   apiKey: string,
+  authHeaders: Record<string, string> | undefined,
   sessionId: string,
   signal: AbortSignal,
+  thinkingLevel: string | undefined,
 ): Promise<Record<string, unknown> | undefined> {
   if (signal.aborted) return undefined;
 
   let payload: unknown;
   const captureError = new Error("capture Codex request payload");
+  const options: Record<string, unknown> = {
+    apiKey,
+    headers: authHeaders,
+    sessionId,
+    signal,
+    onPayload(next: unknown) {
+      payload = next;
+      throw captureError;
+    },
+  };
+  if (model.reasoning && isThinkingLevel(thinkingLevel) && thinkingLevel !== "off") {
+    options.reasoningEffort = thinkingLevel;
+  }
+
   const stream = captureProviderPayload(model as Model<any>, {
     systemPrompt: instructions,
     messages,
     tools: [...tools],
-  }, {
-    apiKey,
-    sessionId,
-    signal,
-    onPayload(next) {
-      payload = next;
-      throw captureError;
-    },
-  });
+  }, options);
 
   await stream.result();
   return isRecord(payload) ? payload : undefined;
@@ -219,7 +292,9 @@ function appendCompactionItems(
     output.unshift({
       type: "message",
       role: "user",
-      content: [{ type: "input_text", text: limitText(preparation.previousSummary, FALLBACK_SUMMARY_MAX_CHARS) }],
+      // This is bounded together with the complete request envelope below;
+      // the readable fallback limit is only for non-Codex continuation.
+      content: [{ type: "input_text", text: preparation.previousSummary }],
       status: "completed",
     });
   }
@@ -358,19 +433,97 @@ function isRemoteCompactionDetails(value: unknown): value is RemoteCompactionDet
   return (
     isRecord(value) &&
     value.kind === REMOTE_COMPACTION_KIND &&
-    value.version === 1 &&
+    value.version === 2 &&
     value.provider === "openai-codex" &&
     typeof value.model === "string" &&
     value.model.length > 0 &&
+    value.model.length <= 256 &&
+    typeof value.endpoint === "string" &&
+    value.endpoint.length <= 2_048 &&
+    typeof value.accountFingerprint === "string" &&
+    /^sha256:[a-f0-9]{64}$/.test(value.accountFingerprint) &&
+    (value.authKind === "oauth" || value.authKind === "api-key" || value.authKind === "unknown") &&
     typeof value.encryptedContent === "string" &&
     value.encryptedContent.length > 0 &&
-    value.encryptedContent.length <= MAX_ENCRYPTED_CONTENT_CHARS
+    value.encryptedContent.length <= MAX_ENCRYPTED_CONTENT_CHARS &&
+    (value.usage === undefined || isCodexCompactionUsage(value.usage))
   );
 }
 
-function estimateConservativeTokens(value: unknown): number {
-  // One UTF-8 byte per token is deliberately conservative without a provider tokenizer.
-  return new TextEncoder().encode(JSON.stringify(value) ?? "").byteLength;
+export function getCodexAuthKind(
+  modelRegistry: unknown,
+  model: Model<any>,
+): CodexAuthKind {
+  const isUsingOAuth = isRecord(modelRegistry) ? modelRegistry.isUsingOAuth : undefined;
+  if (typeof isUsingOAuth !== "function") return "unknown";
+  try {
+    return isUsingOAuth.call(modelRegistry, model) ? "oauth" : "api-key";
+  } catch {
+    return "unknown";
+  }
+}
+
+function isCodexCompactionUsage(value: unknown): value is CodexCompactionUsage {
+  return isRecord(value) && Object.values(value).every(
+    (entry) => typeof entry === "number" && Number.isFinite(entry) && entry >= 0,
+  );
+}
+
+function buildCompactionRequest(
+  requestPayload: Record<string, unknown> | undefined,
+  input: readonly unknown[],
+  instructions: string,
+  tools: readonly unknown[],
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = requestPayload ? { ...requestPayload } : {};
+  payload.instructions = instructions;
+  payload.input = input;
+  if (tools.length > 0 || requestPayload && "tools" in requestPayload) payload.tools = tools;
+  return payload;
+}
+
+function trimToolOutput(value: unknown): unknown | undefined {
+  if (!isRecord(value)) return undefined;
+  if (
+    (value.type === "function_call_output" ||
+      value.type === "custom_tool_call_output" ||
+      value.type === "local_shell_call_output" ||
+      value.type === "computer_call_output") &&
+    value.output !== undefined
+  ) {
+    return { ...value, output: TRUNCATED_TOOL_OUTPUT };
+  }
+  if (value.type === "tool_search_output" && Array.isArray(value.tools)) {
+    return { ...value, tools: [] };
+  }
+  return undefined;
+}
+
+function estimateConservativeBytes(value: unknown): number {
+  try {
+    const json = JSON.stringify(value) ?? "";
+    return new TextEncoder().encode(json).byteLength;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function formatFileOperations(fileOps: { read: Set<string>; edited: Set<string> }): string {
+  const read = [...fileOps.read].filter((path): path is string => typeof path === "string").sort();
+  const edited = [...fileOps.edited].filter((path): path is string => typeof path === "string").sort();
+  if (read.length === 0 && edited.length === 0) return "";
+  return [
+    "File operations in discarded history:",
+    read.length > 0 ? `- Read: ${read.join(", ")}` : "",
+    edited.length > 0 ? `- Modified: ${edited.join(", ")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function isThinkingLevel(value: string | undefined): value is ThinkingLevel {
+  return value === "off" || value === "minimal" || value === "low" || value === "medium" ||
+    value === "high" || value === "xhigh" || value === "max";
 }
 
 function limitText(text: string, maxChars: number): string {

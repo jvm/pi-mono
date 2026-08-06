@@ -3,12 +3,14 @@ import type {
   ExtensionHandler,
   SessionBeforeCompactEvent,
 } from "@earendil-works/pi-coding-agent";
-import { BETA_FEATURE } from "../src/codex-wire.js";
+import { BETA_FEATURE, getCodexAccountFingerprint } from "../src/codex-wire.js";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import {
   applyRemoteCompactionMarker,
   createRemoteCompaction,
   findActiveRemoteCompaction,
+  getCodexAuthKind,
+  isRemoteCompactionCompatible,
   supportsRemoteCompaction,
 } from "../src/remote-compaction.js";
 
@@ -24,7 +26,7 @@ export default function piCodexCompaction(pi: ExtensionAPI): void {
         return pi.getAllTools()
           .filter((tool) => active.has(tool.name))
           .map(({ name, description, parameters }) => ({ name, description, parameters }));
-      });
+      }, pi.getThinkingLevel?.());
       return compaction ? { compaction } : undefined;
     } catch {
       if (!event.signal.aborted && ctx.hasUI) {
@@ -47,6 +49,23 @@ export default function piCodexCompaction(pi: ExtensionAPI): void {
     if (!supportsRemoteCompaction(ctx.model)) return;
     const details = findActiveRemoteCompaction(ctx.sessionManager.buildContextEntries());
     if (!details) return;
-    return applyRemoteCompactionMarker(event.payload, details);
+
+    return (async () => {
+      const model = ctx.model;
+      if (!model) return undefined;
+      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+      if (!auth.ok || !auth.apiKey) return undefined;
+
+      let accountFingerprint: string;
+      try {
+        accountFingerprint = getCodexAccountFingerprint(auth.apiKey);
+      } catch {
+        return undefined;
+      }
+      if (!isRemoteCompactionCompatible(details, model, accountFingerprint, getCodexAuthKind(ctx.modelRegistry, model))) {
+        return undefined;
+      }
+      return applyRemoteCompactionMarker(event.payload, details);
+    })();
   });
 }
