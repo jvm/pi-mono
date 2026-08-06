@@ -92,7 +92,9 @@ export function scanPatchPreview(input: string): PatchPreview {
           ? "delete"
           : "update";
       const prefix = kind === "add" ? FILE_ADD : kind === "delete" ? FILE_DELETE : FILE_UPDATE;
-      const path = line.slice(prefix.length);
+      // Match parseApplyPatch's headerPath(), which trims paths, so whitespace-padded headers
+      // coalesce and render the same way execution sees them.
+      const path = line.slice(prefix.length).trim();
       const existing = filesByPath.get(path);
       if (existing) {
         // Execution coalesces multiple hunks for the same path; the preview must too, otherwise

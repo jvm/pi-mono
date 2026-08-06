@@ -229,6 +229,15 @@ test("coalesces multiple update hunks for the same path into one file", () => {
   assert.equal(preview.totalAdded, 2);
 });
 
+test("trims header paths so whitespace-padded headers coalesce like execution", () => {
+  const preview = scanPatchPreview(
+    ["*** Begin Patch", "*** Add File: a.ts ", "+x", "*** Update File: a.ts", "@@ c", "+y", "*** End Patch"].join("\n"),
+  );
+  assert.equal(preview.files.length, 1, "padded and clean headers must coalesce into one file");
+  assert.equal(preview.files[0].path, "a.ts");
+  assert.equal(preview.totalAdded, 2);
+});
+
 test("collapsed multi-file roster is capped; expansion reveals the rest", async () => {
   const { initTheme } = await import("@earendil-works/pi-coding-agent");
   const { formatApplyPatchCallText } = await import("../src/patch-preview.ts");
