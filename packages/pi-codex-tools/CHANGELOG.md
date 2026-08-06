@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Stream `apply_patch` progress in the TUI: while a patch is generated the tool now shows a live diff glimpse of the content being written plus a running `+added -removed` tally (and a capped per-file roster for multi-file patches), reusing Pi's shared diff rendering. Moves render the source → destination transition, and the preview is byte/file bounded for responsiveness. Execution behavior is unchanged.
+
 ## [0.1.1] - 2026-08-04
 
 ### Fixed
