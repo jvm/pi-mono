@@ -1,8 +1,22 @@
+import { Container, Text } from "@earendil-works/pi-tui";
+import type { Component } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import { applyPatch, APPLY_PATCH_GRAMMAR, MAX_PATCH_BYTES } from "../src/apply-patch.js";
 import { createFreeformInputSchema, createOpenAILarkSampling, type OpenAIGrammarSampling } from "../src/grammar.js";
 import { supportsOpenAIGrammarTools } from "../src/model-support.js";
+import { formatApplyPatchCallText, formatApplyPatchResultText } from "../src/patch-preview.js";
+
+class ApplyPatchCallComponent extends Text {
+  cache?: { key: string; text: string };
+  constructor() {
+    super("", 0, 0);
+  }
+}
+
+function readPatchArg(args: unknown): string {
+  return typeof (args as { patch?: unknown })?.patch === "string" ? (args as { patch: string }).patch : "";
+}
 
 const APPLY_PATCH = "apply_patch";
 const EDIT = "edit";
@@ -35,6 +49,31 @@ export default function piCodexTools(pi: ExtensionAPI): void {
     parameters: APPLY_PATCH_PARAMETERS,
     constrainedSampling: createOpenAILarkSampling(APPLY_PATCH_GRAMMAR),
     executionMode: "sequential",
+    renderCall(args, theme, context) {
+      const component =
+        context.lastComponent instanceof ApplyPatchCallComponent ? context.lastComponent : new ApplyPatchCallComponent();
+      const rawPatch = readPatchArg(args);
+      const key = `${context.expanded ? "1" : "0"}:${rawPatch}`;
+      if (!component.cache || component.cache.key !== key) {
+        component.cache = {
+          key,
+          text: formatApplyPatchCallText(rawPatch, theme, { expanded: context.expanded }),
+        };
+      }
+      component.setText(component.cache.text);
+      return component as Component;
+    },
+    renderResult(result, _options, theme, context) {
+      const text = formatApplyPatchResultText(result, theme, context.isError);
+      if (!text) {
+        const component = (context.lastComponent ?? new Container()) as Container;
+        component.clear();
+        return component as Component;
+      }
+      const component = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+      component.setText(text);
+      return component as Component;
+    },
     async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
       if (!supportsOpenAIGrammarTools(ctx.model)) {
         throw new Error("apply_patch is only available for OpenAI models that advertise grammar-tool support.");
