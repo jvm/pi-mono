@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Trim patch header paths in the streaming preview so whitespace-padded headers coalesce and render the same way execution does (it trims via `headerPath`).
+
 ## [0.1.2] - 2026-08-06
 
 ### Added
