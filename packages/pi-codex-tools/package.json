@@ -36,7 +36,6 @@
     "extensions",
     "src",
     "native",
-    "binding.gyp",
     "prebuilds",
     "README.md",
     "NOTICE",
