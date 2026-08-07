@@ -2,7 +2,7 @@ import { Container, Text } from "@earendil-works/pi-tui";
 import type { Component } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
-import { applyPatch, APPLY_PATCH_GRAMMAR, MAX_PATCH_BYTES } from "../src/apply-patch.js";
+import { applyPatch, APPLY_PATCH_GRAMMAR, MAX_PATCH_BYTES, secureFilesystemSupported } from "../src/apply-patch.js";
 import { createFreeformInputSchema, createOpenAILarkSampling, type OpenAIGrammarSampling } from "../src/grammar.js";
 import { supportsOpenAIGrammarTools } from "../src/model-support.js";
 import { formatApplyPatchCallText, formatApplyPatchResultText } from "../src/patch-preview.js";
@@ -94,7 +94,7 @@ export default function piCodexTools(pi: ExtensionAPI): void {
     if (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function") return;
 
     const active = new Set(pi.getActiveTools());
-    if (supportsOpenAIGrammarTools(ctx.model)) {
+    if (supportsOpenAIGrammarTools(ctx.model) && secureFilesystemSupported()) {
       if (replacedToolsWasActive === undefined) {
         replacedToolsWasActive = {
           edit: active.has(EDIT),

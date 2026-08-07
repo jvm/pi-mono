@@ -11,7 +11,18 @@ export const MAX_TARGET_FILE_BYTES = 64 * 1024 * 1024;
 
 const O_NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 const SECURE_FD_DIRECTORY = process.platform === "linux" ? "/proc/self/fd" : undefined;
-const SECURE_FILESYSTEM_SUPPORTED = SECURE_FD_DIRECTORY !== undefined && O_NOFOLLOW !== 0;
+const BASE_SECURE_FILESYSTEM_SUPPORTED = SECURE_FD_DIRECTORY !== undefined && O_NOFOLLOW !== 0;
+let secureFilesystemSupportedOverride: boolean | undefined;
+
+/** Whether apply_patch can safely execute against this platform's filesystem. */
+export function secureFilesystemSupported(): boolean {
+  return secureFilesystemSupportedOverride ?? BASE_SECURE_FILESYSTEM_SUPPORTED;
+}
+
+/** @internal Force the support flag so the activation path can be tested on any host platform. */
+export function setSecureFilesystemSupportedForTest(value: boolean | undefined): void {
+  secureFilesystemSupportedOverride = value;
+}
 const SECURE_DIRECTORY_FLAGS = constants.O_RDONLY | O_NOFOLLOW | (constants.O_DIRECTORY ?? 0) | (constants.O_NONBLOCK ?? 0);
 const SECURE_READ_FLAGS = constants.O_RDONLY | O_NOFOLLOW | (constants.O_NONBLOCK ?? 0);
 const SECURE_UPDATE_FLAGS = constants.O_WRONLY | O_NOFOLLOW | constants.O_TRUNC | (constants.O_NONBLOCK ?? 0);
@@ -420,7 +431,7 @@ async function safePath(rawPath: string, root: string, signal?: AbortSignal): Pr
 }
 
 function requireSecureFilesystem(): void {
-  if (!SECURE_FILESYSTEM_SUPPORTED) {
+  if (!secureFilesystemSupported()) {
     throw new Error("apply_patch requires a POSIX filesystem with descriptor-based no-follow support.");
   }
 }

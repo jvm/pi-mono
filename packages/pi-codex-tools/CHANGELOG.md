@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep `edit` and `write` active on platforms where `apply_patch` cannot run. The tool swap was gated solely on model grammar capability, so unsupported platforms (macOS) replaced the native file tools with `apply_patch` and then failed at execution; activation now also requires the secure filesystem to be supported.
+
 ## [0.1.3] - 2026-08-06
 
 ### Fixed
