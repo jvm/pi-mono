@@ -14,6 +14,7 @@ export interface OpenAtBindings {
   openat(dirfd: number, path: string, flags: number, mode: number): number;
   mkdirat(dirfd: number, path: string, mode: number): void;
   unlinkat(dirfd: number, path: string): void;
+  lstatAt(dirfd: number, path: string): { isFile: boolean; isDirectory: boolean; isSymbolicLink: boolean };
 }
 
 let cached: OpenAtBindings | null | undefined;

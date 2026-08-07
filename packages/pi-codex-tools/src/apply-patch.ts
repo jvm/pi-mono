@@ -65,6 +65,14 @@ async function unlinkChildRelative(parentFd: number, child: string): Promise<voi
   await unlinkPath(join(SECURE_FD_DIRECTORY as string, String(parentFd), child));
 }
 
+// No-follow stat of `child` relative to a trusted descriptor, without opening it
+// (so unreadable files can still be inspected for symlink/directory rejection).
+async function lstatChildRelative(parentFd: number, child: string): Promise<{ isFile: boolean; isDirectory: boolean; isSymbolicLink: boolean }> {
+  if (OPENAT_BINDINGS) return OPENAT_BINDINGS.lstatAt(parentFd, child);
+  const stats = await lstat(join(SECURE_FD_DIRECTORY as string, String(parentFd), child));
+  return { isFile: stats.isFile(), isDirectory: stats.isDirectory(), isSymbolicLink: stats.isSymbolicLink() };
+}
+
 async function writeAllFd(fd: number, data: string): Promise<void> {
   const buffer = Buffer.from(data, "utf8");
   let written = 0;
@@ -605,19 +613,15 @@ async function writeSecureFile(rootFd: number, root: string, absolute: string, c
 
 async function removeSecureFile(rootFd: number, root: string, absolute: string, signal?: AbortSignal): Promise<void> {
   const parent = await openSecureParentDirectory(rootFd, root, absolute, false, signal);
-  let fd: number | undefined;
   try {
     throwIfAborted(signal);
-    // O_NOFOLLOW rejects a symlinked target (ELOOP / ENOTDIR) before any mutation; fstat confirms it is a file.
-    fd = await openChildRelative(parent.handle, basename(absolute), SECURE_READ_FLAGS, 0);
-    const stats = await fstatFd(fd);
-    if (stats.isSymbolicLink()) throw new Error(`Symlink paths are not allowed in apply_patch: ${absolute}`);
-    if (stats.isDirectory()) throw new Error(`Cannot delete directory '${absolute}'.`);
-    await closeFd(fd);
-    fd = undefined;
+    // No-follow stat without opening the target, so unreadable (mode-000) files can still be deleted;
+    // unlink only requires write permission on the parent directory, never on the file itself.
+    const stats = await lstatChildRelative(parent.handle, basename(absolute));
+    if (stats.isSymbolicLink) throw new Error(`Symlink paths are not allowed in apply_patch: ${absolute}`);
+    if (stats.isDirectory) throw new Error(`Cannot delete directory '${absolute}'.`);
     await unlinkChildRelative(parent.handle, basename(absolute));
   } finally {
-    if (fd !== undefined) await closeFd(fd).catch(() => undefined);
     if (parent.owned) await closeFd(parent.handle).catch(() => undefined);
   }
 }

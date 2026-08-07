@@ -114,13 +114,43 @@ static napi_value UnlinkAt(napi_env env, napi_callback_info info) {
   return undef;
 }
 
+static napi_value LstatAt(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value args[2];
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc < 2) {
+    napi_throw_type_error(env, NULL, "lstatAt(dirfd, path) requires (dirfd, path)");
+    return NULL;
+  }
+  int dirfd = 0;
+  if (napi_get_value_int32(env, args[0], &dirfd) != napi_ok) {
+    napi_throw_type_error(env, NULL, "dirfd must be an integer");
+    return NULL;
+  }
+  char *path = get_string(env, args[1]);
+  if (!path) {
+    napi_throw_type_error(env, NULL, "path must be a string");
+    return NULL;
+  }
+  struct stat st;
+  int rc = fstatat(dirfd, path, &st, AT_SYMLINK_NOFOLLOW);
+  free(path);
+  if (rc < 0) return throw_errno(env, errno);
+  napi_value obj, v;
+  napi_create_object(env, &obj);
+  napi_get_boolean(env, S_ISREG(st.st_mode), &v); napi_set_named_property(env, obj, "isFile", v);
+  napi_get_boolean(env, S_ISDIR(st.st_mode), &v); napi_set_named_property(env, obj, "isDirectory", v);
+  napi_get_boolean(env, S_ISLNK(st.st_mode), &v); napi_set_named_property(env, obj, "isSymbolicLink", v);
+  return obj;
+}
+
 static napi_value Init(napi_env env, napi_value exports) {
   const napi_property_descriptor props[] = {
     { "openat", NULL, OpenAt, NULL, NULL, NULL, napi_default, NULL },
     { "mkdirat", NULL, MkdirAt, NULL, NULL, NULL, napi_default, NULL },
     { "unlinkat", NULL, UnlinkAt, NULL, NULL, NULL, napi_default, NULL },
+    { "lstatAt", NULL, LstatAt, NULL, NULL, NULL, napi_default, NULL },
   };
-  napi_define_properties(env, exports, 3, props);
+  napi_define_properties(env, exports, 4, props);
   return exports;
 }
 
