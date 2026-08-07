@@ -6,10 +6,10 @@ import test from "node:test";
 
 process.env.CI = "1";
 
-const { applyPatch, MAX_TARGET_FILE_BYTES, parseApplyPatch } = await import("../src/apply-patch.ts");
+const { applyPatch, MAX_TARGET_FILE_BYTES, parseApplyPatch, secureFilesystemSupported } = await import("../src/apply-patch.ts");
 
 const patch = (body) => `*** Begin Patch\n${body}\n*** End Patch`;
-const supportsSecureFilesystem = process.platform === "linux";
+const supportsSecureFilesystem = secureFilesystemSupported();
 const applyTest = (name, fn) => test(name, { skip: !supportsSecureFilesystem }, fn);
 
 test("parses Codex add, delete, update, and move hunks", () => {
