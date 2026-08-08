@@ -4,8 +4,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 
-process.env.CI = "1";
-
 const { getOpenAtBindings } = await import("../src/native.ts");
 const binding = getOpenAtBindings();
 
