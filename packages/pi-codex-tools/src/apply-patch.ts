@@ -1,9 +1,10 @@
 // Adapted from OpenAI Codex apply-patch grammar/parser behavior; see NOTICE.
-import { constants } from "node:fs";
-import { lstat, mkdir, open, realpath, unlink } from "node:fs/promises";
-import type { FileHandle } from "node:fs/promises";
+import { constants, open as openCb, fstat as fstatCb, read as readCb, write as writeCb, close as closeCb, mkdir as mkdirCb, unlink as unlinkCb } from "node:fs";
+import type { Stats } from "node:fs";
+import { lstat, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { getOpenAtBindings } from "./native.js";
 
 export const MAX_PATCH_BYTES = 1_048_576;
 export const MAX_PATCH_HUNKS = 1_000;
@@ -11,7 +12,74 @@ export const MAX_TARGET_FILE_BYTES = 64 * 1024 * 1024;
 
 const O_NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 const SECURE_FD_DIRECTORY = process.platform === "linux" ? "/proc/self/fd" : undefined;
-const SECURE_FILESYSTEM_SUPPORTED = SECURE_FD_DIRECTORY !== undefined && O_NOFOLLOW !== 0;
+const OPENAT_BINDINGS = getOpenAtBindings();
+const BASE_SECURE_FILESYSTEM_SUPPORTED =
+  (process.platform === "linux" && SECURE_FD_DIRECTORY !== undefined && O_NOFOLLOW !== 0) ||
+  (process.platform === "darwin" && OPENAT_BINDINGS !== null && O_NOFOLLOW !== 0);
+let secureFilesystemSupportedOverride: boolean | undefined;
+
+/** Whether apply_patch can safely execute against this platform's filesystem. */
+export function secureFilesystemSupported(): boolean {
+  return secureFilesystemSupportedOverride ?? BASE_SECURE_FILESYSTEM_SUPPORTED;
+}
+
+/** @internal Force the support flag so the activation path can be tested on any host platform. */
+export function setSecureFilesystemSupportedForTest(value: boolean | undefined): void {
+  secureFilesystemSupportedOverride = value;
+}
+
+const openFd = (path: string, flags: number, mode: number): Promise<number> =>
+  new Promise((resolveP, rejectP) => openCb(path, flags, mode, (error, fd) => (error ? rejectP(error) : resolveP(fd))));
+const fstatFd = (fd: number): Promise<Stats> =>
+  new Promise((resolveP, rejectP) => fstatCb(fd, (error, stats) => (error ? rejectP(error) : resolveP(stats))));
+const readFd = (fd: number, buffer: Buffer, offset: number, length: number, position: number | null): Promise<number> =>
+  new Promise((resolveP, rejectP) => readCb(fd, buffer, offset, length, position, (error, bytesRead) => (error ? rejectP(error) : resolveP(bytesRead))));
+const writeFd = (fd: number, buffer: Buffer, offset: number, length: number, position: number | null): Promise<number> =>
+  new Promise((resolveP, rejectP) => writeCb(fd, buffer, offset, length, position, (error, written) => (error ? rejectP(error) : resolveP(written))));
+const closeFd = (fd: number): Promise<void> =>
+  new Promise((resolveP, rejectP) => closeCb(fd, (error) => (error ? rejectP(error) : resolveP())));
+const mkdirPath = (path: string, mode: number): Promise<void> =>
+  new Promise((resolveP, rejectP) => mkdirCb(path, mode, (error) => (error ? rejectP(error) : resolveP())));
+const unlinkPath = (path: string): Promise<void> =>
+  new Promise((resolveP, rejectP) => unlinkCb(path, (error) => (error ? rejectP(error) : resolveP())));
+
+// Open `child` relative to a trusted open directory descriptor, never following the final component.
+async function openChildRelative(parentFd: number, child: string, flags: number, mode: number): Promise<number> {
+  if (OPENAT_BINDINGS) return OPENAT_BINDINGS.openat(parentFd, child, flags, mode);
+  return openFd(join(SECURE_FD_DIRECTORY as string, String(parentFd), child), flags, mode);
+}
+
+async function mkdirChildRelative(parentFd: number, child: string, mode: number): Promise<void> {
+  if (OPENAT_BINDINGS) {
+    OPENAT_BINDINGS.mkdirat(parentFd, child, mode);
+    return;
+  }
+  await mkdirPath(join(SECURE_FD_DIRECTORY as string, String(parentFd), child), mode);
+}
+
+async function unlinkChildRelative(parentFd: number, child: string): Promise<void> {
+  if (OPENAT_BINDINGS) {
+    OPENAT_BINDINGS.unlinkat(parentFd, child);
+    return;
+  }
+  await unlinkPath(join(SECURE_FD_DIRECTORY as string, String(parentFd), child));
+}
+
+// No-follow stat of `child` relative to a trusted descriptor, without opening it
+// (so unreadable files can still be inspected for symlink/directory rejection).
+async function lstatChildRelative(parentFd: number, child: string): Promise<{ isFile: boolean; isDirectory: boolean; isSymbolicLink: boolean }> {
+  if (OPENAT_BINDINGS) return OPENAT_BINDINGS.lstatAt(parentFd, child);
+  const stats = await lstat(join(SECURE_FD_DIRECTORY as string, String(parentFd), child));
+  return { isFile: stats.isFile(), isDirectory: stats.isDirectory(), isSymbolicLink: stats.isSymbolicLink() };
+}
+
+async function writeAllFd(fd: number, data: string): Promise<void> {
+  const buffer = Buffer.from(data, "utf8");
+  let written = 0;
+  while (written < buffer.length) {
+    written += await writeFd(fd, buffer, written, buffer.length - written, written);
+  }
+}
 const SECURE_DIRECTORY_FLAGS = constants.O_RDONLY | O_NOFOLLOW | (constants.O_DIRECTORY ?? 0) | (constants.O_NONBLOCK ?? 0);
 const SECURE_READ_FLAGS = constants.O_RDONLY | O_NOFOLLOW | (constants.O_NONBLOCK ?? 0);
 const SECURE_UPDATE_FLAGS = constants.O_WRONLY | O_NOFOLLOW | constants.O_TRUNC | (constants.O_NONBLOCK ?? 0);
@@ -238,22 +306,22 @@ export async function applyPatch(input: string, options: ApplyPatchOptions): Pro
   });
 
   return withMutationLocks(lockPaths, async () => {
-    const rootHandle = await openSecureRoot(root, options.signal);
+    const rootFd = await openSecureRoot(root, options.signal);
     try {
-      const operations = await planOperations(hunks, root, rootHandle, options.signal);
+      const operations = await planOperations(hunks, root, rootFd, options.signal);
       throwIfAborted(options.signal);
       // ponytail: preflight catches parse/match errors before writes; cross-process failures can still leave a partial multi-file patch.
       for (const operation of operations) {
         throwIfAborted(options.signal);
         if (operation.kind === "add") {
-          await writeSecureFile(rootHandle, root, operation.path, operation.content, true, options.signal);
+          await writeSecureFile(rootFd, root, operation.path, operation.content, true, options.signal);
         } else if (operation.kind === "delete") {
-          await removeSecureFile(rootHandle, root, operation.path, options.signal);
+          await removeSecureFile(rootFd, root, operation.path, options.signal);
         } else if (operation.moveTo) {
-          await writeSecureFile(rootHandle, root, operation.moveTo, operation.content, true, options.signal);
-          await removeSecureFile(rootHandle, root, operation.path, options.signal);
+          await writeSecureFile(rootFd, root, operation.moveTo, operation.content, true, options.signal);
+          await removeSecureFile(rootFd, root, operation.path, options.signal);
         } else {
-          await writeSecureFile(rootHandle, root, operation.path, operation.content, false, options.signal);
+          await writeSecureFile(rootFd, root, operation.path, operation.content, false, options.signal);
         }
       }
 
@@ -265,12 +333,12 @@ export async function applyPatch(input: string, options: ApplyPatchOptions): Pro
         })),
       };
     } finally {
-      await rootHandle.close();
+      await closeFd(rootFd);
     }
   });
 }
 
-async function planOperations(hunks: ApplyPatchHunk[], root: string, rootHandle: FileHandle, signal?: AbortSignal): Promise<PlannedOperation[]> {
+async function planOperations(hunks: ApplyPatchHunk[], root: string, rootFd: number, signal?: AbortSignal): Promise<PlannedOperation[]> {
   const operations: PlannedOperation[] = [];
   const virtualFiles = new Map<string, VirtualFile>();
 
@@ -290,7 +358,7 @@ async function planOperations(hunks: ApplyPatchHunk[], root: string, rootHandle:
 
   const getVirtualContent = async (absolute: string, file: VirtualFile): Promise<string> => {
     if (!file.exists || !file.isFile) throw new Error(`Cannot read non-file '${absolute}'.`);
-    if (file.content === undefined) file.content = await readSecureFile(rootHandle, root, absolute, signal);
+    if (file.content === undefined) file.content = await readSecureFile(rootFd, root, absolute, signal);
     return file.content;
   };
 
@@ -420,47 +488,42 @@ async function safePath(rawPath: string, root: string, signal?: AbortSignal): Pr
 }
 
 function requireSecureFilesystem(): void {
-  if (!SECURE_FILESYSTEM_SUPPORTED) {
+  if (!secureFilesystemSupported()) {
     throw new Error("apply_patch requires a POSIX filesystem with descriptor-based no-follow support.");
   }
 }
 
-function secureChildPath(parent: FileHandle, child: string): string {
-  if (!SECURE_FD_DIRECTORY) throw new Error("Secure filesystem operations are unavailable on this platform.");
-  return join(SECURE_FD_DIRECTORY, String(parent.fd), child);
-}
-
-async function openSecureRoot(root: string, signal?: AbortSignal): Promise<FileHandle> {
+async function openSecureRoot(root: string, signal?: AbortSignal): Promise<number> {
   requireSecureFilesystem();
-  let current = await open(sep, SECURE_DIRECTORY_FLAGS);
+  let current = await openFd(sep, SECURE_DIRECTORY_FLAGS, 0);
   try {
     for (const component of root.split(sep).filter(Boolean)) {
       throwIfAborted(signal);
       const next = await openSecureDirectoryChild(current, component);
-      await current.close();
+      await closeFd(current);
       current = next;
     }
     return current;
   } catch (error) {
-    await current.close().catch(() => undefined);
+    await closeFd(current).catch(() => undefined);
     throw error;
   }
 }
 
-async function openSecureDirectoryChild(parent: FileHandle, component: string): Promise<FileHandle> {
-  const handle = await open(secureChildPath(parent, component), SECURE_DIRECTORY_FLAGS);
+async function openSecureDirectoryChild(parentFd: number, component: string): Promise<number> {
+  const fd = await openChildRelative(parentFd, component, SECURE_DIRECTORY_FLAGS, 0);
   try {
-    if (!(await handle.stat()).isDirectory()) throw new Error(`Secure path component is not a directory: ${component}`);
-    return handle;
+    if (!(await fstatFd(fd)).isDirectory()) throw new Error(`Secure path component is not a directory: ${component}`);
+    return fd;
   } catch (error) {
-    await handle.close().catch(() => undefined);
+    await closeFd(fd).catch(() => undefined);
     throw error;
   }
 }
 
-type SecureParent = { handle: FileHandle; owned: boolean };
+type SecureParent = { handle: number; owned: boolean };
 
-async function openSecureParentDirectory(rootHandle: FileHandle, root: string, absolute: string, createParents: boolean, signal?: AbortSignal): Promise<SecureParent> {
+async function openSecureParentDirectory(rootFd: number, root: string, absolute: string, createParents: boolean, signal?: AbortSignal): Promise<SecureParent> {
   const parentPath = dirname(absolute);
   const relativeParent = relative(root, parentPath);
   const components = relativeParent ? relativeParent.split(sep) : [];
@@ -468,58 +531,58 @@ async function openSecureParentDirectory(rootHandle: FileHandle, root: string, a
     throw new Error(`Patch path must stay inside the current working directory: ${absolute}`);
   }
 
-  let current = rootHandle;
+  let current = rootFd;
   let owned = false;
   try {
     for (const component of components) {
       throwIfAborted(signal);
-      let next: FileHandle;
+      let next: number;
       try {
         next = await openSecureDirectoryChild(current, component);
       } catch (error) {
         if (!createParents || !isNoEntryError(error)) throw error;
         try {
-          await mkdir(secureChildPath(current, component));
+          await mkdirChildRelative(current, component, 0o777);
         } catch (mkdirError) {
           if (!isAlreadyExistsError(mkdirError)) throw mkdirError;
         }
         next = await openSecureDirectoryChild(current, component);
       }
-      if (owned) await current.close();
+      if (owned) await closeFd(current);
       current = next;
       owned = true;
     }
     return { handle: current, owned };
   } catch (error) {
-    if (owned) await current.close().catch(() => undefined);
+    if (owned) await closeFd(current).catch(() => undefined);
     throw error;
   }
 }
 
 async function withSecureFile<T>(
-  rootHandle: FileHandle,
+  rootFd: number,
   root: string,
   absolute: string,
   flags: number,
   createParents: boolean,
-  callback: (file: FileHandle, size: number) => Promise<T>,
+  callback: (fd: number, size: number) => Promise<T>,
   signal?: AbortSignal,
 ): Promise<T> {
-  const parent = await openSecureParentDirectory(rootHandle, root, absolute, createParents, signal);
-  let file: FileHandle | undefined;
+  const parent = await openSecureParentDirectory(rootFd, root, absolute, createParents, signal);
+  let fd: number | undefined;
   try {
-    file = await open(secureChildPath(parent.handle, basename(absolute)), flags, 0o666);
-    const stats = await file.stat();
+    fd = await openChildRelative(parent.handle, basename(absolute), flags, 0o666);
+    const stats = await fstatFd(fd);
     if (!stats.isFile()) throw new Error(`Patch target is not a regular file: ${absolute}`);
-    return await callback(file, stats.size);
+    return await callback(fd, stats.size);
   } finally {
-    await file?.close().catch(() => undefined);
-    if (parent.owned) await parent.handle.close().catch(() => undefined);
+    if (fd !== undefined) await closeFd(fd).catch(() => undefined);
+    if (parent.owned) await closeFd(parent.handle).catch(() => undefined);
   }
 }
 
-async function readSecureFile(rootHandle: FileHandle, root: string, absolute: string, signal?: AbortSignal): Promise<string> {
-  return withSecureFile(rootHandle, root, absolute, SECURE_READ_FLAGS, false, async (file, size) => {
+async function readSecureFile(rootFd: number, root: string, absolute: string, signal?: AbortSignal): Promise<string> {
+  return withSecureFile(rootFd, root, absolute, SECURE_READ_FLAGS, false, async (fd, size) => {
     if (size > MAX_TARGET_FILE_BYTES) {
       throw new Error(`Patch target exceeds the ${MAX_TARGET_FILE_BYTES}-byte limit: ${absolute}`);
     }
@@ -529,7 +592,7 @@ async function readSecureFile(rootHandle: FileHandle, root: string, absolute: st
     while (true) {
       throwIfAborted(signal);
       const buffer = Buffer.alloc(Math.min(FILE_READ_CHUNK_BYTES, MAX_TARGET_FILE_BYTES + 1 - total));
-      const { bytesRead } = await file.read(buffer, 0, buffer.length, null);
+      const bytesRead = await readFd(fd, buffer, 0, buffer.length, null);
       if (bytesRead === 0) break;
       total += bytesRead;
       chunks.push(buffer.subarray(0, bytesRead));
@@ -541,23 +604,25 @@ async function readSecureFile(rootHandle: FileHandle, root: string, absolute: st
   }, signal);
 }
 
-async function writeSecureFile(rootHandle: FileHandle, root: string, absolute: string, content: string, createParents: boolean, signal?: AbortSignal): Promise<void> {
+async function writeSecureFile(rootFd: number, root: string, absolute: string, content: string, createParents: boolean, signal?: AbortSignal): Promise<void> {
   const flags = createParents ? SECURE_CREATE_FLAGS : SECURE_UPDATE_FLAGS;
-  await withSecureFile(rootHandle, root, absolute, flags, createParents, async (file) => {
-    await file.writeFile(content, "utf8");
+  await withSecureFile(rootFd, root, absolute, flags, createParents, async (fd) => {
+    await writeAllFd(fd, content);
   }, signal);
 }
 
-async function removeSecureFile(rootHandle: FileHandle, root: string, absolute: string, signal?: AbortSignal): Promise<void> {
-  const parent = await openSecureParentDirectory(rootHandle, root, absolute, false, signal);
+async function removeSecureFile(rootFd: number, root: string, absolute: string, signal?: AbortSignal): Promise<void> {
+  const parent = await openSecureParentDirectory(rootFd, root, absolute, false, signal);
   try {
-    const target = secureChildPath(parent.handle, basename(absolute));
-    const stats = await lstat(target);
-    if (stats.isSymbolicLink()) throw new Error(`Symlink paths are not allowed in apply_patch: ${absolute}`);
-    if (stats.isDirectory()) throw new Error(`Cannot delete directory '${absolute}'.`);
-    await unlink(target);
+    throwIfAborted(signal);
+    // No-follow stat without opening the target, so unreadable (mode-000) files can still be deleted;
+    // unlink only requires write permission on the parent directory, never on the file itself.
+    const stats = await lstatChildRelative(parent.handle, basename(absolute));
+    if (stats.isSymbolicLink) throw new Error(`Symlink paths are not allowed in apply_patch: ${absolute}`);
+    if (stats.isDirectory) throw new Error(`Cannot delete directory '${absolute}'.`);
+    await unlinkChildRelative(parent.handle, basename(absolute));
   } finally {
-    if (parent.owned) await parent.handle.close().catch(() => undefined);
+    if (parent.owned) await closeFd(parent.handle).catch(() => undefined);
   }
 }
 

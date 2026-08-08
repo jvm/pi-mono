@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, symlink, truncate, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, chmod, readFile, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 process.env.CI = "1";
 
-const { applyPatch, MAX_TARGET_FILE_BYTES, parseApplyPatch } = await import("../src/apply-patch.ts");
+const { applyPatch, MAX_TARGET_FILE_BYTES, parseApplyPatch, secureFilesystemSupported } = await import("../src/apply-patch.ts");
 
 const patch = (body) => `*** Begin Patch\n${body}\n*** End Patch`;
-const supportsSecureFilesystem = process.platform === "linux";
+const supportsSecureFilesystem = secureFilesystemSupported();
 const applyTest = (name, fn) => test(name, { skip: !supportsSecureFilesystem }, fn);
 
 test("parses Codex add, delete, update, and move hunks", () => {
@@ -272,6 +272,23 @@ applyTest("rejects symlink path escapes", async () => {
   } finally {
     await rm(cwd, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });
+  }
+});
+
+applyTest("deletes unreadable mode-000 files", async () => {
+  // root bypasses file permissions, so the bug would not manifest; skip to keep the test honest.
+  if (process.getuid && process.getuid() === 0) return;
+  const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
+  const target = join(cwd, "locked.txt");
+  try {
+    await writeFile(target, "x");
+    await chmod(target, 0o000);
+    const result = await applyPatch(patch(`*** Delete File: locked.txt`), { cwd });
+    assert.deepEqual(result.changes.map((change) => change.kind), ["deleted"]);
+    await assert.rejects(readFile(target));
+  } finally {
+    await chmod(target, 0o600).catch(() => undefined);
+    await rm(cwd, { recursive: true, force: true });
   }
 });
 

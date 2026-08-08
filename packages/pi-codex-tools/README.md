@@ -6,7 +6,7 @@ Give grammar-capable OpenAI/Codex models the Codex `apply_patch` tool in Pi with
 
 - **Raw `apply_patch`** — sends Codex's Lark grammar as an OpenAI custom tool, so patches are not JSON-wrapped.
 - **Capability-based activation** — requires `openai-codex-responses` or `openai-responses` plus `model.compat.supportsOpenAIGrammarTools === true`; model names alone are never enough.
-- **Safe local mutation** — patches are limited to 1 MiB, target files to 64 MiB, stay under Pi's current working directory, reject symlink escapes, use descriptor-anchored no-follow operations on Linux, fail closed elsewhere, preflight all hunks, and serialize writes with Pi's mutation queue.
+- **Safe local mutation** — patches are limited to 1 MiB, target files to 64 MiB, stay under Pi's current working directory, reject symlink escapes, use descriptor-anchored no-follow operations on Linux and macOS, fail closed elsewhere, preflight all hunks, and serialize writes with Pi's mutation queue.
 - **Model switching** — supported models replace Pi's `edit` and `write` tools with `apply_patch`; other active tools are preserved. Switching back restores only the file tools that were active before the switch.
 - **Sequential patch calls** — the extension marks patch execution sequential and disables provider-side parallel tool calls when the patch tool is active.
 - **Streaming progress** — while a patch is generated, the TUI shows a live, color-coded glimpse of the content being written (new-file content, or `+`/`-` lines for updates) plus a running `+added -removed` tally and a per-file roster for multi-file patches. It reuses Pi's shared diff rendering and mirrors the built-in `write`/`edit` previews; patch execution is unchanged.
@@ -25,7 +25,7 @@ pi -e /path/to/pi-mono/packages/pi-codex-tools
 
 ## Scope decisions
 
-The current Codex source does not define separate `read_file` or `write_file` tools: file inspection is normally done through shell commands and file mutation through `apply_patch`. This package keeps Pi's bounded `read` and `bash` tools, and uses `apply_patch` in place of Pi's `edit` and `write` tools for supported models. Because Pi does not provide Codex's OS-level filesystem sandbox, `apply_patch` runs only on Linux and fails closed on unsupported platforms. It also requires a Pi model runtime that advertises `compat.supportsOpenAIGrammarTools`; older runtimes leave the tool inactive.
+The current Codex source does not define separate `read_file` or `write_file` tools: file inspection is normally done through shell commands and file mutation through `apply_patch`. This package keeps Pi's bounded `read` and `bash` tools, and uses `apply_patch` in place of Pi's `edit` and `write` tools for supported models. Because Pi does not provide Codex's OS-level filesystem sandbox, `apply_patch` performs its own TOCTOU-safe, no-follow directory walk: on Linux it re-opens each component relative to a trusted fd via `/proc/self/fd`, and on macOS via a tiny bundled `openat`/`mkdirat`/`unlinkat` N-API binding (prebuilt for Apple silicon and Intel). It fails closed on platforms without that support, in which case the native `edit`/`write` tools stay active. `apply_patch` also requires a Pi model runtime that advertises `compat.supportsOpenAIGrammarTools`; older runtimes leave the tool inactive.
 
 | Codex surface | Decision |
 | --- | --- |
