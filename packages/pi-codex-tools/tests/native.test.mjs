@@ -10,7 +10,8 @@ const { getOpenAtBindings } = await import("../src/native.ts");
 const binding = getOpenAtBindings();
 
 // The binding is darwin-only; on other platforms getOpenAtBindings() returns null and these skip.
-test("openat surfaces the syscall errno, not one clobbered by free()", { skip: !binding }, () => {
+test("openat surfaces the syscall errno, not one clobbered by free()", { skip: process.platform !== "darwin" }, () => {
+  assert.ok(binding, "Expected the Darwin native binding to load");
   const dir = mkdtempSync(join(tmpdir(), "pi-codex-tools-native-"));
   let dirfd;
   try {
