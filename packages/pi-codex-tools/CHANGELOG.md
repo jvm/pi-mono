@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-08
+
+### Fixed
+
+- Stop npm from running `node-gyp rebuild` on install. The package ships prebuilt native bindings and loads them at runtime, but npm's gypfile detection keyed off the dev-only `binding.gyp` and injected a failing `node-gyp rebuild` into the install lifecycle — breaking install on machines without a build toolchain (e.g. Linux). Set `gypfile: false` to suppress it.
+
 ## [0.2.0] - 2026-08-08
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "pi-codex-tools",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Codex-compatible apply_patch tooling for Pi's grammar-capable OpenAI models.",
   "type": "module",
   "license": "Apache-2.0",
@@ -45,6 +45,7 @@
     "CONTRIBUTING.md",
     "CODE_OF_CONDUCT.md"
   ],
+  "gypfile": false,
   "scripts": {
     "check": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
