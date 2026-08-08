@@ -68,8 +68,9 @@ static napi_value OpenAt(napi_env env, napi_callback_info info) {
     free(path); napi_throw_type_error(env, NULL, "mode must be an integer"); return NULL;
   }
   int fd = openat(dirfd, path, flags, (mode_t)mode);
+  int saved_errno = errno;
   free(path);
-  if (fd < 0) return throw_errno(env, errno);
+  if (fd < 0) return throw_errno(env, saved_errno);
   napi_value result;
   napi_create_int32(env, fd, &result);
   return result;
@@ -88,8 +89,9 @@ static napi_value MkdirAt(napi_env env, napi_callback_info info) {
   if (!path) { napi_throw_type_error(env, NULL, "path must be a string"); return NULL; }
   if (argc >= 3 && napi_get_value_int32(env, args[2], &mode) != napi_ok) { free(path); napi_throw_type_error(env, NULL, "mode must be an integer"); return NULL; }
   int rc = mkdirat(dirfd, path, (mode_t)mode);
+  int saved_errno = errno;
   free(path);
-  if (rc < 0) return throw_errno(env, errno);
+  if (rc < 0) return throw_errno(env, saved_errno);
   napi_value undef;
   napi_get_undefined(env, &undef);
   return undef;
@@ -107,8 +109,9 @@ static napi_value UnlinkAt(napi_env env, napi_callback_info info) {
   char *path = get_string(env, args[1]);
   if (!path) { napi_throw_type_error(env, NULL, "path must be a string"); return NULL; }
   int rc = unlinkat(dirfd, path, 0);
+  int saved_errno = errno;
   free(path);
-  if (rc < 0) return throw_errno(env, errno);
+  if (rc < 0) return throw_errno(env, saved_errno);
   napi_value undef;
   napi_get_undefined(env, &undef);
   return undef;
@@ -133,8 +136,9 @@ static napi_value LstatAt(napi_env env, napi_callback_info info) {
   }
   struct stat st;
   int rc = fstatat(dirfd, path, &st, AT_SYMLINK_NOFOLLOW);
+  int saved_errno = errno;
   free(path);
-  if (rc < 0) return throw_errno(env, errno);
+  if (rc < 0) return throw_errno(env, saved_errno);
   napi_value obj, v;
   napi_create_object(env, &obj);
   napi_get_boolean(env, S_ISREG(st.st_mode), &v); napi_set_named_property(env, obj, "isFile", v);
