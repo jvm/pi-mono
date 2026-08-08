@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-08
+
 ### Added
 
 - macOS support for `apply_patch` via a bundled `openat` / `mkdirat` / `unlinkat` N-API binding, prebuilt for Apple silicon and Intel. The TOCTOU-safe no-follow directory walk now runs on macOS with parity to Linux, so supported Codex models can use `apply_patch` on macOS (previously Linux-only).
