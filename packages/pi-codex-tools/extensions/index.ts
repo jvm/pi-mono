@@ -122,15 +122,4 @@ export default function piCodexTools(pi: ExtensionAPI): void {
   pi.on("model_select", (_event, ctx) => {
     synchronizeTools(ctx);
   });
-
-  pi.on("before_provider_request", (event, ctx) => {
-    if (!supportsOpenAIGrammarTools(ctx.model)) return;
-    if (typeof pi.getActiveTools !== "function" || !pi.getActiveTools().includes(APPLY_PATCH)) return;
-    if (!isRecord(event.payload) || event.payload.parallel_tool_calls !== true) return;
-    return { ...event.payload, parallel_tool_calls: false };
-  });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

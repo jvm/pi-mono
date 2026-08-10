@@ -8,7 +8,7 @@ Give grammar-capable OpenAI/Codex models the Codex `apply_patch` tool in Pi with
 - **Capability-based activation** — requires `openai-codex-responses` or `openai-responses` plus `model.compat.supportsOpenAIGrammarTools === true`; model names alone are never enough.
 - **Safe local mutation** — patches are limited to 1 MiB, target files to 64 MiB, stay under Pi's current working directory, reject symlink escapes, use descriptor-anchored no-follow operations on Linux and macOS, fail closed elsewhere, preflight all hunks, and serialize writes with Pi's mutation queue.
 - **Model switching** — supported models replace Pi's `edit` and `write` tools with `apply_patch`; other active tools are preserved. Switching back restores only the file tools that were active before the switch.
-- **Sequential patch calls** — the extension marks patch execution sequential and disables provider-side parallel tool calls when the patch tool is active.
+- **Sequential patch calls** — the extension marks patch execution sequential while leaving provider-side parallel tool calls enabled.
 - **Streaming progress** — while a patch is generated, the TUI shows a live, color-coded glimpse of the content being written (new-file content, or `+`/`-` lines for updates) plus a running `+added -removed` tally and a per-file roster for multi-file patches. It reuses Pi's shared diff rendering and mirrors the built-in `write`/`edit` previews; patch execution is unchanged.
 
 ## Installation
