@@ -5,6 +5,7 @@
 // (it never throws) to drive a live, write-style glimpse of the content plus a running
 // added/removed tally. It reuses Pi's shared `renderDiff` primitive for +/- coloring, so the
 // preview stays consistent with the built-in `edit` tool's diff preview.
+import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { keyHint, type Theme } from "@earendil-works/pi-coding-agent";
 
 const FILE_ADD = "*** Add File: ";
@@ -26,6 +27,11 @@ const MAX_PREVIEW_BYTES = 256 * 1024;
 const MAX_PREVIEW_FILES = 500;
 /** Cap a single rendered glimpse line so minified/generated content cannot flood the TUI. */
 const PREVIEW_LINE_CHARS = 200;
+const TERMINAL_CONTROL_CHARS = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g;
+
+function sanitizeTerminalText(text: string): string {
+  return stripTerminalSequences(text).replace(TERMINAL_CONTROL_CHARS, "").replace(/\t/g, "   ");
+}
 
 export type PatchLineType = "add" | "del" | "ctx";
 
@@ -156,8 +162,10 @@ function fileMarkLabel(file: PatchPreviewFile, theme: Theme): string {
 }
 
 function filePathLabel(file: PatchPreviewFile, theme: Theme): string {
-  const path = theme.fg("accent", truncatePath(file.path));
-  return file.moveTo ? `${path} ${theme.fg("muted", "->")} ${theme.fg("accent", truncatePath(file.moveTo))}` : path;
+  const path = theme.fg("accent", truncatePath(sanitizeTerminalText(file.path)));
+  return file.moveTo
+    ? `${path} ${theme.fg("muted", "->")} ${theme.fg("accent", truncatePath(sanitizeTerminalText(file.moveTo)))}`
+    : path;
 }
 
 function formatFileRosterLine(file: PatchPreviewFile, theme: Theme): string {
@@ -177,7 +185,8 @@ function countLines(file: PatchPreviewFile, type: PatchLineType): number {
  */
 function renderGlimpseLine(line: PatchPreviewLine, theme: Theme): string {
   const sign = line.type === "add" ? "+" : line.type === "del" ? "-" : " ";
-  const body = line.text.length > PREVIEW_LINE_CHARS ? `${line.text.slice(0, PREVIEW_LINE_CHARS)}…` : line.text;
+  const text = sanitizeTerminalText(line.text);
+  const body = text.length > PREVIEW_LINE_CHARS ? `${text.slice(0, PREVIEW_LINE_CHARS)}…` : text;
   const styled = `${sign}${body}`;
   if (line.type === "add") return theme.fg("toolDiffAdded", styled);
   if (line.type === "del") return theme.fg("toolDiffRemoved", styled);
@@ -263,5 +272,5 @@ export function formatApplyPatchResultText(
     .map((part) => part.text ?? "")
     .join("\n")
     .trim();
-  return output ? theme.fg("error", output) : undefined;
+  return output ? theme.fg("error", sanitizeTerminalText(output)) : undefined;
 }

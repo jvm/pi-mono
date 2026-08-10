@@ -16,10 +16,10 @@ export interface CodexCompactionRequest {
   model: {
     id: string;
     baseUrl: string;
-    headers?: Record<string, string>;
+    headers?: Record<string, string | null>;
   };
   apiKey: string;
-  authHeaders?: Record<string, string>;
+  authHeaders?: Record<string, string | null>;
   sessionId?: string;
   body: Record<string, unknown>;
   signal?: AbortSignal;
@@ -140,8 +140,12 @@ export function parseCompactionSseResult(sse: string): CodexCompactionResult {
 
 function buildHeaders(request: CodexCompactionRequest, accountId: string): Headers {
   const headers = new Headers();
-  for (const [name, value] of Object.entries(request.model.headers ?? {})) headers.set(name, value);
-  for (const [name, value] of Object.entries(request.authHeaders ?? {})) headers.set(name, value);
+  for (const [name, value] of Object.entries(request.model.headers ?? {})) {
+    if (value !== null) headers.set(name, value);
+  }
+  for (const [name, value] of Object.entries(request.authHeaders ?? {})) {
+    if (value !== null) headers.set(name, value);
+  }
 
   headers.set("Authorization", `Bearer ${request.apiKey}`);
   headers.set("chatgpt-account-id", accountId);
