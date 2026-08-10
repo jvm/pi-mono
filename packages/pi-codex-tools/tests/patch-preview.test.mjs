@@ -311,3 +311,22 @@ test("caps a single very long glimpse line", async () => {
   assert.ok(glimpseLine.length < long.length, "long line should be truncated");
   assert.ok(glimpseLine.endsWith("…"), "truncated line should end with an ellipsis");
 });
+
+test("removes untrusted terminal controls from preview text and paths", async () => {
+  const { initTheme } = await import("@earendil-works/pi-coding-agent");
+  const { formatApplyPatchCallText } = await import("../src/patch-preview.ts");
+  initTheme("dark");
+  const theme = globalThis[Symbol.for("@earendil-works/pi-coding-agent:theme")];
+  const patch = [
+    "*** Begin Patch",
+    "*** Add File: safe-\x1b]52;c;evil\x07.ts",
+    `+\x1b[2Jvalue\x00\x1b]8;;https://evil.example\x1b\\`,
+    "*** End Patch",
+  ].join("\n");
+  const rendered = formatApplyPatchCallText(patch, theme, { expanded: false });
+  const withoutTrustedStyles = rendered.replace(/\x1b\[[0-9;]*m/g, "");
+  assert.doesNotMatch(withoutTrustedStyles, /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/);
+  assert.doesNotMatch(withoutTrustedStyles, /\x1b/);
+  assert.match(withoutTrustedStyles, /safe-.*\.ts/);
+  assert.match(withoutTrustedStyles, /value/);
+});

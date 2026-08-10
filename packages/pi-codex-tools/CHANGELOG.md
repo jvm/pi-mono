@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Strip untrusted terminal control sequences from `apply_patch` previews before rendering them in the Pi TUI.
+
 ## [0.2.1] - 2026-08-08
 
 ### Fixed

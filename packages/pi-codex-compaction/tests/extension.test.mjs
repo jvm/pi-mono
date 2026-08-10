@@ -385,6 +385,34 @@ test("retries transient responses and parses split SSE chunks", async () => {
   }
 });
 
+test("omits null provider headers", async () => {
+  const originalFetch = globalThis.fetch;
+  const frames = [
+    `data: ${JSON.stringify({ type: "response.output_item.done", item: { type: "compaction", encrypted_content: "opaque-checkpoint" } })}`,
+    `data: ${JSON.stringify({ type: "response.completed", response: { status: "completed", output: [] } })}`,
+    "",
+  ].join("\n\n");
+  globalThis.fetch = async (_url, init) => {
+    const headers = new Headers(init.headers);
+    assert.equal(headers.get("x-test"), "yes");
+    assert.equal(headers.has("x-suppressed"), false);
+    return new Response(frames, { status: 200 });
+  };
+
+  try {
+    const result = await requestRemoteCompactionWithUsage({
+      model,
+      apiKey: token,
+      authHeaders: { "x-test": "yes", "x-suppressed": null },
+      body: { input: [] },
+      signal: new AbortController().signal,
+    });
+    assert.equal(result.encryptedContent, "opaque-checkpoint");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("rehydrates an opaque checkpoint only in the textual compaction slot", () => {
   const payload = {
     model: model.id,

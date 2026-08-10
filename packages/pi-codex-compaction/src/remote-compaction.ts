@@ -247,7 +247,7 @@ async function captureCodexPayload(
   messages: ReturnType<typeof convertToLlm>,
   tools: readonly ToolInfoLike[],
   apiKey: string,
-  authHeaders: Record<string, string> | undefined,
+  authHeaders: Record<string, string | null> | undefined,
   sessionId: string,
   signal: AbortSignal,
   thinkingLevel: string | undefined,
