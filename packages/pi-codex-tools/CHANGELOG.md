@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-10
+
 ### Changed
 
 - Keep provider-side parallel tool calls enabled while preserving sequential `apply_patch` execution.
