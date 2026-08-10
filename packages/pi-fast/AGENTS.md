@@ -4,7 +4,7 @@ Root `AGENTS.md` applies.
 
 ## Invariants
 
-- Fast mode is disabled on every new extension instance and is never persisted.
+- Fast mode defaults to disabled unless `pi-fast.enabledByDefault` is explicitly `true` in global Pi settings; command toggles are never persisted.
 - Only provider/model pairs known to advertise Fast support may receive a fast-mode request.
 - OpenAI Codex Fast mode uses the `priority` service tier, which can increase usage.
 - The status indicator must reflect the current model: on, off, or unavailable.

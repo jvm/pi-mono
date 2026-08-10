@@ -1,6 +1,7 @@
 import { Key } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
+import { isFastModeEnabledByDefault } from "../src/config.js";
 import { applyFastMode, supportsFastMode } from "../src/fast-mode.js";
 
 const STATUS_KEY = "pi-fast";
@@ -69,7 +70,7 @@ export default function piFast(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    enabled = false;
+    enabled = await isFastModeEnabledByDefault();
     updateStatus(ctx);
   });
 
