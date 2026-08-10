@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Changed
+
+- Keep provider-side parallel tool calls enabled while preserving sequential `apply_patch` execution.
+
 ### Fixed
 
 - Strip untrusted terminal control sequences from `apply_patch` previews before rendering them in the Pi TUI.

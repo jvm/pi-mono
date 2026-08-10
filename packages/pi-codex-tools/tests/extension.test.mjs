@@ -33,6 +33,15 @@ function makePi(initialActive = ["read", "write", "edit", "bash"]) {
   };
 }
 
+async function applyProviderRequestHooks(pi, payload, context) {
+  let nextPayload = payload;
+  for (const handler of pi.handlers.get("before_provider_request") ?? []) {
+    const result = await handler({ payload: nextPayload }, context);
+    if (result !== undefined) nextPayload = result;
+  }
+  return nextPayload;
+}
+
 const codexModel = {
   provider: "openai-codex",
   api: "openai-codex-responses",
@@ -63,15 +72,14 @@ test("replaces edit and write while preserving unrelated active tools", async ()
   await pi.handlers.get("session_start")[0]({}, context);
   assert.deepEqual(pi.getActiveTools(), ["read", "bash", "apply_patch"]);
 
-  const rewritten = await pi.handlers.get("before_provider_request")[0](
-    { payload: { model: codexModel.id, parallel_tool_calls: true } },
-    context,
+  assert.equal(pi.tools.get("apply_patch").executionMode, "sequential");
+  assert.deepEqual(
+    await applyProviderRequestHooks(pi, { model: codexModel.id, parallel_tool_calls: true }, context),
+    { model: codexModel.id, parallel_tool_calls: true },
   );
-  assert.deepEqual(rewritten, { model: codexModel.id, parallel_tool_calls: false });
 
   await pi.handlers.get("model_select")[0]({}, { model: ordinaryModel });
   assert.deepEqual(pi.getActiveTools(), ["read", "bash", "edit", "write"]);
-  assert.equal(await pi.handlers.get("before_provider_request")[0]({ payload: { parallel_tool_calls: true } }, { model: ordinaryModel }), undefined);
 });
 
 test("rejects apply_patch execution for unsupported models", async () => {
