@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-11
+
 ### Added
 
 - Add the global `pi-fast.enabledByDefault` setting to start sessions with Fast mode enabled for all supported models.
