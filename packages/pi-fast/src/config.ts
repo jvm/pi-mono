@@ -14,7 +14,7 @@ export async function isFastModeEnabledByDefault(
     const settings = parsed[SETTINGS_KEY];
     return isRecord(settings) && settings.enabledByDefault === true;
   } catch (error) {
-    if (isMissingFileError(error)) return false;
+    if (error instanceof SyntaxError || isMissingFileError(error)) return false;
     throw error;
   }
 }

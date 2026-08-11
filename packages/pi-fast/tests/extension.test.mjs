@@ -124,6 +124,27 @@ test("enables Fast by default for supported models when configured", async () =>
   }
 });
 
+test("keeps Fast off when global settings contain malformed JSON", async () => {
+  const settingsPath = join(agentDir, "settings.json");
+  await writeFile(settingsPath, "{ malformed", "utf-8");
+
+  try {
+    const pi = makePi();
+    piFast(pi);
+    const context = makeContext({ provider: "openai-codex", id: "gpt-5.4" });
+
+    await pi.handlers.get("session_start")[0]({}, context);
+
+    assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast off" });
+    assert.equal(
+      await pi.handlers.get("before_provider_request")[0]({ payload: {} }, context),
+      undefined,
+    );
+  } finally {
+    await rm(settingsPath, { force: true });
+  }
+});
+
 test("does not render footer status outside TUI", async () => {
   const pi = makePi();
   piFast(pi);
