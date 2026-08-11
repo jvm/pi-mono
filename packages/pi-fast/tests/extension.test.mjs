@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 process.env.CI = "1";
+const agentDir = await mkdtemp(join(tmpdir(), "pi-fast-extension-test-"));
+process.env.PI_CODING_AGENT_DIR = agentDir;
 
 const { default: piFast } = await import("../extensions/index.ts");
 const { FAST_SERVICE_TIER, applyFastMode, supportsFastMode } = await import("../src/fast-mode.ts");
@@ -90,6 +95,56 @@ test("keeps Fast off by default and rewrites supported provider requests after t
   assert.deepEqual(await beforeRequest({ payload: { model: "gpt-5.4" } }, context), undefined);
 });
 
+test("enables Fast by default for supported models when configured", async () => {
+  const settingsPath = join(agentDir, "settings.json");
+  await writeFile(
+    settingsPath,
+    `${JSON.stringify({ "pi-fast": { enabledByDefault: true } }, null, 2)}\n`,
+    "utf-8",
+  );
+
+  try {
+    const pi = makePi();
+    piFast(pi);
+    const context = makeContext({ provider: "openai-codex", id: "gpt-5.4-mini" });
+    const beforeRequest = pi.handlers.get("before_provider_request")[0];
+
+    await pi.handlers.get("session_start")[0]({}, context);
+    assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast n/a" });
+
+    context.model = { provider: "openai-codex", id: "gpt-5.4" };
+    await pi.handlers.get("model_select")[0]({}, context);
+    assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast on" });
+    assert.deepEqual(
+      await beforeRequest({ payload: { model: "gpt-5.4" } }, context),
+      { model: "gpt-5.4", service_tier: "priority" },
+    );
+  } finally {
+    await rm(settingsPath, { force: true });
+  }
+});
+
+test("keeps Fast off when global settings contain malformed JSON", async () => {
+  const settingsPath = join(agentDir, "settings.json");
+  await writeFile(settingsPath, "{ malformed", "utf-8");
+
+  try {
+    const pi = makePi();
+    piFast(pi);
+    const context = makeContext({ provider: "openai-codex", id: "gpt-5.4" });
+
+    await pi.handlers.get("session_start")[0]({}, context);
+
+    assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast off" });
+    assert.equal(
+      await pi.handlers.get("before_provider_request")[0]({ payload: {} }, context),
+      undefined,
+    );
+  } finally {
+    await rm(settingsPath, { force: true });
+  }
+});
+
 test("does not render footer status outside TUI", async () => {
   const pi = makePi();
   piFast(pi);
@@ -111,4 +166,8 @@ test("does not enable Fast for unsupported models", async () => {
   assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast n/a" });
   assert.equal(context.notifications.at(-1).type, "warning");
   assert.equal(await pi.handlers.get("before_provider_request")[0]({ payload: {} }, context), undefined);
+});
+
+test.after(async () => {
+  await rm(agentDir, { recursive: true, force: true });
 });

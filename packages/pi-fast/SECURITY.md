@@ -19,9 +19,9 @@ Report privately through [GitHub Security Advisories](https://github.com/jvm/pi-
 
 `pi-fast` is a Pi package. Pi extensions execute with the same permissions as the local user running Pi. Users should review installed Pi packages and only install packages from sources they trust.
 
-The extension does not read or log prompts, credentials, auth headers, or provider responses. It only inspects the current provider/model identifier and creates an in-memory request payload copy with `service_tier: "priority"` for supported OpenAI Codex models when Fast mode is enabled.
+The extension does not read or log prompts, credentials, auth headers, or provider responses. It reads only the `pi-fast.enabledByDefault` value from global Pi settings, inspects the current provider/model identifier, and creates an in-memory request payload copy with `service_tier: "priority"` for supported OpenAI Codex models when Fast mode is enabled.
 
-Fast mode is off by default and is never persisted. Models without an advertised Fast tier are not modified. The `priority` tier can increase provider usage, so the footer and toggle notifications make the active state visible.
+Fast mode is off by default unless `pi-fast.enabledByDefault` is explicitly `true`. Session toggles are not persisted. Models without an advertised Fast tier are not modified. The `priority` tier can increase provider usage, so the setting is an explicit opt-in and the footer and toggle notifications make the active state visible.
 
 On startup, `@mocito/install-telemetry` sends a best-effort install/update telemetry ping to the configured telemetry endpoint once per package version unless Pi telemetry is disabled, offline mode is enabled, or Pi runs in CI. The ping contains only the package name, version, and parsed platform/runtime/architecture from its User-Agent; it does not include prompts, file paths, config values, environment variables, or API keys.
 

@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Add the global `pi-fast.enabledByDefault` setting to start sessions with Fast mode enabled for all supported models.
+
 ### Changed
 
 - Share install telemetry mechanics through `@mocito/install-telemetry` while preserving Pi-specific settings and state paths.

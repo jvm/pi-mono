@@ -2,14 +2,15 @@
 
 Use provider fast modes in Pi when you need lower latency, while keeping the paid path off by default.
 
-`pi-fast` currently supports OpenAI Codex models that advertise Fast processing. It adds Codex's `priority` service tier only after you explicitly enable it for the session.
+`pi-fast` currently supports OpenAI Codex models that advertise Fast processing. It adds Codex's `priority` service tier after you enable it for the session or opt in to the global default.
 
 ## Features
 
 - **On-demand toggle** — use `/fast`, `/fast on`, `/fast off`, or `Ctrl+Shift+F`.
 - **Safe model guard** — only supported `openai-codex` models receive the Fast request field.
 - **Visible state** — the Pi footer shows `Fast on`, `Fast off`, or `Fast n/a`.
-- **Session-local behavior** — Fast mode starts off and is never persisted.
+- **Configurable default** — opt in once to start Fast mode on for every supported model.
+- **Session-local overrides** — command and shortcut changes reset to the configured default for each session.
 
 ## Supported models
 
@@ -65,7 +66,17 @@ or press `Ctrl+Shift+F`.
 
 ## Configuration
 
-There is no Fast-mode configuration. The mode is intentionally disabled when Pi starts and resets when the extension reloads or the session ends.
+Fast mode remains off by default. To start every session with Fast mode enabled for all supported models, add this setting to Pi's global `settings.json` (normally `~/.pi/agent/settings.json`, or the configured agent directory):
+
+```json
+{
+  "pi-fast": {
+    "enabledByDefault": true
+  }
+}
+```
+
+This is a global opt-in because the `priority` service tier can increase provider usage. Unsupported provider/model pairs remain unchanged. `/fast off` disables Fast mode for the current session; starting, switching, or reloading a session restores the configured default.
 
 Install/update telemetry can be disabled with `PI_OFFLINE=1` or `PI_TELEMETRY=0`.
 
