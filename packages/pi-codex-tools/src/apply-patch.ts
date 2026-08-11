@@ -298,17 +298,18 @@ type VirtualFile = Omit<SafePath, "absolute"> & { content?: string };
 export async function applyPatch(input: string, options: ApplyPatchOptions): Promise<ApplyPatchResult> {
   requireSecureFilesystem();
   const hunks = parseApplyPatch(input);
-  const root = await realpath(resolve(options.cwd));
+  const cwd = await realpath(resolve(options.cwd));
+  const root = sep;
   const lockPaths = hunks.flatMap((hunk) => {
-    const paths = [resolvePatchPath(hunk.path, root)];
-    if (hunk.kind === "update" && hunk.moveTo) paths.push(resolvePatchPath(hunk.moveTo, root));
+    const paths = [resolvePatchPath(hunk.path, cwd)];
+    if (hunk.kind === "update" && hunk.moveTo) paths.push(resolvePatchPath(hunk.moveTo, cwd));
     return paths;
   });
 
   return withMutationLocks(lockPaths, async () => {
     const rootFd = await openSecureRoot(root, options.signal);
     try {
-      const operations = await planOperations(hunks, root, rootFd, options.signal);
+      const operations = await planOperations(hunks, cwd, root, rootFd, options.signal);
       throwIfAborted(options.signal);
       // ponytail: preflight catches parse/match errors before writes; cross-process failures can still leave a partial multi-file patch.
       for (const operation of operations) {
@@ -338,15 +339,21 @@ export async function applyPatch(input: string, options: ApplyPatchOptions): Pro
   });
 }
 
-async function planOperations(hunks: ApplyPatchHunk[], root: string, rootFd: number, signal?: AbortSignal): Promise<PlannedOperation[]> {
+async function planOperations(
+  hunks: ApplyPatchHunk[],
+  cwd: string,
+  root: string,
+  rootFd: number,
+  signal?: AbortSignal,
+): Promise<PlannedOperation[]> {
   const operations: PlannedOperation[] = [];
   const virtualFiles = new Map<string, VirtualFile>();
 
   const getVirtualFile = async (rawPath: string): Promise<{ absolute: string; file: VirtualFile }> => {
-    const absolute = resolvePatchPath(rawPath, root);
+    const absolute = resolvePatchPath(rawPath, cwd);
     const existing = virtualFiles.get(absolute);
     if (existing) return { absolute, file: existing };
-    const safe = await safePath(rawPath, root, signal);
+    const safe = await safePath(rawPath, cwd, signal);
     const file: VirtualFile = {
       exists: safe.exists,
       isDirectory: safe.isDirectory,
@@ -377,7 +384,7 @@ async function planOperations(hunks: ApplyPatchHunk[], root: string, rootFd: num
       operations.push({
         kind: "add",
         path: source.absolute,
-        displayPath: displayPath(root, source.absolute, hunk.path),
+        displayPath: displayPath(cwd, source.absolute, hunk.path),
         content: hunk.content,
       });
       continue;
@@ -386,7 +393,7 @@ async function planOperations(hunks: ApplyPatchHunk[], root: string, rootFd: num
     if (hunk.kind === "delete") {
       if (!source.file.exists) throw new Error(`Cannot delete missing file '${hunk.path}'.`);
       if (source.file.isDirectory || !source.file.isFile) throw new Error(`Cannot delete non-file '${hunk.path}'.`);
-      operations.push({ kind: "delete", path: source.absolute, displayPath: displayPath(root, source.absolute, hunk.path) });
+      operations.push({ kind: "delete", path: source.absolute, displayPath: displayPath(cwd, source.absolute, hunk.path) });
       source.file.exists = false;
       source.file.content = undefined;
       continue;
@@ -395,7 +402,7 @@ async function planOperations(hunks: ApplyPatchHunk[], root: string, rootFd: num
     if (!source.file.exists) throw new Error(`Cannot update missing file '${hunk.path}'.`);
     if (source.file.isDirectory || !source.file.isFile) throw new Error(`Cannot update non-file '${hunk.path}'.`);
     const original = await getVirtualContent(source.absolute, source.file);
-    const moveTo = hunk.moveTo ? resolvePatchPath(hunk.moveTo, root) : undefined;
+    const moveTo = hunk.moveTo ? resolvePatchPath(hunk.moveTo, cwd) : undefined;
     if (moveTo === source.absolute) throw new Error(`Cannot move '${hunk.path}' onto itself.`);
 
     let destination: { absolute: string; file: VirtualFile } | undefined;
@@ -411,9 +418,9 @@ async function planOperations(hunks: ApplyPatchHunk[], root: string, rootFd: num
       operations.push({
         kind: "update",
         path: source.absolute,
-        displayPath: displayPath(root, source.absolute, hunk.path),
+        displayPath: displayPath(cwd, source.absolute, hunk.path),
         moveTo: moveTo!,
-        moveDisplayPath: displayPath(root, moveTo!, hunk.moveTo!),
+        moveDisplayPath: displayPath(cwd, moveTo!, hunk.moveTo!),
         chunkGroups: [[...hunk.chunks]],
         content,
       });
@@ -434,7 +441,7 @@ async function planOperations(hunks: ApplyPatchHunk[], root: string, rootFd: num
       operations.push({
         kind: "update",
         path: source.absolute,
-        displayPath: displayPath(root, source.absolute, hunk.path),
+        displayPath: displayPath(cwd, source.absolute, hunk.path),
         chunkGroups: [[...hunk.chunks]],
         content,
       });
@@ -445,19 +452,16 @@ async function planOperations(hunks: ApplyPatchHunk[], root: string, rootFd: num
   return operations;
 }
 
-function resolvePatchPath(rawPath: string, root: string): string {
-  const absolute = isAbsolute(rawPath) ? resolve(rawPath) : resolve(root, rawPath);
-  if (!isWithin(root, absolute) || absolute === root) {
-    throw new Error(`Patch path must stay inside the current working directory: ${rawPath}`);
-  }
-  return absolute;
+function resolvePatchPath(rawPath: string, cwd: string): string {
+  return isAbsolute(rawPath) ? resolve(rawPath) : resolve(cwd, rawPath);
 }
 
-async function safePath(rawPath: string, root: string, signal?: AbortSignal): Promise<SafePath> {
+async function safePath(rawPath: string, cwd: string, signal?: AbortSignal): Promise<SafePath> {
   throwIfAborted(signal);
-  const absolute = resolvePatchPath(rawPath, root);
+  const absolute = resolvePatchPath(rawPath, cwd);
 
   let current = absolute;
+  let target: Omit<SafePath, "absolute"> = { exists: false, isDirectory: false, isFile: false };
   while (true) {
     throwIfAborted(signal);
     try {
@@ -465,25 +469,18 @@ async function safePath(rawPath: string, root: string, signal?: AbortSignal): Pr
       if (stats.isSymbolicLink()) {
         throw new Error(`Symlink paths are not allowed in apply_patch: ${rawPath}`);
       }
-      const resolved = await realpath(current);
-      if (!isWithin(root, resolved)) {
-        throw new Error(`Patch path escapes the current working directory: ${rawPath}`);
-      }
       if (current !== absolute && !stats.isDirectory()) {
         throw new Error(`Parent path is not a directory: ${rawPath}`);
       }
-      return {
-        absolute,
-        exists: current === absolute,
-        isDirectory: current === absolute && stats.isDirectory(),
-        isFile: current === absolute && stats.isFile(),
-      };
+      if (current === absolute) {
+        target = { exists: true, isDirectory: stats.isDirectory(), isFile: stats.isFile() };
+      }
     } catch (error) {
       if (!isMissingPathError(error)) throw error;
-      const parent = dirname(current);
-      if (parent === current) throw new Error(`Cannot resolve patch path: ${rawPath}`);
-      current = parent;
     }
+    const parent = dirname(current);
+    if (parent === current) return { absolute, ...target };
+    current = parent;
   }
 }
 
@@ -528,7 +525,7 @@ async function openSecureParentDirectory(rootFd: number, root: string, absolute:
   const relativeParent = relative(root, parentPath);
   const components = relativeParent ? relativeParent.split(sep) : [];
   if (components.some((component) => !component || component === "." || component === "..")) {
-    throw new Error(`Patch path must stay inside the current working directory: ${absolute}`);
+    throw new Error(`Patch path cannot be traversed securely: ${absolute}`);
   }
 
   let current = rootFd;
@@ -725,11 +722,6 @@ async function withMutationLocks<T>(paths: string[], callback: () => Promise<T>)
 function displayPath(root: string, absolute: string, fallback: string): string {
   const relativePath = relative(root, absolute);
   return relativePath && !relativePath.startsWith("..") ? relativePath : fallback;
-}
-
-function isWithin(root: string, candidate: string): boolean {
-  const path = relative(root, candidate);
-  return path === "" || (!path.startsWith("..") && !isAbsolute(path));
 }
 
 function isMissingPathError(error: unknown): boolean {

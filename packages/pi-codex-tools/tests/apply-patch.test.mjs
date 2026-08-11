@@ -292,7 +292,32 @@ applyTest("deletes unreadable mode-000 files", async () => {
   }
 });
 
-applyTest("rejects path escapes and does not partially apply a patch", async () => {
+applyTest("allows relative and absolute paths outside the current working directory", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
+  const cwd = join(parent, "cwd");
+  try {
+    await mkdir(cwd);
+    await writeFile(join(parent, "outside.txt"), "old\n");
+    const absolute = join(parent, "absolute.txt");
+
+    await applyPatch(
+      patch(`*** Update File: ../outside.txt
+@@
+-old
++updated
+*** Add File: ${absolute}
++created`),
+      { cwd },
+    );
+
+    assert.equal(await readFile(join(parent, "outside.txt"), "utf8"), "updated\n");
+    assert.equal(await readFile(absolute, "utf8"), "created\n");
+  } finally {
+    await rm(parent, { recursive: true, force: true });
+  }
+});
+
+applyTest("does not partially apply a patch when preflight fails", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
   try {
     await assert.rejects(
@@ -308,12 +333,6 @@ applyTest("rejects path escapes and does not partially apply a patch", async () 
       /missing file/,
     );
     await assert.rejects(readFile(join(cwd, "created.txt")));
-
-    await assert.rejects(
-      applyPatch(patch(`*** Add File: ../outside.txt
-+blocked`), { cwd }),
-      /inside the current working directory/,
-    );
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
