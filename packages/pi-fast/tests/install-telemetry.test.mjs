@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const { reportInstallTelemetry } = await import("../src/install-telemetry.ts");
+const { version: packageVersion } = JSON.parse(
+  await readFile(new URL("../package.json", import.meta.url), "utf8"),
+);
 
 const CI_ENVIRONMENT_VARIABLES = [
   "CI",
@@ -90,7 +93,9 @@ test("retries telemetry after failed and non-OK reports", async () => {
 
     reportInstallTelemetry();
     await waitFor(async () => calls === 3 && (await exists(statePath)));
-    assert.deepEqual(JSON.parse(await readFile(statePath, "utf8")), { lastReportedVersion: "0.1.0" });
+    assert.deepEqual(JSON.parse(await readFile(statePath, "utf8")), {
+      lastReportedVersion: packageVersion,
+    });
 
     reportInstallTelemetry();
     await new Promise((resolve) => setTimeout(resolve, 20));
