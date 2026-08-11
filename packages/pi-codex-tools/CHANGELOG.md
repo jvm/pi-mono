@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-08-11
+
 ### Changed
 
 - Accept relative paths outside the current working directory and absolute paths, matching Pi's native `edit` and `write` tools while preserving no-follow filesystem operations.
