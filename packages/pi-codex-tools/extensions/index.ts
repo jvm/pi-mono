@@ -44,7 +44,7 @@ export default function piCodexTools(pi: ExtensionAPI): void {
     promptGuidelines: [
       "Use apply_patch for file changes when it is available.",
       "Send the patch body directly; do not wrap it in JSON or add a shell heredoc.",
-      `Patch paths must stay inside the current working directory and patches are limited to ${MAX_PATCH_BYTES} bytes.`,
+      `Patch paths may be relative to the current working directory or absolute, and patches are limited to ${MAX_PATCH_BYTES} bytes.`,
     ],
     parameters: APPLY_PATCH_PARAMETERS,
     constrainedSampling: createOpenAILarkSampling(APPLY_PATCH_GRAMMAR),
