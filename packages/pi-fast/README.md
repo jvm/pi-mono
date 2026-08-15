@@ -6,7 +6,7 @@ Use provider fast modes in Pi when you need lower latency, while keeping the pai
 
 ## Features
 
-- **On-demand toggle** — use `/fast`, `/fast on`, `/fast off`, or `Ctrl+Shift+F`.
+- **On-demand toggle** — use `/fast`, `/fast on`, `/fast off`, or `Ctrl+Shift+R`.
 - **Safe model guard** — only supported `openai-codex` models receive the Fast request field.
 - **Visible state** — the Pi footer shows `Fast on`, `Fast off`, or `Fast n/a`.
 - **Configurable default** — opt in once to start Fast mode on for every supported model.
@@ -60,7 +60,7 @@ Start a supported Codex model, then use either:
 /fast
 ```
 
-or press `Ctrl+Shift+F`.
+or press `Ctrl+Shift+R`.
 
 `/fast` toggles the current state. `/fast on`, `/fast off`, and `/fast toggle` select it explicitly. When active, supported Codex requests include `service_tier: "priority"`, which upstream describes as faster processing with increased usage.
 

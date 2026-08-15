@@ -59,7 +59,7 @@ export default function piFast(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerShortcut(Key.ctrlShift("f"), {
+  pi.registerShortcut(Key.ctrlShift("r"), {
     description: "Toggle Fast mode",
     handler: toggle,
   });
