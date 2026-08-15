@@ -86,7 +86,7 @@ test("keeps Fast off by default and rewrites supported provider requests after t
     { model: "gpt-5.4", service_tier: "priority" },
   );
 
-  await pi.shortcuts.get("ctrl+shift+f").handler(context);
+  await pi.shortcuts.get("ctrl+shift+r").handler(context);
   assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast off" });
 
   await pi.commands.get("fast").handler("on", context);
