@@ -56,7 +56,7 @@ The generated file refers to authoritative project documents instead of duplicat
 
 If `AGENTS.md` already exists, use `--force` to reconcile it:
 
-```
+```bash
 /init --force
 ```
 

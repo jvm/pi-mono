@@ -13,6 +13,11 @@ export async function handleInitCommand(
   const trimmed = args.trim();
   const force = trimmed === "--force" || trimmed === "-f";
 
+  if (!ctx.isProjectTrusted()) {
+    ctx.ui.notify("Trust this project before running /init.", "warning");
+    return;
+  }
+
   const initTarget = join(ctx.cwd, DEFAULT_AGENTS_MD_FILENAME);
 
   if (existsSync(initTarget) && !force) {

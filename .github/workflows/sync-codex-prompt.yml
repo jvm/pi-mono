@@ -94,23 +94,3 @@ jobs:
           BODY
 
           echo "Issue created"
-
-      - name: Update existing issue
-        if: steps.compare.outputs.status == 'changed' && steps.check-issue.outputs.exists == 'true'
-        env:
-          ACTUAL_SHA256: ${{ steps.compare.outputs.actual_sha256 }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUM: ${{ steps.check-issue.outputs.number }}
-          WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/sync-codex-prompt.yml
-        run: |
-          gh issue comment "$ISSUE_NUM" \
-            --body-file - <<BODY
-          ## Update: Upstream prompt change is still pending
-
-          Current upstream SHA-256: \`${ACTUAL_SHA256}\`
-
-          ---
-          *Updated automatically by the [Codex Prompt Sync](${WORKFLOW_URL}) workflow.*
-          BODY
-
-          echo "Updated issue #$ISSUE_NUM"
