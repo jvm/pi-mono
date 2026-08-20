@@ -51,16 +51,22 @@ jobs:
         if: steps.compare.outputs.status == 'changed'
         id: check-issue
         env:
+          ACTUAL_SHA256: ${{ steps.compare.outputs.actual_sha256 }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          EXISTING=$(gh issue list --label "codex-prompt-sync" --state open --json number --jq ".[0].number // empty")
+          EXISTING=$(gh issue list \
+            --label "codex-prompt-sync" \
+            --state open \
+            --search "$ACTUAL_SHA256 in:body" \
+            --json number \
+            --jq ".[0].number // empty")
           if [ -n "$EXISTING" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "number=$EXISTING" >> "$GITHUB_OUTPUT"
-            echo "Found existing issue #$EXISTING"
+            echo "Found existing issue for this revision: #$EXISTING"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "No existing issue found"
+            echo "No existing issue found for this revision"
           fi
 
       - name: Create issue
@@ -70,8 +76,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/sync-codex-prompt.yml
         run: |
+          short_sha="${ACTUAL_SHA256:0:12}"
           gh issue create \
-            --title "Codex prompt has changed upstream" \
+            --title "Codex prompt changed upstream ($short_sha)" \
             --label "codex-prompt-sync,enhancement" \
             --body-file - <<BODY
           ## Upstream Change Detected
