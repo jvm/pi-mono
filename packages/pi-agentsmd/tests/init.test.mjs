@@ -47,7 +47,7 @@ test("/init warns without sending prompt when AGENTS.md exists", async () => {
   assert.deepEqual(result.messages, []);
   assert.deepEqual(result.notifications, [
     {
-      message: "AGENTS.md already exists here. Use /init --force to overwrite.",
+      message: "AGENTS.md already exists here. Use /init --force to update it.",
       type: "warning",
     },
   ]);
@@ -69,8 +69,23 @@ for (const args of ["--force", "-f"]) {
   });
 }
 
-test("force prompt explicitly authorizes replacement without no-overwrite instruction", () => {
+test("prompts require verified guidance and safe repository inspection", () => {
+  for (const prompt of [INIT_PROMPT, FORCE_INIT_PROMPT]) {
+    assert.match(prompt, /only verified, repository-specific guidance/);
+    assert.match(prompt, /Do not run project commands, install dependencies/);
+    assert.doesNotMatch(prompt, /200-400 words/);
+  }
+});
+
+test("normal prompt refuses to modify an existing AGENTS.md", () => {
+  assert.match(INIT_PROMPT, /do not modify it/);
+  assert.match(INIT_PROMPT, /run \/init --force/);
+});
+
+test("force prompt reconciles existing guidance without touching other files", () => {
   assert.match(FORCE_INIT_PROMPT, /explicitly invoked \/init with --force/);
-  assert.match(FORCE_INIT_PROMPT, /Replace AGENTS\.md/);
-  assert.doesNotMatch(FORCE_INIT_PROMPT, /do not overwrite or modify it/);
+  assert.match(FORCE_INIT_PROMPT, /update it carefully/);
+  assert.match(FORCE_INIT_PROMPT, /preserve accurate repository-specific guidance/);
+  assert.match(FORCE_INIT_PROMPT, /Do not discard useful human-authored instructions/);
+  assert.doesNotMatch(FORCE_INIT_PROMPT, /do not modify it/);
 });

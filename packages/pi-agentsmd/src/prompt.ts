@@ -4,20 +4,14 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const NO_OVERWRITE_INSTRUCTION =
-  "Before writing, check whether AGENTS.md already exists in the current working directory. If it does, do not overwrite or modify it.";
+  "If AGENTS.md already exists in the current working directory, do not modify it. Tell the user to run /init --force.";
 const FORCE_OVERWRITE_INSTRUCTION =
-  "The user explicitly invoked /init with --force. Replace AGENTS.md in the current working directory, even if it already exists. Do not modify any other existing files.";
+  "The user explicitly invoked /init with --force. If AGENTS.md already exists in the current working directory, update it carefully: preserve accurate repository-specific guidance, correct stale information, and remove duplication. Do not discard useful human-authored instructions or modify any other file.";
 
-export const INIT_PROMPT = readFileSync(
+const BASE_INIT_PROMPT = readFileSync(
   join(__dirname, "../prompts/init.md"),
   "utf8",
 );
 
-export const FORCE_INIT_PROMPT = INIT_PROMPT.replace(
-  NO_OVERWRITE_INSTRUCTION,
-  FORCE_OVERWRITE_INSTRUCTION,
-);
-
-if (FORCE_INIT_PROMPT === INIT_PROMPT) {
-  throw new Error("Init prompt no-overwrite instruction is missing.");
-}
+export const INIT_PROMPT = `${BASE_INIT_PROMPT.trimEnd()}\n\n${NO_OVERWRITE_INSTRUCTION}\n`;
+export const FORCE_INIT_PROMPT = `${BASE_INIT_PROMPT.trimEnd()}\n\n${FORCE_OVERWRITE_INSTRUCTION}\n`;

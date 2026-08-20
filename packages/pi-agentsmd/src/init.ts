@@ -17,7 +17,7 @@ export async function handleInitCommand(
 
   if (existsSync(initTarget) && !force) {
     ctx.ui.notify(
-      `${DEFAULT_AGENTS_MD_FILENAME} already exists here. Use /init --force to overwrite.`,
+      `${DEFAULT_AGENTS_MD_FILENAME} already exists here. Use /init --force to update it.`,
       "warning",
     );
     return;

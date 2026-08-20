@@ -21,7 +21,7 @@ The maintainer will acknowledge reports as soon as practical and coordinate disc
 
 `pi-agentsmd` is a Pi package. Pi extensions execute with the same permissions as the local user running Pi. Users should review installed Pi packages and only install packages from sources they trust.
 
-The `/init` command checks for an existing `AGENTS.md` file before generating one. The `--force` flag bypasses this check. The package does not read or write files other than `AGENTS.md` in the current working directory.
+The `/init` command checks for an existing `AGENTS.md` file before sending a generation prompt. The `--force` flag permits the active model to update that file. The package does not write the file itself: the active model inspects the repository and writes `AGENTS.md` with the user's existing Pi tool permissions. The prompt tells the model not to run project commands, install dependencies, or modify other files during generation.
 
 At startup, `@mocito/install-telemetry` sends a best-effort install/update ping to the configured telemetry endpoint once per package version unless CI, Pi offline/telemetry settings, or `enableInstallTelemetry: false` disables it. It contains only the package name/version and parsed platform/runtime/architecture; it does not include prompts, paths, configuration values, credentials, or provider responses.
 
