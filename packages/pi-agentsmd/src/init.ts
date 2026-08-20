@@ -13,11 +13,16 @@ export async function handleInitCommand(
   const trimmed = args.trim();
   const force = trimmed === "--force" || trimmed === "-f";
 
+  if (!ctx.isProjectTrusted()) {
+    ctx.ui.notify("Trust this project before running /init.", "warning");
+    return;
+  }
+
   const initTarget = join(ctx.cwd, DEFAULT_AGENTS_MD_FILENAME);
 
   if (existsSync(initTarget) && !force) {
     ctx.ui.notify(
-      `${DEFAULT_AGENTS_MD_FILENAME} already exists here. Use /init --force to overwrite.`,
+      `${DEFAULT_AGENTS_MD_FILENAME} already exists here. Use /init --force to update it.`,
       "warning",
     );
     return;

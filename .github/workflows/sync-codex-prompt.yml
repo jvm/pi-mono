@@ -1,4 +1,4 @@
-name: Check Codex Prompt Sync
+name: Monitor Codex Init Prompt
 
 on:
   schedule:
@@ -6,7 +6,6 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "packages/pi-agentsmd/prompts/init.md"
       - ".github/workflows/sync-codex-prompt.yml"
 
 permissions:
@@ -33,47 +32,53 @@ jobs:
           fi
           echo "Fetched original prompt ($(wc -c < /tmp/codex-prompt.md) bytes)"
 
-      - name: Compare prompts
+      - name: Check upstream revision
         id: compare
+        env:
+          EXPECTED_SHA256: 70dfe903081ca894fbec7d80b40da2b5560a6106422fdfd0db2907dc9f5aa525
         run: |
-          set +e
-          diff -u "packages/pi-agentsmd/prompts/init.md" /tmp/codex-prompt.md > /tmp/prompt-diff.txt 2>&1
-          EXIT_CODE=$?
-          set -e
-          if [ "$EXIT_CODE" -eq 0 ]; then
-            echo "status=in-sync" >> "$GITHUB_OUTPUT"
-            echo "Prompts are in sync"
+          actual_sha256="$(sha256sum /tmp/codex-prompt.md | cut -d ' ' -f 1)"
+          echo "actual_sha256=$actual_sha256" >> "$GITHUB_OUTPUT"
+          if [ "$actual_sha256" = "$EXPECTED_SHA256" ]; then
+            echo "status=unchanged" >> "$GITHUB_OUTPUT"
+            echo "Upstream prompt is unchanged"
           else
-            echo "status=differs" >> "$GITHUB_OUTPUT"
-            echo "Prompts differ"
+            echo "status=changed" >> "$GITHUB_OUTPUT"
+            echo "Upstream prompt changed: $actual_sha256"
           fi
 
       - name: Check for existing issue
-        if: steps.compare.outputs.status == 'differs'
+        if: steps.compare.outputs.status == 'changed'
         id: check-issue
         env:
+          ACTUAL_SHA256: ${{ steps.compare.outputs.actual_sha256 }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          EXISTING=$(gh issue list --label "codex-prompt-sync" --state open --json number --jq ".[0].number // empty")
+          EXISTING=$(gh issue list \
+            --label "codex-prompt-sync" \
+            --state open \
+            --search "$ACTUAL_SHA256 in:body" \
+            --json number \
+            --jq ".[0].number // empty")
           if [ -n "$EXISTING" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "number=$EXISTING" >> "$GITHUB_OUTPUT"
-            echo "Found existing issue #$EXISTING"
+            echo "Found existing issue for this revision: #$EXISTING"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "No existing issue found"
+            echo "No existing issue found for this revision"
           fi
 
       - name: Create issue
-        if: steps.compare.outputs.status == 'differs' && steps.check-issue.outputs.exists != 'true'
+        if: steps.compare.outputs.status == 'changed' && steps.check-issue.outputs.exists != 'true'
         env:
+          ACTUAL_SHA256: ${{ steps.compare.outputs.actual_sha256 }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/workflows/sync-codex-prompt.yml
         run: |
-          DIFF_CONTENT=$(cat /tmp/prompt-diff.txt)
-          WORKFLOW_URL="${{ github.server_url }}/${{ github.repository }}/actions/workflows/sync-codex-prompt.yml"
-
+          short_sha="${ACTUAL_SHA256:0:12}"
           gh issue create \
-            --title "Codex prompt has changed upstream" \
+            --title "Codex prompt changed upstream ($short_sha)" \
             --label "codex-prompt-sync,enhancement" \
             --body-file - <<BODY
           ## Upstream Change Detected
@@ -82,18 +87,13 @@ jobs:
 
           ### Action Required
 
-          Review the changes and update \`packages/pi-agentsmd/prompts/init.md\` accordingly.
-
-          ### Changes
-
-          \`\`\`diff
-          ${DIFF_CONTENT}
-          \`\`\`
+          Review the new upstream prompt and decide whether any lessons apply to the evidence-based local prompt. Then update the expected SHA-256 in this workflow.
 
           ### References
 
           - Source: https://github.com/openai/codex/blob/main/codex-rs/tui/prompt_for_init_command.md
           - Local file: packages/pi-agentsmd/prompts/init.md
+          - New upstream SHA-256: \`${ACTUAL_SHA256}\`
           - THIRD-PARTY-NOTICES: packages/pi-agentsmd/THIRD-PARTY-NOTICES
 
           ---
@@ -101,30 +101,3 @@ jobs:
           BODY
 
           echo "Issue created"
-
-      - name: Update existing issue
-        if: steps.compare.outputs.status == 'differs' && steps.check-issue.outputs.exists == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          ISSUE_NUM="${{ steps.check-issue.outputs.number }}"
-          DIFF_CONTENT=$(cat /tmp/prompt-diff.txt)
-          WORKFLOW_URL="${{ github.server_url }}/${{ github.repository }}/actions/workflows/sync-codex-prompt.yml"
-
-          gh issue comment "$ISSUE_NUM" \
-            --body-file - <<BODY
-          ## Update: Upstream prompt still differs
-
-          The prompt was checked again and differences still exist.
-
-          ### Latest Diff
-
-          \`\`\`diff
-          ${DIFF_CONTENT}
-          \`\`\`
-
-          ---
-          *Updated automatically by the [Codex Prompt Sync](${WORKFLOW_URL}) workflow.*
-          BODY
-
-          echo "Updated issue #$ISSUE_NUM"

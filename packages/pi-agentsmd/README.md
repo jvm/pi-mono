@@ -41,25 +41,30 @@ Run the `/init` command inside a repository:
 /init
 ```
 
-Pi will analyze the repository and create an `AGENTS.md` file with sections covering:
+Pi will inspect executable configuration and repository documentation, then include only verified guidance that is useful for the project. This can cover:
 
-- Project structure & module organization
-- Build, test, and development commands
-- Coding style & naming conventions
-- Testing guidelines
-- Commit & pull request guidelines
+- Non-obvious structure and package boundaries
+- Exact build, test, lint, and type-check commands
+- Focused verification steps and prerequisites
+- Generated or protected files
+- Conventions not enforced by tooling
+- Repository-specific security and completion criteria
 
-### Overwrite existing AGENTS.md
+The generated file refers to authoritative project documents instead of duplicating them. The model is instructed not to run project commands or install dependencies during generation.
 
-If `AGENTS.md` already exists, use `--force` to regenerate it:
+### Update existing AGENTS.md
 
-```
+If `AGENTS.md` already exists, use `--force` to reconcile it:
+
+```bash
 /init --force
 ```
 
+Force mode preserves accurate project guidance while correcting stale or duplicate information.
+
 ## How it works
 
-The `/init` command sends a structured prompt to the active AI model. The model uses its file-writing tools to analyze the repository and generate an `AGENTS.md` file tailored to the project. The package itself does not write the file — it delegates entirely to the model.
+The `/init` command sends a structured prompt to the active AI model. The model uses its file tools to inspect the repository and generate an `AGENTS.md` file tailored to the project. The package itself does not write the file — it delegates entirely to the model.
 
 ## Development
 

@@ -9,6 +9,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 ### Changed
 
 - Share install telemetry mechanics through `@mocito/install-telemetry` while preserving Pi-specific settings and state paths.
+- Generate concise `AGENTS.md` guidance from verified repository evidence instead of a fixed contributor-guide template.
+- Make `/init --force` preserve accurate human-authored guidance while correcting stale or duplicate information.
+- Monitor the upstream Codex prompt for useful changes without requiring the local prompt to remain identical.
+- Require project trust before `/init` inspects repository content.
 
 ### Fixed
 
