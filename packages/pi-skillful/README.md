@@ -72,7 +72,11 @@ Open the menu with:
 /skillful
 ```
 
-The menu lists configurable skills alphabetically. Toggle a skill off or on in the active scope. Use the Global/Project tabs to choose which settings file to edit. In the Project tab, inherited on/off values are shown normally; project overrides are highlighted. Press `1` through `9` on a selected skill to assign or clear that scope's session toggle slot. Visibility and toggle slots are independent.
+**Pi Web support.** The menu works in Pi's terminal interface and in [Pi Web](https://github.com/agegr/pi-web) through its RPC custom-component bridge. The integration is capability-based, so other compatible RPC clients may also work, but they have not been tested. The active Global/Project scope remains explicit with Pi Web's plain theme; clients without custom-component support receive a warning instead of failing silently.
+
+**Stable descriptions.** Description previews stay at two lines while navigating, so different description lengths do not resize the menu. Press `Enter` to open the complete description in a bounded, scrollable view.
+
+The menu lists configurable skills alphabetically. Press `Space` to toggle the selected skill, including while filtering, and `1` through `9` to assign or clear that scope's session toggle slot. In the Project tab, inherited on/off values are shown normally; project overrides are highlighted. Visibility and toggle slots are independent.
 
 Project settings are read and the Project tab is available only when Pi trusts the current project. In an untrusted project, `pi-skillful` ignores `.pi/settings.json` and exposes only global settings.
 

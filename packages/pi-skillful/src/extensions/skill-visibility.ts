@@ -6,7 +6,17 @@ import {
   type Skill,
   type Theme,
 } from "@earendil-works/pi-coding-agent";
-import { type Component, Key, matchesKey, type SettingItem, SettingsList, truncateToWidth, type TUI } from "@earendil-works/pi-tui";
+import {
+  type Component,
+  Key,
+  type KeybindingsManager,
+  matchesKey,
+  type SettingItem,
+  SettingsList,
+  truncateToWidth,
+  type TUI,
+  wrapTextWithAnsi,
+} from "@earendil-works/pi-tui";
 import {
   normalizeSkillName,
   normalizeSkillNames,
@@ -23,8 +33,22 @@ import { replaceSkillsSection } from "../skill-prompt.js";
 import { isTopLevelSkill, listLoadedSkills, type LoadedSkillInfo } from "../skills.js";
 import { hasActiveSessionSkillToggles, refreshSessionSkillToggles } from "./session-skill-toggles.js";
 const SCOPES: SkillfulScope[] = ["global", "project"];
+const DESCRIPTION_LINES = 2;
+const DESCRIPTION_DETAIL_CHROME_LINES = 6;
+const DESCRIPTION_DETAIL_MAX_LINES = 12;
+const DESCRIPTION_DETAIL_RESERVED_LINES = 2;
 const STORE_KEY = Symbol.for("pi-skillful.skillVisibilityStore");
 const STARTUP_PATCH_KEY = Symbol.for("pi-skillful.startupPatchV3");
+
+function formatKeyList(keys: string[], fallback: string): string {
+  const labels = [...new Set(keys)].map((key) =>
+    key
+      .split("+")
+      .map((part) => (part === "escape" ? "Esc" : `${part.charAt(0).toUpperCase()}${part.slice(1)}`))
+      .join("+"),
+  );
+  return labels.join("/") || fallback;
+}
 
 interface SkillVisibilityStore {
   hiddenSkillsByCwd: Map<string, Set<string>>;
@@ -60,11 +84,13 @@ type DefinedByScope = Record<SkillfulScope, boolean>;
 interface SkillfulVisibilityMenuOptions {
   cwd: string;
   projectTrusted: boolean;
+  rpcAnsiFallback: boolean;
   skills: SkillListItem[];
   hiddenByScope: HiddenSkillsByScope;
   hiddenSkillsDefinedByScope: DefinedByScope;
   toggleSlotsByScope: ToggleSlotsByScope;
   toggleSlotsDefinedByScope: DefinedByScope;
+  keybindings: KeybindingsManager;
   theme: Theme;
   tui: TUI;
   notify: (message: string, type?: "info" | "warning" | "error") => void;
@@ -104,7 +130,7 @@ export default function skillVisibility(pi: ExtensionAPI) {
   pi.registerCommand("skillful", {
     description: "Open the pi-skillful skill visibility menu.",
     handler: async (_args, ctx) => {
-      if (ctx.mode !== "tui") {
+      if (!ctx.hasUI) {
         ctx.ui.notify("/skillful requires interactive UI", "warning");
         return;
       }
@@ -117,10 +143,11 @@ export default function skillVisibility(pi: ExtensionAPI) {
 
       const projectTrusted = ctx.isProjectTrusted();
       const scoped = await readScopedSkillfulSettings(ctx.cwd, projectTrusted);
-      await ctx.ui.custom<void>((tui, theme, _keybindings, done) =>
+      const opened = await ctx.ui.custom<true>((tui, theme, keybindings, done) =>
         new SkillfulVisibilityMenu({
           cwd: ctx.cwd,
           projectTrusted,
+          rpcAnsiFallback: ctx.mode === "rpc",
           skills,
           hiddenByScope: {
             global: new Set(scoped.global.hiddenSkills),
@@ -138,13 +165,15 @@ export default function skillVisibility(pi: ExtensionAPI) {
             global: scoped.global.toggleSlotsDefined,
             project: scoped.project.toggleSlotsDefined,
           },
+          keybindings,
           theme,
           tui,
           notify: (message, type) => ctx.ui.notify(message, type),
           onToggleSlotsChanged: () => refreshSessionSkillToggles(pi, ctx.cwd, projectTrusted, ctx.ui),
-          done,
+          done: () => done(true),
         }),
       );
+      if (opened !== true) ctx.ui.notify("/skillful requires custom UI support", "warning");
     },
   });
 }
@@ -226,12 +255,14 @@ function getSkillItems(pi: ExtensionAPI): SkillListItem[] {
 class SkillfulVisibilityMenu implements Component {
   private readonly cwd: string;
   private readonly projectTrusted: boolean;
+  private readonly rpcAnsiFallback: boolean;
   private readonly scopes: SkillfulScope[];
   private readonly skills: SkillListItem[];
   private readonly hiddenByScope: HiddenSkillsByScope;
   private readonly hiddenSkillsDefinedByScope: DefinedByScope;
   private readonly toggleSlotsByScope: ToggleSlotsByScope;
   private readonly toggleSlotsDefinedByScope: DefinedByScope;
+  private readonly keybindings: KeybindingsManager;
   private readonly theme: Theme;
   private readonly tui: TUI;
   private readonly notify: (message: string, type?: "info" | "warning" | "error") => void;
@@ -241,11 +272,14 @@ class SkillfulVisibilityMenu implements Component {
   private readonly bottomBorder: DynamicBorder;
   private scope: SkillfulScope;
   private settingsList: SettingsList;
+  private descriptionExpanded = false;
+  private descriptionScroll = 0;
   private saveQueue: Promise<void> = Promise.resolve();
 
   constructor(options: SkillfulVisibilityMenuOptions) {
     this.cwd = options.cwd;
     this.projectTrusted = options.projectTrusted;
+    this.rpcAnsiFallback = options.rpcAnsiFallback;
     this.scopes = options.projectTrusted ? SCOPES : ["global"];
     this.scope = options.projectTrusted ? "project" : "global";
     this.skills = options.skills;
@@ -253,6 +287,7 @@ class SkillfulVisibilityMenu implements Component {
     this.hiddenSkillsDefinedByScope = options.hiddenSkillsDefinedByScope;
     this.toggleSlotsByScope = options.toggleSlotsByScope;
     this.toggleSlotsDefinedByScope = options.toggleSlotsDefinedByScope;
+    this.keybindings = options.keybindings;
     this.theme = options.theme;
     this.tui = options.tui;
     this.notify = options.notify;
@@ -264,12 +299,15 @@ class SkillfulVisibilityMenu implements Component {
   }
 
   render(width: number): string[] {
+    if (this.descriptionExpanded) return this.renderDescriptionDetail(width);
     return [
       ...this.topBorder.render(width),
       truncateToWidth(`  ${this.theme.bold(this.theme.fg("accent", "pi-skillful"))}  ${this.renderTabs()}`, width),
       truncateToWidth(this.theme.fg("dim", "  Toggle skills shown in the model-invocation system prompt"), width),
       "",
-      ...this.settingsList.render(width),
+      ...this.settingsList.render(width).slice(0, -2),
+      "",
+      ...this.renderSelectedDescription(width),
       "",
       truncateToWidth(this.theme.fg("dim", this.renderHelp()), width),
       ...this.bottomBorder.render(width),
@@ -277,6 +315,41 @@ class SkillfulVisibilityMenu implements Component {
   }
 
   handleInput(data: string): void {
+    if (this.descriptionExpanded) {
+      if (
+        this.keybindings.matches(data, "tui.select.cancel") ||
+        this.keybindings.matches(data, "tui.select.confirm")
+      ) {
+        this.descriptionExpanded = false;
+        this.tui.requestRender();
+        return;
+      }
+
+      const pageSize = this.descriptionPageSize();
+      let scrollDelta = 0;
+      if (this.keybindings.matches(data, "tui.select.up")) scrollDelta = -1;
+      else if (this.keybindings.matches(data, "tui.select.down")) scrollDelta = 1;
+      else if (this.keybindings.matches(data, "tui.select.pageUp")) scrollDelta = -pageSize;
+      else if (this.keybindings.matches(data, "tui.select.pageDown")) scrollDelta = pageSize;
+
+      if (scrollDelta !== 0) {
+        this.descriptionScroll = Math.max(0, this.descriptionScroll + scrollDelta);
+        this.tui.requestRender();
+      }
+      return;
+    }
+    if (this.keybindings.matches(data, "tui.select.confirm")) {
+      if (this.selectedSkillName()) {
+        this.descriptionExpanded = true;
+        this.descriptionScroll = 0;
+        this.tui.requestRender();
+      }
+      return;
+    }
+    if (data === " ") {
+      this.toggleSelectedSkill();
+      return;
+    }
     if (matchesKey(data, Key.tab) || matchesKey(data, Key.right)) {
       this.switchScope(1);
       return;
@@ -300,20 +373,79 @@ class SkillfulVisibilityMenu implements Component {
     this.settingsList.invalidate();
   }
 
+  private renderSelectedDescription(width: number): string[] {
+    const skill = this.skills.find((candidate) => candidate.name === this.selectedSkillName());
+    const contentWidth = Math.max(1, width - 4);
+    const wrapped = wrapTextWithAnsi(skill?.description || "No skill description provided.", contentWidth);
+    const lines = wrapped.slice(0, DESCRIPTION_LINES);
+
+    if (wrapped.length > DESCRIPTION_LINES) {
+      lines[DESCRIPTION_LINES - 1] = truncateToWidth(`${lines[DESCRIPTION_LINES - 1]}…`, contentWidth, "…");
+    }
+    while (lines.length < DESCRIPTION_LINES) lines.push("");
+
+    return lines.map((line) => truncateToWidth(this.theme.fg("dim", `  ${line}`), width));
+  }
+
+  private renderDescriptionDetail(width: number): string[] {
+    const skill = this.skills.find((candidate) => candidate.name === this.selectedSkillName());
+    const description = skill?.description || "No skill description provided.";
+    const descriptionLines = wrapTextWithAnsi(description, Math.max(1, width - 4));
+    const pageSize = this.descriptionPageSize();
+    const maxScroll = Math.max(0, descriptionLines.length - pageSize);
+    this.descriptionScroll = Math.min(this.descriptionScroll, maxScroll);
+    const visibleLines = descriptionLines.slice(this.descriptionScroll, this.descriptionScroll + pageSize);
+    const visibleEnd = this.descriptionScroll + visibleLines.length;
+    const backKeys = formatKeyList(
+      [...this.keybindings.getKeys("tui.select.confirm"), ...this.keybindings.getKeys("tui.select.cancel")],
+      "Confirm/Cancel",
+    );
+    const scrollKeys = formatKeyList(
+      [...this.keybindings.getKeys("tui.select.up"), ...this.keybindings.getKeys("tui.select.down")],
+      "Up/Down",
+    );
+    const scrollHelp = maxScroll > 0 ? ` · ${scrollKeys} scroll · ${this.descriptionScroll + 1}-${visibleEnd}/${descriptionLines.length}` : "";
+
+    return [
+      ...this.topBorder.render(width),
+      truncateToWidth(`  ${this.theme.bold(this.theme.fg("accent", skill?.name || "Skill description"))}`, width),
+      "",
+      ...visibleLines.map((line) => truncateToWidth(this.theme.fg("dim", `  ${line}`), width)),
+      "",
+      truncateToWidth(this.theme.fg("dim", `  ${backKeys} back${scrollHelp}`), width),
+      ...this.bottomBorder.render(width),
+    ];
+  }
+
+  private descriptionPageSize(): number {
+    return Math.max(
+      1,
+      Math.min(
+        DESCRIPTION_DETAIL_MAX_LINES,
+        this.tui.terminal.rows - DESCRIPTION_DETAIL_CHROME_LINES - DESCRIPTION_DETAIL_RESERVED_LINES,
+      ),
+    );
+  }
+
   private renderTabs(): string {
     return this.scopes
       .map((scope) => {
         const label = scope === "global" ? "Global" : "Project";
-        return scope === this.scope
-          ? this.theme.bg("selectedBg", this.theme.fg("accent", ` ${label} `))
-          : this.theme.fg("muted", ` ${label} `);
+        if (scope !== this.scope) return this.theme.fg("muted", ` ${label} `);
+
+        const plain = `[${label}]`;
+        const selected = this.theme.bg("selectedBg", this.theme.fg("accent", plain));
+        // Pi Web supplies a plain semantic theme but preserves ANSI in custom UI output.
+        return this.rpcAnsiFallback && selected === plain ? `\x1b[96m${selected}\x1b[39m` : selected;
       })
       .join(" ");
   }
 
   private renderHelp(): string {
     const scopeHelp = this.projectTrusted ? "Tab/←/→ switch scope · " : "";
-    return `  ${scopeHelp}1-9 assign/clear toggle · Enter/Space on/off · Esc close`;
+    const confirmKeys = formatKeyList(this.keybindings.getKeys("tui.select.confirm"), "Confirm");
+    const cancelKeys = formatKeyList(this.keybindings.getKeys("tui.select.cancel"), "Cancel");
+    return `  ${scopeHelp}1-9 assign/clear toggle · ${confirmKeys} details · Space on/off · ${cancelKeys} close`;
   }
 
   private switchScope(direction: 1 | -1): void {
@@ -329,7 +461,6 @@ class SkillfulVisibilityMenu implements Component {
       return {
         id: skill.name,
         label: skill.name,
-        description: `${skill.description || "No skill description provided."}\nPress 1-9 to assign or clear this skill's toggle slot in the ${this.scope} scope.`,
         currentValue: this.skillValue(skill.name, hidden),
         values: [this.skillValue(skill.name, false), this.skillValue(skill.name, true)],
       };
@@ -339,14 +470,23 @@ class SkillfulVisibilityMenu implements Component {
       items,
       12,
       getSettingsListTheme(),
-      (id, newValue) => {
-        this.setHidden(this.scope, id, newValue.includes("off"));
-        this.settingsList.updateValue(id, this.skillValue(id, this.isHidden(this.scope, id)));
-        this.persistScope(this.scope);
-      },
+      (id, newValue) => this.updateSkillVisibility(id, newValue.includes("off")),
       () => this.close(),
       { enableSearch: true },
     );
+  }
+
+  private toggleSelectedSkill(): void {
+    const skillName = this.selectedSkillName();
+    if (!skillName) return;
+    this.updateSkillVisibility(skillName, !this.isHidden(this.scope, skillName));
+    this.tui.requestRender();
+  }
+
+  private updateSkillVisibility(skillName: string, hidden: boolean): void {
+    this.setHidden(this.scope, skillName, hidden);
+    this.settingsList.updateValue(skillName, this.skillValue(skillName, hidden));
+    this.persistScope(this.scope);
   }
 
   private isHidden(scope: SkillfulScope, skillName: string): boolean {
