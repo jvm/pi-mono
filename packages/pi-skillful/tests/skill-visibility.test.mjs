@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { formatSkillsForPrompt, initTheme } from "@earendil-works/pi-coding-agent";
+import { getKeybindings } from "@earendil-works/pi-tui";
 
 const home = await mkdtemp(join(tmpdir(), "pi-skillful-visibility-test-"));
 process.env.HOME = home;
@@ -155,7 +156,7 @@ for (const mode of ["tui", "rpc"]) {
 
     await registeredCommands.get("skillful").handler("", ctx);
     assert.ok(menu.render(120).join("\n").includes("Global"));
-    assert.match(menu.render(120).join("\n"), /Enter details .* Space on\/off .* Esc\/Ctrl\+C close/);
+    assert.match(menu.render(120).join("\n"), /Enter on\/off .* Space details .* Esc\/Ctrl\+C close/);
     assert.equal(menu.render(120).join("\n").includes("\x1b[96m[Global]\x1b[39m"), mode === "rpc");
     assert.ok(!menu.render(120).join("\n").includes("Project"));
 
@@ -213,8 +214,35 @@ test("plain-text RPC menus color the active project and global scopes", async ()
   assert.ok(!menu.render(120).join("\n").includes("[Project]"));
 });
 
+test("legacy control aliases do not advertise conflicting description keys", async () => {
+  const cwd = await mkdtemp(join(home, "menu-key-conflict-"));
+  await writeSettings(globalSettingsPath, { skillful: { descriptionKey: "ctrl+i" } });
+  const { registeredCommands } = registerVisibility([commandForSkill(skill("key-conflict"))]);
+  let menu;
+  const ctx = {
+    cwd,
+    hasUI: true,
+    isProjectTrusted: () => false,
+    mode: "tui",
+    ui: {
+      custom: async (factory) => {
+        menu = factory({ requestRender: () => undefined }, identityTheme, getKeybindings(), () => undefined);
+        return true;
+      },
+      notify: () => undefined,
+    },
+  };
+
+  await registeredCommands.get("skillful").handler("", ctx);
+  assert.doesNotMatch(menu.render(180).join("\n"), /Ctrl\+I details/);
+  menu.handleInput("\t");
+  assert.match(menu.render(180).join("\n"), /Type to search/);
+});
+
 test("skill descriptions keep the menu height stable", async () => {
   const cwd = await mkdtemp(join(home, "menu-description-height-"));
+  await writeSettings(globalSettingsPath, { skillful: { descriptionKey: "ctrl+o" } });
+  await writeSettings(join(cwd, ".pi", "settings.json"), { skillful: { descriptionKey: "space" } });
   const shortSkill = skill("a-short-description");
   const longSkill = skill("b-long-description");
   shortSkill.description = "Short description.";
@@ -232,7 +260,10 @@ test("skill descriptions keep the menu height stable", async () => {
   };
   const detailKeybindings = {
     matches: (data, binding) => detailBindings[binding] === data,
-    getKeys: (binding) => (detailBindings[binding] ? [binding === "tui.select.confirm" ? "enter" : detailBindings[binding]] : []),
+    getKeys: (binding) => {
+      const key = detailBindings[binding];
+      return key ? [key === "\r" ? "enter" : key === " " ? "space" : key] : [];
+    },
   };
   const ctx = {
     cwd,
@@ -249,6 +280,14 @@ test("skill descriptions keep the menu height stable", async () => {
   };
 
   await registeredCommands.get("skillful").handler("", ctx);
+  assert.match(menu.render(180).join("\n"), /Space details/);
+  menu.handleInput("\t");
+  assert.match(menu.render(180).join("\n"), /Ctrl\+O details/);
+  menu.handleInput("\x0f");
+  assert.match(menu.render(40)[1], /a-short-description/);
+  menu.handleInput("\x0f");
+  menu.handleInput("\t");
+  assert.match(menu.render(180).join("\n"), /Space details/);
   const shortRender = menu.render(40);
   menu.handleInput("\x1b[B");
   const longRender = menu.render(40);
@@ -257,26 +296,38 @@ test("skill descriptions keep the menu height stable", async () => {
   assert.match(longRender.join("\n"), /Long description text/);
   assert.equal(longRender.length, shortRender.length);
   assert.doesNotMatch(longRender.join("\n"), /FULL DESCRIPTION END|Enter\/Space to change/);
-  assert.match(menu.render(180).join("\n"), /Enter details .* Q close/);
+  assert.match(menu.render(180).join("\n"), /Type to search .* Enter on\/off .* Space details .* Q close/);
 
   menu.handleInput("b");
+  detailBindings["tui.select.confirm"] = " ";
+  const conflictHelp = menu.render(180).join("\n");
+  assert.match(conflictHelp, /Space on\/off .* Q close/);
+  assert.doesNotMatch(conflictHelp, /details/);
   menu.handleInput(" ");
   const filteredRender = menu.render(40);
   assert.match(filteredRender.join("\n"), /b-long-description.*off/);
+  detailBindings["tui.select.confirm"] = "\r";
+  assert.match(menu.render(180).join("\n"), /Enter on\/off .* Space details/);
 
-  menu.handleInput("\r");
+  menu.handleInput(" ");
   const detailRender = menu.render(40);
   assert.equal(detailRender.length, tui.terminal.rows - 2);
   assert.match(detailRender[1], /b-long-description/);
   assert.doesNotMatch(detailRender.join("\n"), /FULL\s+DESCRIPTION END/);
-  assert.match(detailRender.join("\n"), /Enter\/Q back · K\/J scroll/);
+  assert.match(menu.render(180).join("\n"), /Space\/Q back · Enter on\/off · K\/J scroll/);
 
-  menu.handleInput("\x1b");
-  assert.doesNotMatch(menu.render(40).join("\n"), /FULL\s+DESCRIPTION END/);
+  menu.handleInput("\r");
+  assert.match(menu.render(40)[1], /b-long-description/);
+  menu.handleInput(" ");
+  const returnedRender = menu.render(40);
+  assert.match(returnedRender.join("\n"), /b-long-description.*on/);
+  assert.equal(returnedRender.length, filteredRender.length);
+
+  menu.handleInput(" ");
   for (let page = 0; page < 20; page += 1) menu.handleInput("n");
   assert.match(menu.render(40).join("\n"), /FULL\s+DESCRIPTION END/);
   menu.handleInput("q");
-  assert.equal(menu.render(40).length, filteredRender.length);
+  assert.equal(menu.render(40).length, returnedRender.length);
 });
 
 test("startup patch colors the built-in skill list from effective settings", async () => {

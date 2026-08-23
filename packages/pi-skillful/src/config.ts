@@ -1,3 +1,4 @@
+import type { KeyId } from "@earendil-works/pi-tui";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -20,6 +21,8 @@ export interface SkillToggleConfig {
 }
 
 export interface SkillfulSettings extends SkillToggleConfig {
+  descriptionKey: KeyId;
+  descriptionKeyDefined: boolean;
   hiddenSkills: string[];
   hiddenSkillsDefined: boolean;
   visibleSkills: string[];
@@ -38,6 +41,7 @@ interface PiSettingsDocument {
 
 export const SKILLFUL_SETTINGS_KEY = "skillful";
 export const SKILL_TOGGLE_SLOTS: SkillToggleSlot[] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+export const DEFAULT_DESCRIPTION_KEY: KeyId = "space";
 export const DEFAULT_TOGGLE_MODIFIER: SkillToggleModifier = "alt";
 
 const SUPPORTED_TOGGLE_MODIFIERS_SET: ReadonlySet<string> = new Set(SUPPORTED_TOGGLE_MODIFIERS);
@@ -90,6 +94,28 @@ export function normalizeToggleSlots(value: unknown): Partial<Record<SkillToggle
   return result;
 }
 
+const DESCRIPTION_KEY_MODIFIERS = new Set(["ctrl", "shift", "alt", "super"]);
+const DESCRIPTION_SPECIAL_KEYS = new Set(
+  "escape esc enter return tab space backspace delete insert clear home end pageup pagedown up down left right".split(" "),
+);
+const DESCRIPTION_KEY_CHARACTERS = "abcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=[]{}`~\\|;:'\",.<>/?";
+
+export function normalizeDescriptionKey(value: unknown): KeyId {
+  if (typeof value !== "string") return DEFAULT_DESCRIPTION_KEY;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return DEFAULT_DESCRIPTION_KEY;
+
+  const parts = normalized.split("+");
+  const base = parts.pop() || "";
+  const validBase =
+    (base.length === 1 && DESCRIPTION_KEY_CHARACTERS.includes(base)) ||
+    DESCRIPTION_SPECIAL_KEYS.has(base) ||
+    /^f(?:[1-9]|1[0-2])$/.test(base);
+  const validModifiers =
+    new Set(parts).size === parts.length && parts.every((part) => DESCRIPTION_KEY_MODIFIERS.has(part));
+  return validBase && validModifiers ? (normalized as KeyId) : DEFAULT_DESCRIPTION_KEY;
+}
+
 export function normalizeToggleModifier(value: unknown): SkillToggleModifier {
   if (typeof value !== "string") return DEFAULT_TOGGLE_MODIFIER;
   const normalized = value.trim().toLowerCase();
@@ -137,7 +163,10 @@ export async function readEffectiveSkillfulSettings(
   const scoped = await readScopedSkillfulSettings(cwd, projectTrusted);
   const hiddenSkills = normalizeSkillNames(effectiveHiddenSkillSet(scoped));
   const toggleSlots = scoped.project.toggleSlotsDefined ? scoped.project.toggleSlots : scoped.global.toggleSlots;
+  const descriptionKey = scoped.project.descriptionKeyDefined ? scoped.project.descriptionKey : scoped.global.descriptionKey;
   return {
+    descriptionKey,
+    descriptionKeyDefined: scoped.global.descriptionKeyDefined || scoped.project.descriptionKeyDefined,
     hiddenSkills,
     hiddenSkillsDefined: scoped.global.hiddenSkillsDefined || scoped.project.hiddenSkillsDefined,
     visibleSkills: [],
@@ -255,6 +284,8 @@ function settingsFromRecord(value: unknown): SkillfulSettings {
   const skillful = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
   return {
+    descriptionKey: normalizeDescriptionKey(skillful.descriptionKey),
+    descriptionKeyDefined: Object.hasOwn(skillful, "descriptionKey"),
     hiddenSkills: normalizeSkillNames(stringArray(skillful.hiddenSkills)),
     hiddenSkillsDefined: Object.hasOwn(skillful, "hiddenSkills"),
     visibleSkills: normalizeSkillNames(stringArray(skillful.visibleSkills)),

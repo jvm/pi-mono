@@ -9,6 +9,7 @@ import {
 import {
   type Component,
   Key,
+  type KeyId,
   type KeybindingsManager,
   matchesKey,
   type SettingItem,
@@ -50,6 +51,24 @@ function formatKeyList(keys: string[], fallback: string): string {
   return labels.join("/") || fallback;
 }
 
+function canonicalKeyId(key: string, legacyControls = false): string {
+  const parts = key.toLowerCase().split("+");
+  const base = parts.pop() || "";
+  const aliases: Record<string, string> = { esc: "escape", return: "enter" };
+  const canonical = [...new Set(parts)].sort().concat(aliases[base] || base).join("+");
+  if (!legacyControls) return canonical;
+  const legacyAliases: Record<string, string> = {
+    "ctrl+@": "ctrl+space",
+    "ctrl+h": "backspace",
+    "ctrl+i": "tab",
+    "ctrl+j": "enter",
+    "ctrl+m": "enter",
+    "ctrl+[": "escape",
+    "ctrl+?": "backspace",
+  };
+  return legacyAliases[canonical] || canonical;
+}
+
 interface SkillVisibilityStore {
   hiddenSkillsByCwd: Map<string, Set<string>>;
   theme: Theme | null;
@@ -80,9 +99,11 @@ type SkillListItem = LoadedSkillInfo;
 type HiddenSkillsByScope = Record<SkillfulScope, Set<string>>;
 type ToggleSlotsByScope = Record<SkillfulScope, Partial<Record<SkillToggleSlot, string>>>;
 type DefinedByScope = Record<SkillfulScope, boolean>;
+type DescriptionKeysByScope = Record<SkillfulScope, KeyId>;
 
 interface SkillfulVisibilityMenuOptions {
   cwd: string;
+  descriptionKeysByScope: DescriptionKeysByScope;
   projectTrusted: boolean;
   rpcAnsiFallback: boolean;
   skills: SkillListItem[];
@@ -146,6 +167,12 @@ export default function skillVisibility(pi: ExtensionAPI) {
       const opened = await ctx.ui.custom<true>((tui, theme, keybindings, done) =>
         new SkillfulVisibilityMenu({
           cwd: ctx.cwd,
+          descriptionKeysByScope: {
+            global: scoped.global.descriptionKey,
+            project: scoped.project.descriptionKeyDefined
+              ? scoped.project.descriptionKey
+              : scoped.global.descriptionKey,
+          },
           projectTrusted,
           rpcAnsiFallback: ctx.mode === "rpc",
           skills,
@@ -254,6 +281,7 @@ function getSkillItems(pi: ExtensionAPI): SkillListItem[] {
 
 class SkillfulVisibilityMenu implements Component {
   private readonly cwd: string;
+  private readonly descriptionKeysByScope: DescriptionKeysByScope;
   private readonly projectTrusted: boolean;
   private readonly rpcAnsiFallback: boolean;
   private readonly scopes: SkillfulScope[];
@@ -278,6 +306,7 @@ class SkillfulVisibilityMenu implements Component {
 
   constructor(options: SkillfulVisibilityMenuOptions) {
     this.cwd = options.cwd;
+    this.descriptionKeysByScope = options.descriptionKeysByScope;
     this.projectTrusted = options.projectTrusted;
     this.rpcAnsiFallback = options.rpcAnsiFallback;
     this.scopes = options.projectTrusted ? SCOPES : ["global"];
@@ -316,10 +345,11 @@ class SkillfulVisibilityMenu implements Component {
 
   handleInput(data: string): void {
     if (this.descriptionExpanded) {
-      if (
-        this.keybindings.matches(data, "tui.select.cancel") ||
-        this.keybindings.matches(data, "tui.select.confirm")
-      ) {
+      if (this.keybindings.matches(data, "tui.select.confirm")) {
+        this.toggleSelectedSkill();
+        return;
+      }
+      if (this.keybindings.matches(data, "tui.select.cancel")) {
         this.descriptionExpanded = false;
         this.tui.requestRender();
         return;
@@ -335,19 +365,25 @@ class SkillfulVisibilityMenu implements Component {
       if (scrollDelta !== 0) {
         this.descriptionScroll = Math.max(0, this.descriptionScroll + scrollDelta);
         this.tui.requestRender();
+        return;
       }
-      return;
-    }
-    if (this.keybindings.matches(data, "tui.select.confirm")) {
-      if (this.selectedSkillName()) {
-        this.descriptionExpanded = true;
-        this.descriptionScroll = 0;
+      if (matchesKey(data, this.descriptionKeysByScope[this.scope])) {
+        this.descriptionExpanded = false;
         this.tui.requestRender();
       }
       return;
     }
-    if (data === " ") {
+    if (this.keybindings.matches(data, "tui.select.confirm")) {
       this.toggleSelectedSkill();
+      return;
+    }
+    if (
+      this.keybindings.matches(data, "tui.select.cancel") ||
+      this.keybindings.matches(data, "tui.select.up") ||
+      this.keybindings.matches(data, "tui.select.down")
+    ) {
+      this.settingsList.handleInput(data);
+      this.tui.requestRender();
       return;
     }
     if (matchesKey(data, Key.tab) || matchesKey(data, Key.right)) {
@@ -360,6 +396,14 @@ class SkillfulVisibilityMenu implements Component {
     }
     if (/^[1-9]$/.test(data)) {
       this.toggleSelectedSkillSlot(data as SkillToggleSlot);
+      return;
+    }
+    if (matchesKey(data, this.descriptionKeysByScope[this.scope])) {
+      if (this.selectedSkillName()) {
+        this.descriptionExpanded = true;
+        this.descriptionScroll = 0;
+        this.tui.requestRender();
+      }
       return;
     }
 
@@ -396,10 +440,14 @@ class SkillfulVisibilityMenu implements Component {
     this.descriptionScroll = Math.min(this.descriptionScroll, maxScroll);
     const visibleLines = descriptionLines.slice(this.descriptionScroll, this.descriptionScroll + pageSize);
     const visibleEnd = this.descriptionScroll + visibleLines.length;
+    const descriptionBackKeys = this.descriptionKeyConflictsWithExistingAction(true)
+      ? []
+      : [this.descriptionKeysByScope[this.scope]];
     const backKeys = formatKeyList(
-      [...this.keybindings.getKeys("tui.select.confirm"), ...this.keybindings.getKeys("tui.select.cancel")],
-      "Confirm/Cancel",
+      [...descriptionBackKeys, ...this.keybindings.getKeys("tui.select.cancel")],
+      "Description/Cancel",
     );
+    const confirmKeys = formatKeyList(this.keybindings.getKeys("tui.select.confirm"), "Confirm");
     const scrollKeys = formatKeyList(
       [...this.keybindings.getKeys("tui.select.up"), ...this.keybindings.getKeys("tui.select.down")],
       "Up/Down",
@@ -412,7 +460,7 @@ class SkillfulVisibilityMenu implements Component {
       "",
       ...visibleLines.map((line) => truncateToWidth(this.theme.fg("dim", `  ${line}`), width)),
       "",
-      truncateToWidth(this.theme.fg("dim", `  ${backKeys} back${scrollHelp}`), width),
+      truncateToWidth(this.theme.fg("dim", `  ${backKeys} back · ${confirmKeys} on/off${scrollHelp}`), width),
       ...this.bottomBorder.render(width),
     ];
   }
@@ -441,11 +489,29 @@ class SkillfulVisibilityMenu implements Component {
       .join(" ");
   }
 
+  private descriptionKeyConflictsWithExistingAction(includePaging = false): boolean {
+    const keys = [
+      ...this.keybindings.getKeys("tui.select.confirm"),
+      ...this.keybindings.getKeys("tui.select.cancel"),
+      ...this.keybindings.getKeys("tui.select.up"),
+      ...this.keybindings.getKeys("tui.select.down"),
+      ...(includePaging
+        ? [...this.keybindings.getKeys("tui.select.pageUp"), ...this.keybindings.getKeys("tui.select.pageDown")]
+        : [Key.tab, Key.right, Key.shift(Key.tab), Key.left, ...SKILL_TOGGLE_SLOTS]),
+    ];
+    const legacyControls = this.tui.terminal?.kittyProtocolActive !== true;
+    const descriptionKey = canonicalKeyId(this.descriptionKeysByScope[this.scope], legacyControls);
+    return keys.some((key) => canonicalKeyId(key, legacyControls) === descriptionKey);
+  }
+
   private renderHelp(): string {
-    const scopeHelp = this.projectTrusted ? "Tab/←/→ switch scope · " : "";
+    const scopeHelp = this.projectTrusted ? "Tab/←/→ scope · " : "";
     const confirmKeys = formatKeyList(this.keybindings.getKeys("tui.select.confirm"), "Confirm");
+    const descriptionHelp = this.descriptionKeyConflictsWithExistingAction()
+      ? ""
+      : `${formatKeyList([this.descriptionKeysByScope[this.scope]], "Description")} details · `;
     const cancelKeys = formatKeyList(this.keybindings.getKeys("tui.select.cancel"), "Cancel");
-    return `  ${scopeHelp}1-9 assign/clear toggle · ${confirmKeys} details · Space on/off · ${cancelKeys} close`;
+    return `  Type to search · ${scopeHelp}1-9 slot · ${confirmKeys} on/off · ${descriptionHelp}${cancelKeys} close`;
   }
 
   private switchScope(direction: 1 | -1): void {
