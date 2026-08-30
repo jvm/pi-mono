@@ -4,7 +4,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { fetchCache, type CachedPage } from "../src/cache.js";
 import { resolveConfig } from "../src/config.js";
-import { DEFAULT_FETCH_LIMIT, DEFAULT_NUM_RESULTS, MAX_LIMIT, MAX_NUM_RESULTS, MAX_OFFSET, MAX_QUERY_COUNT, MAX_URL_COUNT, MULTI_FETCH_LIMIT } from "../src/limits.js";
+import { capSearchResultLimit, DEFAULT_FETCH_LIMIT, DEFAULT_NUM_RESULTS, MAX_LIMIT, MAX_NUM_RESULTS, MAX_OFFSET, MAX_QUERY_COUNT, MAX_URL_COUNT, MULTI_FETCH_LIMIT, TINYFISH_MAX_PAGE } from "../src/limits.js";
 import { createCodeSearchProvider, createContext7Provider, createFetchProvider, createSearchProvider } from "../src/providers/index.js";
 import { mapFetchResults } from "../src/providers/fallback.js";
 import type { FetchProviderName, SearchProviderName, WebFetchResult } from "../src/types.js";
@@ -53,11 +53,17 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
     async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
       const params = rawParams as Record<string, any>;
       const queries = normalizeQueries(params);
-      const numResults = parseInteger(params.numResults, DEFAULT_NUM_RESULTS, "numResults", 1, MAX_NUM_RESULTS);
       if (queries.length === 0) throw new Error("web_search requires query or queries.");
 
       const config = runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx));
       assertProviderUnchanged("web_search", startupConfig.provider_search, config.provider_search);
+      const requestedResultLimit = parseInteger(
+        params.numResults ?? (config.provider_search === "brave" ? params.maxUrls : undefined),
+        DEFAULT_NUM_RESULTS,
+        "numResults",
+        1,
+      );
+      const effectiveResultLimit = capSearchResultLimit(config.provider_search, requestedResultLimit);
       const provider = createSearchProvider(config);
       const grouped = [];
       const progress = createProgress("search", config.provider_search, queries);
@@ -65,8 +71,8 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
       for (const query of queries) {
         markProgressCurrent(progress, query);
         emitProgress(onUpdate, progress);
-        const result = await provider.search({ ...params, query, numResults }, signal);
-        grouped.push({ query, results: result.results });
+        const result = await provider.search({ ...params, query, numResults: effectiveResultLimit }, signal);
+        grouped.push({ query, requestedResultLimit, effectiveResultLimit: result.effectiveResultLimit ?? effectiveResultLimit, resultCount: result.results.length, results: result.results });
         markProgressDone(progress, query, `${result.results.length} results`);
         emitProgress(onUpdate, progress);
       }
@@ -212,7 +218,7 @@ export function buildSearchSchema(provider: SearchProviderName) {
   const props: Record<string, any> = {
     query: Type.Optional(Type.String({ description: "Single search query" })),
     queries: Type.Optional(Type.Array(Type.String(), { description: `Multiple related search queries (max ${MAX_QUERY_COUNT})`, maxItems: MAX_QUERY_COUNT })),
-    numResults: Type.Optional(int("Results per query", 1, MAX_NUM_RESULTS)),
+    numResults: Type.Optional(int("Desired results per query; capped by the active provider", 1)),
   };
   if (provider === "exa") Object.assign(props, {
     includeDomains: Type.Optional(Type.Array(Type.String())),
@@ -224,9 +230,9 @@ export function buildSearchSchema(provider: SearchProviderName) {
     type: Type.Optional(Type.String()),
     category: Type.Optional(Type.String()),
   });
-  if (provider === "tinyfish") Object.assign(props, { page: Type.Optional(int("Result page", 1, 10)) });
+  if (provider === "tinyfish") Object.assign(props, { page: Type.Optional(int("Deprecated starting result page", 0, TINYFISH_MAX_PAGE)) });
   if (provider === "brave") Object.assign(props, {
-    country: Type.Optional(Type.String()), searchLang: Type.Optional(Type.String()), uiLang: Type.Optional(Type.String()), safesearch: Type.Optional(Type.String()), freshness: Type.Optional(Type.String()), maxUrls: Type.Optional(int("Maximum URLs", 1, MAX_NUM_RESULTS)),
+    country: Type.Optional(Type.String()), searchLang: Type.Optional(Type.String()), uiLang: Type.Optional(Type.String()), safesearch: Type.Optional(Type.String()), freshness: Type.Optional(Type.String()), maxUrls: Type.Optional(int("Deprecated alias for numResults", 1)),
   });
   if (provider === "firecrawl") Object.assign(props, {
     location: Type.Optional(Type.String()), country: Type.Optional(Type.String()), includeDomains: Type.Optional(Type.Array(Type.String())), excludeDomains: Type.Optional(Type.Array(Type.String())), categories: Type.Optional(Type.Array(Type.String())), tbs: Type.Optional(Type.String()), scrape: Type.Optional(Type.Boolean({ description: "Enable default markdown scrape-on-search" })), scrapeOptions: Type.Optional(Type.Object({}, { additionalProperties: true, description: "Firecrawl scrapeOptions for search." })),
@@ -473,17 +479,18 @@ function boundSearchResult(value: { provider?: string; queries: Array<{ query?: 
 function searchResultWithLimits(value: { provider?: string; queries: Array<{ query?: string; results?: any[] }> }, snippetChars: number, resultsPerQuery?: number) {
   return {
     ...value,
-    queries: value.queries.map((group) => ({
-      ...group,
-      results: (group.results ?? []).slice(0, resultsPerQuery).map((item) => {
+    queries: value.queries.map((group) => {
+      const results = (group.results ?? []).slice(0, resultsPerQuery).map((item) => {
         if (typeof item?.snippet !== "string") return item;
         if (snippetChars === 0) {
           const { snippet: _snippet, ...metadata } = item;
           return metadata;
         }
         return { ...item, snippet: safePrefix(item.snippet, snippetChars) };
-      }),
-    })),
+      });
+      const omittedResultCount = Math.max(0, (group.results?.length ?? 0) - results.length);
+      return { ...group, resultCount: results.length, ...(omittedResultCount ? { omittedResultCount } : {}), results };
+    }),
   };
 }
 
@@ -534,9 +541,11 @@ function limitStrings(value: unknown, maxChars: number): unknown {
   return value;
 }
 
-function parseInteger(value: unknown, defaultValue: number, name: string, min: number, max: number): number {
+function parseInteger(value: unknown, defaultValue: number, name: string, min: number, max?: number): number {
   if (value == null) return defaultValue;
-  if (typeof value !== "number" || !Number.isInteger(value) || !Number.isFinite(value) || value < min || value > max) throw new Error(`${name} must be a finite integer between ${min} and ${max}.`);
+  if (typeof value !== "number" || !Number.isInteger(value) || !Number.isFinite(value) || value < min || (max != null && value > max)) {
+    throw new Error(`${name} must be a finite integer ${max == null ? `>= ${min}` : `between ${min} and ${max}`}.`);
+  }
   return value;
 }
 
@@ -591,7 +600,10 @@ function searchDetails(value: any) {
     provider: value.provider,
     queries: value.queries.map((q: any) => ({
       query: q.query,
+      requestedResultLimit: q.requestedResultLimit,
+      effectiveResultLimit: q.effectiveResultLimit,
       resultCount: (q.results ?? []).length,
+      omittedResultCount: q.omittedResultCount,
       results: (q.results ?? []).map((r: any) => ({ title: r.title, url: r.url, siteName: r.siteName, position: r.position })),
     })),
   };

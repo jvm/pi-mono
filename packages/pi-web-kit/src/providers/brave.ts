@@ -10,9 +10,9 @@ export class BraveProvider implements SearchProvider {
     const url = new URL("https://api.search.brave.com/res/v1/llm/context");
     url.searchParams.set("q", input.query);
     if (input.numResults) {
-      const count = String(Math.max(1, Math.min(input.numResults, 20)));
+      const count = String(input.numResults);
       url.searchParams.set("count", count);
-      url.searchParams.set("maximum_number_of_urls", String(input.maxUrls ?? count));
+      url.searchParams.set("maximum_number_of_urls", count);
     }
     if (typeof input.country === "string") url.searchParams.set("country", input.country);
     if (typeof input.searchLang === "string") url.searchParams.set("search_lang", input.searchLang);

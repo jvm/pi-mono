@@ -148,9 +148,11 @@ Searches with the active search provider and returns compact results grouped by 
 |---|---|---|
 | `query` | string | Single search query. |
 | `queries` | string[] | Multiple related search queries. Max 5 after de-duplication. |
-| `numResults` | integer | Results per query. Range: 1-20. Default: 10. |
+| `numResults` | integer | Desired results per query. Default: 10. Values above the active provider's limit are capped rather than rejected. |
 
-Provider-specific parameters are exposed only for the configured provider, such as Exa date/domain filters, TinyFish `page`, Brave locale/freshness options, or Firecrawl scrape/search options.
+Provider caps are Exa/Exa MCP 100, Brave 50, and Firecrawl 100. TinyFish is paginated internally through its service maximum of page 10 and may make up to 11 provider requests for one query. Search output reports requested, effective, returned, and omitted result counts. Brave `maxUrls` remains as a deprecated alias for `numResults`.
+
+Other provider-specific parameters are exposed only for the configured provider, such as Exa date/domain filters, TinyFish's deprecated starting `page`, Brave locale/freshness options, or Firecrawl scrape/search options.
 
 ### `web_fetch`
 
@@ -210,7 +212,7 @@ Finds practical code examples, implementation context, setup snippets, migration
 | Max cached bytes | 20 MiB |
 | Max URLs per call | 10 |
 | Max queries per call | 5 |
-| Max `numResults` | 20 |
+| Provider `numResults` caps | Exa/Exa MCP 100; Brave 50; Firecrawl 100 |
 | Max URL length | 2048 characters |
 
 Cache keys include the provider, canonical URL, fetch-affecting parameters, relevant provider defaults, and an opaque SHA-256 API-key/account scope. Internal cache keys are never returned in tool output. `refresh: true` bypasses and replaces the cached entry.

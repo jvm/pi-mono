@@ -18,6 +18,7 @@ export interface SearchInput {
 export interface WebSearchResult {
   provider: SearchProviderName;
   query: string;
+  effectiveResultLimit?: number;
   results: Array<{ title?: string; url: string; snippet?: string; siteName?: string; position?: number }>;
 }
 

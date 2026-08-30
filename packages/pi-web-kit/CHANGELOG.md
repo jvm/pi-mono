@@ -9,10 +9,13 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 ### Changed
 
 - Share install telemetry mechanics through `@mocito/install-telemetry` while preserving Pi-specific settings and state paths.
+- Treat `web_search.numResults` as a provider-agnostic desired limit, cap it to each provider's service constraints, and report requested, effective, returned, and omitted counts.
 
 ### Fixed
 
 - Let `enableInstallTelemetry: false` override an enabled `PI_TELEMETRY` environment flag.
+- Paginate TinyFish searches instead of sending its ignored `limit` parameter.
+- Surface Exa MCP tool-level errors instead of returning a misleading empty result.
 
 ## [0.2.4] - 2026-07-28
 

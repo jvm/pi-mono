@@ -7,6 +7,7 @@ import { BraveProvider } from "../src/providers/brave.ts";
 import { Context7Provider } from "../src/providers/context7.ts";
 import { FirecrawlProvider } from "../src/providers/firecrawl.ts";
 import { resolveConfig } from "../src/config.ts";
+import { capSearchResultLimit } from "../src/limits.ts";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,6 +46,89 @@ test("keyed providers fail clearly when keys are missing", () => {
   assert.throws(() => new BraveProvider(cfg()), /BRAVE_SEARCH_API_KEY/);
   assert.throws(() => new FirecrawlProvider(cfg()), /FIRECRAWL_API_KEY/);
   assert.throws(() => new Context7Provider(cfg()), /CONTEXT7_API_KEY/);
+});
+
+test("search result limits are capped by provider capability", () => {
+  assert.equal(capSearchResultLimit("exa", 101), 100);
+  assert.equal(capSearchResultLimit("exa_mcp", 101), 100);
+  assert.equal(capSearchResultLimit("brave", 51), 50);
+  assert.equal(capSearchResultLimit("firecrawl", 101), 100);
+  assert.equal(capSearchResultLimit("tinyfish", 101), 101);
+});
+
+test("Brave maps the effective result limit to native parameters", async () => {
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    assert.equal(new URL(url).searchParams.get("count"), "50");
+    assert.equal(new URL(url).searchParams.get("maximum_number_of_urls"), "50");
+    return new Response(JSON.stringify({ sources: [
+      { title: "One", url: "https://one.test" },
+      { title: "Two", url: "https://two.test" },
+    ] }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const result = await new BraveProvider(cfg({ brave: "test-key" })).search({ query: "q", numResults: 50 });
+    assert.equal(result.results.length, 2);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("TinyFish paginates without its ignored limit parameter and slices returned results", async () => {
+  const pages = [];
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(url);
+    assert.equal(parsed.searchParams.has("limit"), false);
+    const page = Number(parsed.searchParams.get("page"));
+    pages.push(page);
+    const start = page * 10;
+    return new Response(JSON.stringify({
+      total_results: 30,
+      results: Array.from({ length: 10 }, (_, i) => ({ title: `R${start + i}`, url: `https://example.test/${start + i}` })),
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const result = await new TinyFishProvider(cfg({ tinyfish: "test-key" })).search({ query: "q", numResults: 15 });
+    assert.deepEqual(pages, [0, 1]);
+    assert.equal(result.results.length, 15);
+    assert.equal(result.results[14].position, 15);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("TinyFish never requests a page above its service maximum", async () => {
+  const pages = [];
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const page = Number(new URL(url).searchParams.get("page"));
+    pages.push(page);
+    return new Response(JSON.stringify({ results: [{ url: `https://example.test/${page}` }] }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const result = await new TinyFishProvider(cfg({ tinyfish: "test-key" })).search({ query: "q", numResults: 100 });
+    assert.deepEqual(pages, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert.equal(result.results.length, 11);
+    assert.equal(result.effectiveResultLimit, 11);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("Exa MCP rejects tool-level errors", async () => {
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (body.method === "initialize") return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {} }), { status: 200, headers: { "content-type": "application/json", "mcp-session-id": "s" } });
+    if (body.method === "notifications/initialized") return new Response("", { status: 202 });
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { isError: true, content: [{ type: "text", text: "provider rejected request" }] } }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    await assert.rejects(() => new ExaMcpProvider(cfg()).search({ query: "q" }), /provider rejected request/);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
 });
 
 test("config-file API keys override environment for all keyed providers", () => {

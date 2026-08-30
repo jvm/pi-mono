@@ -23,7 +23,9 @@ export class ExaMcpProvider implements SearchProvider, FetchProvider {
 
   private async callTool(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<any> {
     await this.initialize(signal);
-    return this.rpc("tools/call", { name, arguments: args }, signal);
+    const result = await this.rpc("tools/call", { name, arguments: args }, signal);
+    if (result?.isError) throw new Error(`Exa MCP ${name} failed: ${textFromContent(result).slice(0, 1000)}`);
+    return result;
   }
 
   private async initialize(signal?: AbortSignal) {

@@ -9,6 +9,8 @@ const propNames = (schema) => Object.keys(schema.properties ?? {}).sort();
 
 test("active search schemas are provider-tailored", () => {
   assert.deepEqual(propNames(buildSearchSchema("exa_mcp")), ["numResults", "queries", "query"]);
+  assert.equal(buildSearchSchema("exa_mcp").properties.numResults.maximum, undefined);
+  assert.equal(buildSearchSchema("brave").properties.maxUrls.maximum, undefined);
   assert(propNames(buildSearchSchema("firecrawl")).includes("scrape"));
   assert(propNames(buildSearchSchema("firecrawl")).includes("scrapeOptions"));
   assert(propNames(buildSearchSchema("firecrawl")).includes("includeDomains"));
@@ -182,24 +184,32 @@ test("web_search returns grouped multi-query output with bounded details", async
     const body = JSON.parse(init.body);
     if (body.method === "initialize") return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {} }), { status: 200, headers: { "content-type": "application/json", "mcp-session-id": "s" } });
     if (body.method === "notifications/initialized") return new Response("", { status: 202 });
-    if (body.method === "tools/call") return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { structuredContent: { results: [{ title: body.params.arguments.query, url: `https://example.com/${body.params.arguments.query}` }] } } }), { status: 200, headers: { "content-type": "application/json" } });
+    if (body.method === "tools/call") {
+      assert.equal(body.params.arguments.numResults, 100);
+      return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { structuredContent: { results: [{ title: body.params.arguments.query, url: `https://example.com/${body.params.arguments.query}` }] } } }), { status: 200, headers: { "content-type": "application/json" } });
+    }
     throw new Error(`unexpected ${body.method}`);
   };
   try {
-    const out = await searchTool.execute("id", { queries: ["one", "two"] }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")), isProjectTrusted: () => true });
+    const out = await searchTool.execute("id", { queries: ["one", "two"], numResults: 101 }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")), isProjectTrusted: () => true });
     const parsed = JSON.parse(out.content[0].text);
     assert.deepEqual(parsed.queries.map((q) => q.query), ["one", "two"]);
+    assert.equal(parsed.queries[0].requestedResultLimit, 101);
+    assert.equal(parsed.queries[0].effectiveResultLimit, 100);
+    assert.equal(parsed.queries[0].resultCount, 1);
+    assert.equal(out.details.queries[0].resultCount, 1);
     assert.equal(out.details.queries[0].results[0].snippet, undefined);
   } finally {
     globalThis.fetch = oldFetch;
   }
 });
 
-test("web_search rejects query and numResults limits", async () => {
+test("web_search rejects query count and invalid numResults", async () => {
   const searchTool = registerWithFlags({}).find((t) => t.name === "web_search");
   const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
   await assert.rejects(() => searchTool.execute("id", { queries: ["a", "b", "c", "d", "e", "f"] }, undefined, undefined, { cwd, isProjectTrusted: () => true }), /Too many queries/);
-  await assert.rejects(() => searchTool.execute("id", { query: "a", numResults: 21 }, undefined, undefined, { cwd, isProjectTrusted: () => true }), /numResults/);
+  await assert.rejects(() => searchTool.execute("id", { query: "a", numResults: 0 }, undefined, undefined, { cwd, isProjectTrusted: () => true }), /numResults/);
+  await assert.rejects(() => searchTool.execute("id", { query: "a", numResults: 1.5 }, undefined, undefined, { cwd, isProjectTrusted: () => true }), /numResults/);
 });
 
 test("web_fetch rejects offset with multiple URLs", async () => {
@@ -279,6 +289,15 @@ test("large search output preserves result URLs while fitting snippets", () => {
   assert.equal(parsed.queries.reduce((total, group) => total + group.results.length, 0), 100);
   assert.equal(parsed.queries[4].results[19].url, "https://example.com/4/19");
   assert((parsed.queries[0].results[0].snippet?.length ?? 0) < 1_000);
+});
+
+test("search resultCount reflects results retained by output bounding", () => {
+  const results = Array.from({ length: 100 }, (_, i) => ({ title: "t".repeat(1_000), url: `https://example.com/${i}` }));
+  const out = jsonToolResult({ provider: "test", queries: [{ query: "q", requestedResultLimit: 100, effectiveResultLimit: 100, resultCount: 100, results }] });
+  const group = JSON.parse(out.content[0].text).queries[0];
+  assert(group.results.length < results.length);
+  assert.equal(group.resultCount, group.results.length);
+  assert.equal(group.omittedResultCount, results.length - group.results.length);
 });
 
 test("oversized fetch metadata is bounded without discarding page content", () => {
