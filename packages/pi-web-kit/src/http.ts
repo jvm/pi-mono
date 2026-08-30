@@ -32,10 +32,19 @@ export async function requestJson<T>(url: string, init: RequestInit & { timeoutM
 }
 
 export function asSnippet(value: unknown): string | undefined {
+  return asText(value)?.slice(0, 1000) || undefined;
+}
+
+export function asText(value: unknown): string | undefined {
   if (value == null) return undefined;
-  if (Array.isArray(value)) return value.filter(Boolean).join("\n").slice(0, 1000) || undefined;
-  if (typeof value === "string") return value.slice(0, 1000) || undefined;
-  return JSON.stringify(value).slice(0, 1000);
+  if (Array.isArray(value)) return value.filter(Boolean).map((item) => typeof item === "string" ? item : JSON.stringify(item)).join("\n") || undefined;
+  if (typeof value === "string") return value || undefined;
+  return JSON.stringify(value);
+}
+
+export function withoutContent(value: any): Record<string, unknown> {
+  const { text: _text, content: _content, markdown: _markdown, html: _html, summary: _summary, highlights: _highlights, ...metadata } = value ?? {};
+  return metadata;
 }
 
 export function normalizeUrls(input: { url?: string; urls?: string[] }, maxCount?: number): string[] {

@@ -1,7 +1,7 @@
-import { asSnippet, fetchWithTimeout, normalizeUrls } from "../http.js";
+import { asSnippet, asText, fetchWithTimeout, normalizeUrls, withoutContent } from "../http.js";
 import { DEFAULT_NUM_RESULTS } from "../limits.js";
 import { urlsMatch } from "../urls.js";
-import type { FetchInput, FetchProvider, SearchInput, SearchProvider, WebKitConfig } from "../types.js";
+import type { FetchInput, FetchProvider, SearchInput, SearchProvider, WebKitConfig, WebSearchResult } from "../types.js";
 import { applyExaFetchFallbacks } from "./fallback.js";
 
 export class ExaMcpProvider implements SearchProvider, FetchProvider {
@@ -10,13 +10,24 @@ export class ExaMcpProvider implements SearchProvider, FetchProvider {
   constructor(private config: WebKitConfig) {}
 
   async search(input: SearchInput, signal?: AbortSignal) {
-    const result = await this.callTool("web_search_exa", { query: input.query, numResults: input.numResults ?? DEFAULT_NUM_RESULTS }, signal);
-    return { provider: "exa_mcp" as const, query: input.query, results: normalizeSearch(result) };
+    const result = await this.callTool("web_search_exa", { query: input.purpose ? `${input.query}\n\nIntent: ${input.purpose}` : input.query, numResults: input.numResults ?? DEFAULT_NUM_RESULTS }, signal);
+    const results = normalizeSearch(result) as WebSearchResult["results"];
+    const existingCharacters = results.reduce((total, item) => total + (item.content?.length ?? 0), 0);
+    if (input.contextTokens && results.length && existingCharacters < input.contextTokens * 4) {
+      const maxCharacters = Math.max(1, Math.floor(input.contextTokens * 4 / results.length));
+      const fetched = await this.callTool("web_fetch_exa", { urls: results.map((item) => item.url), maxCharacters }, signal);
+      const pages = normalizeFetch(fetched, results.map((item) => item.url));
+      for (let i = 0; i < results.length; i++) if (pages[i]?.content) {
+        results[i].content = pages[i].content;
+        results[i].contentFormat = "markdown";
+      }
+    }
+    return { provider: "exa_mcp" as const, query: input.query, results };
   }
 
   async fetch(input: FetchInput, signal?: AbortSignal) {
     const urls = normalizeUrls(input);
-    const result = await this.callTool("web_fetch_exa", { urls }, signal);
+    const result = await this.callTool("web_fetch_exa", { urls, maxCharacters: 100_000 }, signal);
     const pages = normalizeFetch(result, urls);
     return applyExaFetchFallbacks(this.config, input, urls, { provider: "exa_mcp" as const, results: pages }, signal);
   }
@@ -78,14 +89,23 @@ function normalizeSearch(result: any) {
   if (Array.isArray(list)) return list.map(toSearchResult).filter((r: any) => r.url);
   const text = textFromContent(result);
   const urls = [...text.matchAll(/https?:\/\/[^\s)\]}>"']+/g)].map((m) => m[0]);
-  return [...new Set(urls)].map((url, i) => ({ url, snippet: i === 0 ? text.slice(0, 1000) : undefined, position: i + 1 }));
+  return [...new Set(urls)].map((url, i) => ({
+    url,
+    snippet: i === 0 ? text.slice(0, 1000) : undefined,
+    content: i === 0 ? text : undefined,
+    contentFormat: i === 0 ? "markdown" as const : undefined,
+    position: i + 1,
+  }));
 }
 
 function toSearchResult(r: any, index: number) {
+  const content = asText(r.text ?? r.summary ?? r.highlights ?? r.snippet);
   return {
     title: r.title,
     url: r.url,
-    snippet: asSnippet(r.snippet ?? r.text ?? r.summary ?? r.highlights),
+    snippet: asSnippet(r.snippet ?? content),
+    content,
+    contentFormat: content ? "markdown" as const : undefined,
     siteName: r.siteName,
     position: index + 1,
   };
@@ -97,7 +117,7 @@ function normalizeFetch(result: any, urls: string[]) {
   if (Array.isArray(list)) return urls.map((url, i) => {
     const r = list.find((x: any) => urlsMatch(x.url, url)) ?? list[i];
     if (!r) return { url, error: "No content returned by Exa MCP." };
-    return { url, title: r.title, content: r.markdown ?? r.text ?? r.content ?? r.html, format: "markdown" as const, metadata: r, error: r.error };
+    return { url, title: r.title, content: r.markdown ?? r.text ?? r.content ?? r.html, format: "markdown" as const, metadata: withoutContent(r), error: r.error };
   });
   const text = textFromContent(result);
   return urls.length <= 1 ? [{ url: urls[0] ?? "", content: text, format: "markdown" as const }] : urls.map((url) => ({ url, content: text, format: "markdown" as const }));

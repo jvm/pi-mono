@@ -4,7 +4,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { fetchCache, type CachedPage } from "../src/cache.js";
 import { resolveConfig } from "../src/config.js";
-import { capSearchResultLimit, DEFAULT_FETCH_LIMIT, DEFAULT_NUM_RESULTS, MAX_LIMIT, MAX_NUM_RESULTS, MAX_OFFSET, MAX_QUERY_COUNT, MAX_URL_COUNT, MULTI_FETCH_LIMIT, TINYFISH_MAX_PAGE } from "../src/limits.js";
+import { capSearchResultLimit, DEFAULT_FETCH_LIMIT, DEFAULT_NUM_RESULTS, DEFAULT_SEARCH_CONTEXT_TOKENS, MAX_LIMIT, MAX_NUM_RESULTS, MAX_OFFSET, MAX_QUERY_COUNT, MAX_SEARCH_CONTEXT_TOKENS, MAX_URL_COUNT, MULTI_FETCH_LIMIT, TINYFISH_MAX_PAGE } from "../src/limits.js";
 import { createCodeSearchProvider, createContext7Provider, createFetchProvider, createSearchProvider } from "../src/providers/index.js";
 import { mapFetchResults } from "../src/providers/fallback.js";
 import type { FetchProviderName, SearchProviderName, WebFetchResult } from "../src/types.js";
@@ -64,6 +64,8 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
         1,
       );
       const effectiveResultLimit = capSearchResultLimit(config.provider_search, requestedResultLimit);
+      const requestedContextTokens = params.contextTokens == null ? undefined : parseInteger(params.contextTokens, 0, "contextTokens", 1);
+      const effectiveContextTokens = Math.min(requestedContextTokens ?? DEFAULT_SEARCH_CONTEXT_TOKENS, MAX_SEARCH_CONTEXT_TOKENS);
       const provider = createSearchProvider(config);
       const grouped = [];
       const progress = createProgress("search", config.provider_search, queries);
@@ -71,9 +73,20 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
       for (const query of queries) {
         markProgressCurrent(progress, query);
         emitProgress(onUpdate, progress);
-        const result = await provider.search({ ...params, query, numResults: effectiveResultLimit }, signal);
-        grouped.push({ query, requestedResultLimit, effectiveResultLimit: result.effectiveResultLimit ?? effectiveResultLimit, resultCount: result.results.length, results: result.results });
-        markProgressDone(progress, query, `${result.results.length} results`);
+        const result = await provider.search({ ...params, query, numResults: effectiveResultLimit, contextTokens: requestedContextTokens == null ? undefined : effectiveContextTokens }, signal);
+        const bounded = applySearchContextBudget(result.results, effectiveContextTokens * 4);
+        grouped.push({
+          query,
+          requestedResultLimit,
+          effectiveResultLimit: result.effectiveResultLimit ?? effectiveResultLimit,
+          requestedContextTokens,
+          effectiveContextTokens,
+          contextCharacters: bounded.contextCharacters,
+          ...(bounded.omittedContextCharacters ? { omittedContextCharacters: bounded.omittedContextCharacters } : {}),
+          resultCount: bounded.results.length,
+          results: bounded.results,
+        });
+        markProgressDone(progress, query, `${bounded.results.length} results`);
         emitProgress(onUpdate, progress);
       }
       const result = { provider: config.provider_search, queries: grouped };
@@ -219,6 +232,8 @@ export function buildSearchSchema(provider: SearchProviderName) {
     query: Type.Optional(Type.String({ description: "Single search query" })),
     queries: Type.Optional(Type.Array(Type.String(), { description: `Multiple related search queries (max ${MAX_QUERY_COUNT})`, maxItems: MAX_QUERY_COUNT })),
     numResults: Type.Optional(int("Desired results per query; capped by the active provider", 1)),
+    contextTokens: Type.Optional(int("Desired extracted context tokens; capped to the tool output budget and may enable provider extraction", 1)),
+    purpose: Type.Optional(Type.String({ description: "Optional task/use-case hint when supported by the provider", minLength: 1, maxLength: 2_000 })),
   };
   if (provider === "exa") Object.assign(props, {
     includeDomains: Type.Optional(Type.Array(Type.String())),
@@ -229,13 +244,32 @@ export function buildSearchSchema(provider: SearchProviderName) {
     endCrawlDate: Type.Optional(Type.String()),
     type: Type.Optional(Type.String()),
     category: Type.Optional(Type.String()),
+    maxAgeHours: Type.Optional(int("Maximum Exa cached content age in hours; 0 forces live crawl, -1 disables live crawl", -1)),
   });
-  if (provider === "tinyfish") Object.assign(props, { page: Type.Optional(int("Deprecated starting result page", 0, TINYFISH_MAX_PAGE)) });
+  if (provider === "tinyfish") Object.assign(props, {
+    page: Type.Optional(int("Deprecated starting result page", 0, TINYFISH_MAX_PAGE)),
+    location: Type.Optional(Type.String()), language: Type.Optional(Type.String()),
+    includeDomains: Type.Optional(Type.Array(Type.String())), excludeDomains: Type.Optional(Type.Array(Type.String())),
+    domainType: Type.Optional(Type.Union([Type.Literal("web"), Type.Literal("news"), Type.Literal("research_paper")])),
+    afterDate: Type.Optional(Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" })), beforeDate: Type.Optional(Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" })),
+    recencyMinutes: Type.Optional(int("Freshness window in minutes", 1, 5_256_000)),
+    pubYearMin: Type.Optional(int("Minimum publication year", 0, 9_999)), pubYearMax: Type.Optional(int("Maximum publication year", 0, 9_999)),
+  });
   if (provider === "brave") Object.assign(props, {
-    country: Type.Optional(Type.String()), searchLang: Type.Optional(Type.String()), uiLang: Type.Optional(Type.String()), safesearch: Type.Optional(Type.String()), freshness: Type.Optional(Type.String()), maxUrls: Type.Optional(int("Deprecated alias for numResults", 1)),
+    country: Type.Optional(Type.String({ minLength: 2, maxLength: 2 })), searchLang: Type.Optional(Type.String({ minLength: 2, maxLength: 10 })),
+    safesearch: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("moderate"), Type.Literal("strict")])),
+    freshness: Type.Optional(Type.String()), spellcheck: Type.Optional(Type.Boolean()),
+    contextThresholdMode: Type.Optional(Type.Union([Type.Literal("disabled"), Type.Literal("strict"), Type.Literal("balanced"), Type.Literal("lenient")])),
+    maxSnippets: Type.Optional(int("Maximum context snippets", 1, 256)),
+    maxTokensPerUrl: Type.Optional(int("Maximum context tokens per URL", 512, 8_192)),
+    maxSnippetsPerUrl: Type.Optional(int("Maximum context snippets per URL", 1, 100)),
+    goggles: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String(), { maxItems: 3 })])),
+    maxUrls: Type.Optional(int("Deprecated alias for numResults", 1)),
   });
   if (provider === "firecrawl") Object.assign(props, {
-    location: Type.Optional(Type.String()), country: Type.Optional(Type.String()), includeDomains: Type.Optional(Type.Array(Type.String())), excludeDomains: Type.Optional(Type.Array(Type.String())), categories: Type.Optional(Type.Array(Type.String())), tbs: Type.Optional(Type.String()), scrape: Type.Optional(Type.Boolean({ description: "Enable default markdown scrape-on-search" })), scrapeOptions: Type.Optional(Type.Object({}, { additionalProperties: true, description: "Firecrawl scrapeOptions for search." })),
+    location: Type.Optional(Type.String()), country: Type.Optional(Type.String()), includeDomains: Type.Optional(Type.Array(Type.String())), excludeDomains: Type.Optional(Type.Array(Type.String())),
+    categories: Type.Optional(Type.Array(Type.Union([Type.Literal("research"), Type.Literal("pdf"), Type.Literal("developer")]))),
+    tbs: Type.Optional(Type.String()), scrape: Type.Optional(Type.Boolean({ description: "Enable default markdown scrape-on-search" })), scrapeOptions: Type.Optional(Type.Object({}, { additionalProperties: true, description: "Firecrawl scrapeOptions for search." })),
   });
   return Type.Object(props, { additionalProperties: false });
 }
@@ -247,12 +281,23 @@ export function buildFetchSchema(provider: FetchProviderName) {
     offset: Type.Optional(int("Character offset for cached/ranged reads", 0, MAX_OFFSET)),
     limit: Type.Optional(int("Maximum characters to return", 1, MAX_LIMIT)),
     refresh: Type.Optional(Type.Boolean({ description: "Refetch even if cached" })),
+    maxAgeMs: Type.Optional(int("Maximum local/provider-cached page age in milliseconds; 0 requests live content where supported", 0)),
   };
+  if (provider === "exa") Object.assign(props, { maxAgeHours: Type.Optional(int("Maximum Exa cached content age in hours; 0 forces live crawl, -1 disables live crawl", -1)) });
   if (provider === "tinyfish") Object.assign(props, { format: Type.Optional(Type.Union([Type.Literal("markdown"), Type.Literal("html"), Type.Literal("json")])), links: Type.Optional(Type.Boolean()), imageLinks: Type.Optional(Type.Boolean()) });
+  if (provider === "tinyfish") Object.assign(props, {
+    purpose: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000 })),
+    ttl: Type.Optional(int("Provider cache freshness tolerance in seconds; 0 prefers live fetch", 0)),
+    perUrlTimeoutMs: Type.Optional(int("Per-URL timeout in milliseconds", 1, 110_000)),
+    includeSelectors: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 1_000 }), { minItems: 1, maxItems: 20 })),
+    excludeSelectors: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 1_000 }), { minItems: 1, maxItems: 20 })),
+  });
   if (provider === "markdown_new") Object.assign(props, { method: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("ai"), Type.Literal("browser")])), retainImages: Type.Optional(Type.Boolean()) });
   if (provider === "firecrawl") Object.assign(props, {
     format: Type.Optional(Type.Union([Type.Literal("markdown"), Type.Literal("html"), Type.Literal("json")])),
-    onlyMainContent: Type.Optional(Type.Boolean()), waitFor: Type.Optional(int("Milliseconds to wait", 0, 60_000)), mobile: Type.Optional(Type.Boolean()), location: Type.Optional(Type.String()), maxAge: Type.Optional(int("Maximum cached page age", 0)),
+    onlyMainContent: Type.Optional(Type.Boolean()), waitFor: Type.Optional(int("Milliseconds to wait", 0, 60_000)), mobile: Type.Optional(Type.Boolean()),
+    location: Type.Optional(Type.Object({ country: Type.Optional(Type.String()), languages: Type.Optional(Type.Array(Type.String())) }, { additionalProperties: false })),
+    maxAge: Type.Optional(int("Maximum cached page age in milliseconds", 0)),
   });
   return Type.Object(props, { additionalProperties: false });
 }
@@ -300,6 +345,24 @@ function normalizeQueries(params: Record<string, any>): string[] {
   return queries;
 }
 
+function applySearchContextBudget(results: Array<{ content?: string; [key: string]: unknown }>, maxCharacters: number) {
+  let remaining = maxCharacters;
+  let remainingContentResults = results.filter((result) => typeof result.content === "string").length;
+  let contextCharacters = 0;
+  let omittedContextCharacters = 0;
+  const bounded = results.map((result) => {
+    if (typeof result.content !== "string") return result;
+    const share = Math.max(0, Math.floor(remaining / remainingContentResults));
+    const content = safePrefix(result.content, share);
+    remaining -= content.length;
+    remainingContentResults--;
+    contextCharacters += content.length;
+    omittedContextCharacters += result.content.length - content.length;
+    return { ...result, content };
+  });
+  return { results: bounded, contextCharacters, omittedContextCharacters };
+}
+
 function normalizeUrls(params: Record<string, any>): string[] {
   return normalizeUrlInput({ url: params.url, urls: params.urls }, MAX_URL_COUNT);
 }
@@ -310,6 +373,7 @@ export async function fetchWithCache(providerName: FetchProviderName, params: Re
   const defaultLimit = urls.length > 1 ? MULTI_FETCH_LIMIT : DEFAULT_FETCH_LIMIT;
   const limit = parseInteger(params.limit, defaultLimit, "limit", 1, MAX_LIMIT);
   const refresh = params.refresh === true;
+  const maxAgeMs = localCacheMaxAge(providerName, params);
 
   const pages = new Map<string, { page?: CachedPage; cached: boolean; refreshed: boolean; error?: string }>();
   const cacheKeys = new Map<string, string>();
@@ -318,7 +382,7 @@ export async function fetchWithCache(providerName: FetchProviderName, params: Re
     const cacheKey = buildCacheKey(providerName, url, params, config);
     cacheKeys.set(url, cacheKey);
     const cached = fetchCache.get(cacheKey);
-    if (cached && !refresh) {
+    if (cached && !refresh && (maxAgeMs == null || (maxAgeMs > 0 && Date.now() - cached.fetchedAt <= maxAgeMs))) {
       pages.set(url, { page: cached, cached: true, refreshed: false });
       onProgress?.({ status: "done", url, note: "cached" });
     } else {
@@ -360,6 +424,14 @@ export async function fetchWithCache(providerName: FetchProviderName, params: Re
     if (!entry?.page) return { url, error: entry?.error ?? "No content returned." };
     return pageSlice(entry.page, offset, limit, entry.cached, entry.refreshed);
   }) };
+}
+
+function localCacheMaxAge(provider: FetchProviderName, params: Record<string, any>): number | undefined {
+  if (params.maxAgeMs != null) return parseInteger(params.maxAgeMs, 0, "maxAgeMs", 0);
+  if (provider === "exa" && typeof params.maxAgeHours === "number" && params.maxAgeHours >= 0) return params.maxAgeHours * 3_600_000;
+  if (provider === "tinyfish" && typeof params.ttl === "number") return params.ttl * 1_000;
+  if (provider === "firecrawl" && typeof params.maxAge === "number") return params.maxAge;
+  return undefined;
 }
 
 
@@ -442,8 +514,20 @@ function isSearchResult(value: any): value is { provider?: string; queries: Arra
 }
 
 function boundSearchResult(value: { provider?: string; queries: Array<{ query?: string; results?: any[] }> }) {
-  const compact = limitStrings(value, 1_000) as typeof value;
-  const maxSnippet = Math.max(0, ...compact.queries.flatMap((group) => (group.results ?? []).map((item) => typeof item?.snippet === "string" ? item.snippet.length : 0)));
+  const compact = {
+    ...(limitStrings(value, 1_000) as Record<string, unknown>),
+    queries: value.queries.map((group) => ({
+      ...(limitStrings(group, 1_000) as Record<string, unknown>),
+      results: (group.results ?? []).map((item) => ({
+        ...(limitStrings(item, 1_000) as Record<string, unknown>),
+        ...(typeof item?.content === "string" ? { content: item.content } : {}),
+      })),
+    })),
+  } as typeof value;
+  const maxSnippet = Math.max(0, ...compact.queries.flatMap((group) => (group.results ?? []).flatMap((item) => [
+    typeof item?.snippet === "string" ? item.snippet.length : 0,
+    typeof item?.content === "string" ? item.content.length : 0,
+  ])));
   let low = 0;
   let high = maxSnippet;
   let best = searchResultWithLimits(compact, 0);
@@ -480,16 +564,27 @@ function searchResultWithLimits(value: { provider?: string; queries: Array<{ que
   return {
     ...value,
     queries: value.queries.map((group) => {
+      const originalContextCharacters = (group.results ?? []).reduce((total, item) => total + (typeof item?.content === "string" ? item.content.length : 0), 0);
       const results = (group.results ?? []).slice(0, resultsPerQuery).map((item) => {
-        if (typeof item?.snippet !== "string") return item;
-        if (snippetChars === 0) {
-          const { snippet: _snippet, ...metadata } = item;
-          return metadata;
+        const bounded = { ...item };
+        for (const key of ["snippet", "content"] as const) {
+          if (typeof bounded[key] !== "string") continue;
+          if (snippetChars === 0) delete bounded[key];
+          else bounded[key] = safePrefix(bounded[key], snippetChars);
         }
-        return { ...item, snippet: safePrefix(item.snippet, snippetChars) };
+        return bounded;
       });
       const omittedResultCount = Math.max(0, (group.results?.length ?? 0) - results.length);
-      return { ...group, resultCount: results.length, ...(omittedResultCount ? { omittedResultCount } : {}), results };
+      const contextCharacters = results.reduce((total, item) => total + (typeof item?.content === "string" ? item.content.length : 0), 0);
+      const omittedContextCharacters = (typeof (group as any).omittedContextCharacters === "number" ? (group as any).omittedContextCharacters : 0) + originalContextCharacters - contextCharacters;
+      return {
+        ...group,
+        contextCharacters,
+        ...(omittedContextCharacters ? { omittedContextCharacters } : {}),
+        resultCount: results.length,
+        ...(omittedResultCount ? { omittedResultCount } : {}),
+        results,
+      };
     }),
   };
 }
@@ -602,6 +697,10 @@ function searchDetails(value: any) {
       query: q.query,
       requestedResultLimit: q.requestedResultLimit,
       effectiveResultLimit: q.effectiveResultLimit,
+      requestedContextTokens: q.requestedContextTokens,
+      effectiveContextTokens: q.effectiveContextTokens,
+      contextCharacters: q.contextCharacters,
+      omittedContextCharacters: q.omittedContextCharacters,
       resultCount: (q.results ?? []).length,
       omittedResultCount: q.omittedResultCount,
       results: (q.results ?? []).map((r: any) => ({ title: r.title, url: r.url, siteName: r.siteName, position: r.position })),

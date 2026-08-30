@@ -10,12 +10,18 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 - Share install telemetry mechanics through `@mocito/install-telemetry` while preserving Pi-specific settings and state paths.
 - Treat `web_search.numResults` as a provider-agnostic desired limit, cap it to each provider's service constraints, and report requested, effective, returned, and omitted counts.
+- Add provider-agnostic `contextTokens` and `purpose` search controls, preserve provider-native grounding content, and allocate one bounded context budget across ranked results.
+- Use adaptive extraction: native Exa/Brave context is retained automatically, while Exa MCP/TinyFish fetch and Firecrawl scrape-on-search run only when expanded context is requested.
+- Expose documented TinyFish search/fetch controls and Brave LLM Context controls.
+- Add provider-agnostic `maxAgeMs`, pass refresh/cache intent through to Exa, TinyFish, and Firecrawl, and request complete bounded pages from Exa/Exa MCP fetch.
 
 ### Fixed
 
 - Let `enableInstallTelemetry: false` override an enabled `PI_TELEMETRY` environment flag.
 - Paginate TinyFish searches instead of sending its ignored `limit` parameter.
 - Surface Exa MCP tool-level errors instead of returning a misleading empty result.
+- Send markdown.new's documented `retain_images` field and report its response metadata.
+- Match TinyFish fetch responses and per-URL errors by canonical URL instead of response position.
 
 ## [0.2.4] - 2026-07-28
 

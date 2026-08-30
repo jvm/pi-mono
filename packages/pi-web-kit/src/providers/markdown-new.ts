@@ -15,18 +15,32 @@ export class MarkdownNewProvider implements FetchProvider {
           body: JSON.stringify({
             url,
             method: input.method ?? this.config.markdownNew.method,
-            retainImages: input.retainImages ?? this.config.markdownNew.retainImages,
+            retain_images: input.retainImages ?? this.config.markdownNew.retainImages,
           }),
           signal,
           timeoutMs: 45_000,
         });
         const text = await res.text();
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 1000)}`);
-        return { url, content: text, format: "markdown" as const };
+        return {
+          url,
+          content: text,
+          format: "markdown" as const,
+          metadata: {
+            estimatedTokens: numberHeader(res.headers.get("x-markdown-tokens")),
+            conversionMethod: res.headers.get("x-markdown-method") ?? undefined,
+          },
+        };
       } catch (e) {
         return { url, error: e instanceof Error ? e.message : String(e) };
       }
     });
     return { provider: "markdown_new" as const, results };
   }
+}
+
+function numberHeader(value: string | null): number | undefined {
+  if (value == null) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }

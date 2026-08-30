@@ -8,8 +8,9 @@ import extension, { buildCacheKey, buildCodeSearchSchema, buildFetchSchema, buil
 const propNames = (schema) => Object.keys(schema.properties ?? {}).sort();
 
 test("active search schemas are provider-tailored", () => {
-  assert.deepEqual(propNames(buildSearchSchema("exa_mcp")), ["numResults", "queries", "query"]);
+  assert.deepEqual(propNames(buildSearchSchema("exa_mcp")), ["contextTokens", "numResults", "purpose", "queries", "query"]);
   assert.equal(buildSearchSchema("exa_mcp").properties.numResults.maximum, undefined);
+  assert.equal(buildSearchSchema("exa_mcp").properties.contextTokens.maximum, undefined);
   assert.equal(buildSearchSchema("brave").properties.maxUrls.maximum, undefined);
   assert(propNames(buildSearchSchema("firecrawl")).includes("scrape"));
   assert(propNames(buildSearchSchema("firecrawl")).includes("scrapeOptions"));
@@ -22,7 +23,7 @@ test("active fetch schemas are provider-tailored", () => {
   assert(propNames(buildFetchSchema("tinyfish")).includes("imageLinks"));
   assert(propNames(buildFetchSchema("markdown_new")).includes("method"));
   assert(propNames(buildFetchSchema("markdown_new")).includes("retainImages"));
-  assert.deepEqual(propNames(buildFetchSchema("exa_mcp")), ["limit", "offset", "refresh", "url", "urls"]);
+  assert.deepEqual(propNames(buildFetchSchema("exa_mcp")), ["limit", "maxAgeMs", "offset", "refresh", "url", "urls"]);
 });
 
 test("missing trust API defaults to untrusted and repeated session starts do not duplicate tools", () => {
@@ -204,6 +205,33 @@ test("web_search returns grouped multi-query output with bounded details", async
   }
 });
 
+test("web_search applies one provider-agnostic context budget", async () => {
+  const oldKey = process.env.BRAVE_SEARCH_API_KEY;
+  const oldFetch = globalThis.fetch;
+  process.env.BRAVE_SEARCH_API_KEY = "test-key";
+  globalThis.fetch = async (url) => {
+    assert.equal(new URL(url).searchParams.get("maximum_number_of_tokens"), "10000");
+    return new Response(JSON.stringify({ grounding: { generic: [
+      { title: "One", url: "https://one.test", snippets: ["a".repeat(30_000)] },
+      { title: "Two", url: "https://two.test", snippets: ["b".repeat(30_000)] },
+    ] }, sources: {} }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const searchTool = registerWithFlags({ "web-provider-search": "brave" }).find((t) => t.name === "web_search");
+    const out = await searchTool.execute("id", { query: "q", numResults: 2, contextTokens: 50_000 }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")), isProjectTrusted: () => true });
+    const group = JSON.parse(out.content[0].text).queries[0];
+    assert.equal(group.requestedContextTokens, 50_000);
+    assert.equal(group.effectiveContextTokens, 10_000);
+    assert.equal(group.contextCharacters, 40_000);
+    assert.equal(group.omittedContextCharacters, 20_000);
+    assert.equal(group.results.reduce((total, result) => total + result.content.length, 0), 40_000);
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldKey === undefined) delete process.env.BRAVE_SEARCH_API_KEY;
+    else process.env.BRAVE_SEARCH_API_KEY = oldKey;
+  }
+});
+
 test("web_search rejects query count and invalid numResults", async () => {
   const searchTool = registerWithFlags({}).find((t) => t.name === "web_search");
   const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
@@ -292,12 +320,14 @@ test("large search output preserves result URLs while fitting snippets", () => {
 });
 
 test("search resultCount reflects results retained by output bounding", () => {
-  const results = Array.from({ length: 100 }, (_, i) => ({ title: "t".repeat(1_000), url: `https://example.com/${i}` }));
-  const out = jsonToolResult({ provider: "test", queries: [{ query: "q", requestedResultLimit: 100, effectiveResultLimit: 100, resultCount: 100, results }] });
+  const results = Array.from({ length: 100 }, (_, i) => ({ title: "t".repeat(1_000), url: `https://example.com/${i}`, content: "c".repeat(1_000) }));
+  const out = jsonToolResult({ provider: "test", queries: [{ query: "q", requestedResultLimit: 100, effectiveResultLimit: 100, contextCharacters: 100_000, resultCount: 100, results }] });
   const group = JSON.parse(out.content[0].text).queries[0];
   assert(group.results.length < results.length);
   assert.equal(group.resultCount, group.results.length);
   assert.equal(group.omittedResultCount, results.length - group.results.length);
+  assert.equal(group.contextCharacters, group.results.reduce((total, result) => total + (result.content?.length ?? 0), 0));
+  assert.equal(group.omittedContextCharacters, 100_000 - group.contextCharacters);
 });
 
 test("oversized fetch metadata is bounded without discarding page content", () => {

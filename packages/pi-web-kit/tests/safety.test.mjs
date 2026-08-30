@@ -66,7 +66,9 @@ test("MarkdownNewProvider uses bounded concurrency", async () => {
   let active = 0;
   let maxActive = 0;
   const oldFetch = globalThis.fetch;
-  globalThis.fetch = async () => {
+  globalThis.fetch = async (_url, init) => {
+    assert.equal(JSON.parse(init.body).retain_images, false);
+    assert.equal(JSON.parse(init.body).retainImages, undefined);
     active += 1;
     maxActive = Math.max(maxActive, active);
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -84,13 +86,18 @@ test("MarkdownNewProvider uses bounded concurrency", async () => {
 
 test("Exa fetch matches canonical/trailing-slash URLs and falls back by index", async () => {
   const oldFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({ results: [
-    { url: "https://example.com/a/", title: "A", text: "one" },
-    { url: "https://other.test/redirected", title: "B", text: "two" },
-  ] }), { status: 200 });
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    assert.equal(body.maxAgeHours, 1);
+    assert.deepEqual(body.text, { maxCharacters: 100_000 });
+    return new Response(JSON.stringify({ results: [
+      { url: "https://example.com/a/", title: "A", text: "one" },
+      { url: "https://other.test/redirected", title: "B", text: "two" },
+    ] }), { status: 200 });
+  };
   try {
     const provider = new ExaProvider(cfg({ exa: "key" }));
-    const out = await provider.fetch({ urls: ["https://example.com/a", "https://example.com/b"] });
+    const out = await provider.fetch({ urls: ["https://example.com/a", "https://example.com/b"], maxAgeMs: 5_400_000 });
     assert.equal(out.results[0].content, "one");
     assert.equal(out.results[1].content, "two");
   } finally {
@@ -128,6 +135,24 @@ test("fetchWithCache preserves requested URL when provider returns canonical URL
     const out = await fetchWithCache("exa", { url: "https://example.com/page", refresh: true }, ["https://example.com/page"], undefined, { ...cfg({ exa: "key" }), provider_fetch: "exa" });
     assert.equal(out.results[0].url, "https://example.com/page");
     assert.equal(out.results[0].fetchedUrl, "https://example.com/page/");
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("maxAgeMs zero bypasses the local fetch cache", async () => {
+  let calls = 0;
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response("fresh", { status: 200 });
+  };
+  try {
+    const config = { ...cfg(), provider_fetch: "markdown_new" };
+    const input = { url: "https://max-age-zero.test", maxAgeMs: 0 };
+    await fetchWithCache("markdown_new", input, [input.url], undefined, config);
+    await fetchWithCache("markdown_new", input, [input.url], undefined, config);
+    assert.equal(calls, 2);
   } finally {
     globalThis.fetch = oldFetch;
   }

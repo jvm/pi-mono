@@ -1,4 +1,4 @@
-import { asSnippet, normalizeUrls, requestJson } from "../http.js";
+import { asSnippet, asText, normalizeUrls, requestJson, withoutContent } from "../http.js";
 import { DEFAULT_NUM_RESULTS } from "../limits.js";
 import { urlsMatch } from "../urls.js";
 import type { ExaCodeInput, ExaCodeResult, FetchInput, FetchProvider, SearchInput, SearchProvider, WebFetchResult, WebKitConfig } from "../types.js";
@@ -14,10 +14,15 @@ export class ExaProvider implements SearchProvider, FetchProvider {
   }
 
   async search(input: SearchInput, signal?: AbortSignal) {
+    const textCharacters = input.contextTokens ? Math.min(100_000, Math.max(1, Math.floor(input.contextTokens * 4 / (input.numResults ?? DEFAULT_NUM_RESULTS)))) : undefined;
     const body = {
       query: input.query,
       numResults: input.numResults ?? DEFAULT_NUM_RESULTS,
-      contents: input.contents ?? { highlights: true },
+      contents: input.contents ?? {
+        highlights: input.purpose ? { query: input.purpose } : true,
+        ...(textCharacters ? { text: { maxCharacters: textCharacters } } : {}),
+        ...(typeof input.maxAgeHours === "number" ? { maxAgeHours: input.maxAgeHours } : {}),
+      },
       includeDomains: input.includeDomains,
       excludeDomains: input.excludeDomains,
       startPublishedDate: input.startPublishedDate,
@@ -37,13 +42,18 @@ export class ExaProvider implements SearchProvider, FetchProvider {
     return {
       provider: "exa" as const,
       query: input.query,
-      results: (data.results ?? []).map((r: any, i: number) => ({
-        title: r.title,
-        url: r.url,
-        snippet: asSnippet(r.highlights ?? r.summary ?? r.text),
-        siteName: r.author ?? r.publishedDate,
-        position: i + 1,
-      })).filter((r: any) => r.url),
+      results: (data.results ?? []).map((r: any, i: number) => {
+        const content = asText(r.text ?? r.highlights ?? r.summary);
+        return {
+          title: r.title,
+          url: r.url,
+          snippet: asSnippet(content),
+          content,
+          contentFormat: content ? "markdown" as const : undefined,
+          siteName: r.author ?? r.publishedDate,
+          position: i + 1,
+        };
+      }).filter((r: any) => r.url),
     };
   }
 
@@ -53,7 +63,14 @@ export class ExaProvider implements SearchProvider, FetchProvider {
     const data = await requestJson<any>("https://api.exa.ai/contents", {
       method: "POST",
       headers: this.headers(),
-      body: JSON.stringify({ urls, text: true, highlights: false }),
+      body: JSON.stringify({
+        urls,
+        text: { maxCharacters: 100_000 },
+        highlights: false,
+        maxAgeHours: input.refresh === true
+          ? 0
+          : input.maxAgeHours ?? (typeof input.maxAgeMs === "number" ? Math.floor(input.maxAgeMs / 3_600_000) : undefined),
+      }),
       signal,
       timeoutMs: 45000,
     });
@@ -61,7 +78,7 @@ export class ExaProvider implements SearchProvider, FetchProvider {
     const primary: WebFetchResult = { provider: "exa", results: urls.map((url, i) => {
       const r: any = list.find((item: any) => urlsMatch(item.url, url)) ?? list[i];
       if (!r) return { url, error: "No content returned by Exa contents endpoint." };
-      return { url: r.url ?? url, title: r.title, content: r.text ?? r.summary ?? "", format: "markdown" as const, metadata: r };
+      return { url: r.url ?? url, title: r.title, content: r.text ?? r.summary ?? "", format: "markdown" as const, metadata: withoutContent(r) };
     }) };
     return applyExaFetchFallbacks(this.config, input, urls, primary, signal);
   }

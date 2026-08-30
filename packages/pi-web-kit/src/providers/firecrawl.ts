@@ -1,4 +1,4 @@
-import { asSnippet, mapConcurrent, normalizeUrls, requestJson } from "../http.js";
+import { asSnippet, asText, mapConcurrent, normalizeUrls, requestJson } from "../http.js";
 import { DEFAULT_NUM_RESULTS, FETCH_CONCURRENCY } from "../limits.js";
 import type { FetchInput, FetchProvider, SearchInput, SearchProvider, WebKitConfig } from "../types.js";
 import { requireKey } from "../config.js";
@@ -20,13 +20,22 @@ export class FirecrawlProvider implements SearchProvider, FetchProvider {
         excludeDomains: input.excludeDomains,
         categories: input.categories,
         tbs: input.tbs,
-        scrapeOptions: input.scrapeOptions ?? (input.scrape === true ? { formats: ["markdown"] } : undefined),
+        scrapeOptions: input.scrapeOptions ?? (input.scrape === true || input.contextTokens ? {
+          formats: ["markdown"],
+          onlyMainContent: true,
+          maxAge: input.maxAge,
+        } : undefined),
       }),
     });
     const list = data.data?.web ?? data.web ?? data.data ?? [];
-    return { provider: "firecrawl" as const, query: input.query, results: list.map((r: any, i: number) => ({
-      title: r.title, url: r.url, snippet: asSnippet(r.description ?? r.markdown ?? r.content), siteName: r.siteName, position: i + 1,
-    })).filter((r: any) => r.url) };
+    return { provider: "firecrawl" as const, query: input.query, results: list.map((r: any, i: number) => {
+      const content = asText(r.markdown ?? r.content ?? r.highlights);
+      return {
+        title: r.title, url: r.url, snippet: asSnippet(r.highlights ?? r.description ?? content), content,
+        contentFormat: content ? (r.markdown ? "markdown" as const : "text" as const) : undefined,
+        siteName: r.siteName, position: i + 1,
+      };
+    }).filter((r: any) => r.url) };
   }
 
   async fetch(input: FetchInput, signal?: AbortSignal) {
@@ -44,7 +53,7 @@ export class FirecrawlProvider implements SearchProvider, FetchProvider {
             waitFor: input.waitFor,
             mobile: input.mobile,
             location: input.location,
-            maxAge: input.maxAge,
+            maxAge: input.refresh === true ? 0 : input.maxAge ?? input.maxAgeMs,
           }),
         });
         const d = data.data ?? data;
