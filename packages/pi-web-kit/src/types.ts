@@ -1,5 +1,5 @@
-export type SearchProviderName = "exa_mcp" | "exa" | "tinyfish" | "brave" | "firecrawl";
-export type FetchProviderName = "exa_mcp" | "exa" | "tinyfish" | "markdown_new" | "firecrawl";
+export type SearchProviderName = "exa" | "tinyfish" | "brave" | "firecrawl";
+export type FetchProviderName = "exa" | "tinyfish" | "markdown_new" | "firecrawl";
 export type FetchFormat = "markdown" | "html" | "json";
 
 export interface WebKitConfig {
@@ -12,13 +12,16 @@ export interface WebKitConfig {
 export interface SearchInput {
   query: string;
   numResults?: number;
+  contextTokens?: number;
+  purpose?: string;
   [key: string]: unknown;
 }
 
 export interface WebSearchResult {
   provider: SearchProviderName;
   query: string;
-  results: Array<{ title?: string; url: string; snippet?: string; siteName?: string; position?: number }>;
+  effectiveResultLimit?: number;
+  results: Array<{ title?: string; url: string; snippet?: string; content?: string; contentFormat?: "markdown" | "text"; siteName?: string; position?: number }>;
 }
 
 export interface FetchInput {
@@ -27,9 +30,15 @@ export interface FetchInput {
   offset?: number;
   limit?: number;
   refresh?: boolean;
+  maxAgeMs?: number;
   format?: FetchFormat;
   links?: boolean;
   imageLinks?: boolean;
+  purpose?: string;
+  ttl?: number;
+  perUrlTimeoutMs?: number;
+  includeSelectors?: string[];
+  excludeSelectors?: string[];
   [key: string]: unknown;
 }
 

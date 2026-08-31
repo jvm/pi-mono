@@ -3,11 +3,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { FetchProviderName, SearchProviderName, WebKitConfig } from "./types.js";
 
-const SEARCH = ["exa_mcp", "exa", "tinyfish", "brave", "firecrawl"] as const;
-const FETCH = ["exa_mcp", "exa", "tinyfish", "markdown_new", "firecrawl"] as const;
+const SEARCH = ["exa", "tinyfish", "brave", "firecrawl"] as const;
+const FETCH = ["exa", "tinyfish", "markdown_new", "firecrawl"] as const;
 const DEFAULT_CONFIG: WebKitConfig = {
-  provider_search: "exa_mcp",
-  provider_fetch: "exa_mcp",
+  provider_search: "exa",
+  provider_fetch: "exa",
   apiKeys: {},
   markdownNew: { method: "auto", retainImages: false },
 };

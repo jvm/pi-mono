@@ -1,4 +1,4 @@
-import { asSnippet, requestJson } from "../http.js";
+import { asSnippet, asText, requestJson } from "../http.js";
 import type { SearchInput, SearchProvider, WebKitConfig } from "../types.js";
 import { requireKey } from "../config.js";
 
@@ -7,24 +7,51 @@ export class BraveProvider implements SearchProvider {
   constructor(config: WebKitConfig) { this.key = requireKey(config, "brave"); }
 
   async search(input: SearchInput, signal?: AbortSignal) {
-    const url = new URL("https://api.search.brave.com/res/v1/llm/context");
-    url.searchParams.set("q", input.query);
+    const params: Record<string, string | number | boolean | string[]> = { q: boundedQuery(input.query) };
     if (input.numResults) {
-      const count = String(Math.max(1, Math.min(input.numResults, 20)));
-      url.searchParams.set("count", count);
-      url.searchParams.set("maximum_number_of_urls", String(input.maxUrls ?? count));
+      params.count = input.numResults;
+      params.maximum_number_of_urls = input.numResults;
     }
-    if (typeof input.country === "string") url.searchParams.set("country", input.country);
-    if (typeof input.searchLang === "string") url.searchParams.set("search_lang", input.searchLang);
-    if (typeof input.uiLang === "string") url.searchParams.set("ui_lang", input.uiLang);
-    if (typeof input.safesearch === "string") url.searchParams.set("safesearch", input.safesearch);
-    if (typeof input.freshness === "string") url.searchParams.set("freshness", input.freshness);
-    const data = await requestJson<any>(url.toString(), { headers: { "X-Subscription-Token": this.key, accept: "application/json" }, signal, timeoutMs: 30000 });
+    if (input.contextTokens) params.maximum_number_of_tokens = Math.max(1_024, Math.min(input.contextTokens, 32_768));
+    if (typeof input.country === "string") params.country = input.country;
+    if (typeof input.searchLang === "string") params.search_lang = input.searchLang;
+    if (typeof input.safesearch === "string") params.safesearch = input.safesearch;
+    if (typeof input.freshness === "string") params.freshness = input.freshness;
+    if (typeof input.spellcheck === "boolean") params.spellcheck = input.spellcheck;
+    if (typeof input.contextThresholdMode === "string") params.context_threshold_mode = input.contextThresholdMode;
+    if (typeof input.maxSnippets === "number") params.maximum_number_of_snippets = input.maxSnippets;
+    if (typeof input.maxTokensPerUrl === "number") params.maximum_number_of_tokens_per_url = input.maxTokensPerUrl;
+    if (typeof input.maxSnippetsPerUrl === "number") params.maximum_number_of_snippets_per_url = input.maxSnippetsPerUrl;
+    if (typeof input.goggles === "string" || Array.isArray(input.goggles)) params.goggles = input.goggles;
+
+    const url = new URL("https://api.search.brave.com/res/v1/llm/context");
+    for (const [name, value] of Object.entries(params)) {
+      if (Array.isArray(value)) for (const item of value) url.searchParams.append(name, item);
+      else url.searchParams.set(name, String(value));
+    }
+    const usePost = input.goggles != null || url.toString().length > 2_000;
+    const data = await requestJson<any>(usePost ? `${url.origin}${url.pathname}` : url.toString(), {
+      method: usePost ? "POST" : undefined,
+      headers: { "X-Subscription-Token": this.key, accept: "application/json", ...(usePost ? { "content-type": "application/json" } : {}) },
+      body: usePost ? JSON.stringify(params) : undefined,
+      signal,
+      timeoutMs: 30000,
+    });
     const sources = data.sources ?? data.web?.results ?? [];
     const snippets = data.grounding?.generic ?? [];
-    const rows = sources.length ? sources : snippets;
-    return { provider: "brave" as const, query: input.query, results: rows.map((r: any, i: number) => ({
-      title: r.title ?? r.name, url: r.url, snippet: asSnippet(r.snippets ?? r.description ?? snippets[i]?.snippets), siteName: r.site_name ?? r.source, position: i + 1,
-    })).filter((r: any) => r.url) };
+    const sourceRows = Array.isArray(sources)
+      ? sources
+      : Object.entries(sources).map(([url, source]: [string, any]) => ({ ...source, url }));
+    const rows = snippets.length ? snippets : sourceRows;
+    return { provider: "brave" as const, query: input.query, results: rows.map((r: any, i: number) => {
+      const content = asText(r.snippets ?? r.snippet ?? r.description ?? snippets[i]?.snippets);
+      return {
+        title: r.title ?? r.name, url: r.url, snippet: asSnippet(content), content, contentFormat: content ? "markdown" as const : undefined, siteName: r.site_name ?? r.source, position: i + 1,
+      };
+    }).filter((r: any) => r.url) };
   }
+}
+
+function boundedQuery(query: string): string {
+  return query.trim().split(/\s+/).slice(0, 50).join(" ").slice(0, 400);
 }

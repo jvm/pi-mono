@@ -8,7 +8,9 @@ import extension, { buildCacheKey, buildCodeSearchSchema, buildFetchSchema, buil
 const propNames = (schema) => Object.keys(schema.properties ?? {}).sort();
 
 test("active search schemas are provider-tailored", () => {
-  assert.deepEqual(propNames(buildSearchSchema("exa_mcp")), ["numResults", "queries", "query"]);
+  assert.equal(buildSearchSchema("exa").properties.numResults.maximum, undefined);
+  assert.equal(buildSearchSchema("exa").properties.contextTokens.maximum, undefined);
+  assert.equal(buildSearchSchema("brave").properties.maxUrls.maximum, undefined);
   assert(propNames(buildSearchSchema("firecrawl")).includes("scrape"));
   assert(propNames(buildSearchSchema("firecrawl")).includes("scrapeOptions"));
   assert(propNames(buildSearchSchema("firecrawl")).includes("includeDomains"));
@@ -20,7 +22,7 @@ test("active fetch schemas are provider-tailored", () => {
   assert(propNames(buildFetchSchema("tinyfish")).includes("imageLinks"));
   assert(propNames(buildFetchSchema("markdown_new")).includes("method"));
   assert(propNames(buildFetchSchema("markdown_new")).includes("retainImages"));
-  assert.deepEqual(propNames(buildFetchSchema("exa_mcp")), ["limit", "offset", "refresh", "url", "urls"]);
+  assert(propNames(buildFetchSchema("exa")).includes("maxAgeHours"));
 });
 
 test("missing trust API defaults to untrusted and repeated session starts do not duplicate tools", () => {
@@ -104,14 +106,14 @@ test("cache keys include canonical URL and config-derived fetch defaults", () =>
 });
 
 test("range metadata includes previous/next and offset truncation", () => {
-  const result = pageSlice({ provider: "exa_mcp", cacheKey: "k", url: "u", content: "abcdef", format: "markdown", fetchedAt: 1 }, 2, 2, true, false);
+  const result = pageSlice({ provider: "exa", cacheKey: "k", url: "u", content: "abcdef", format: "markdown", fetchedAt: 1 }, 2, 2, true, false);
   assert.equal(result.content, "cd");
   assert.deepEqual(result.range, { offset: 2, limit: 2, returned: 2, total: 6, truncated: true, hasPrevious: true, hasNext: true, nextOffset: 4 });
   assert.equal(result.cacheKey, undefined);
 });
 
 test("search schema rejects unknown properties in principle", () => {
-  assert.equal(buildSearchSchema("exa_mcp").additionalProperties, false);
+  assert.equal(buildSearchSchema("exa").additionalProperties, false);
   assert.equal(buildFetchSchema("firecrawl").additionalProperties, false);
   assert.equal(buildFetchSchema("firecrawl").properties.waitFor.minimum, 0);
   assert.equal(buildLibrarySearchSchema().additionalProperties, false);
@@ -175,31 +177,65 @@ test("library_docs deferral guidance only appears when Context7 is configured", 
 });
 
 test("web_search returns grouped multi-query output with bounded details", async () => {
+  const oldKey = process.env.EXA_API_KEY;
+  const oldFetch = globalThis.fetch;
+  process.env.EXA_API_KEY = "test-key";
   const tools = registerWithFlags({});
   const searchTool = tools.find((t) => t.name === "web_search");
-  const oldFetch = globalThis.fetch;
   globalThis.fetch = async (_url, init) => {
     const body = JSON.parse(init.body);
-    if (body.method === "initialize") return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {} }), { status: 200, headers: { "content-type": "application/json", "mcp-session-id": "s" } });
-    if (body.method === "notifications/initialized") return new Response("", { status: 202 });
-    if (body.method === "tools/call") return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { structuredContent: { results: [{ title: body.params.arguments.query, url: `https://example.com/${body.params.arguments.query}` }] } } }), { status: 200, headers: { "content-type": "application/json" } });
-    throw new Error(`unexpected ${body.method}`);
+    assert.equal(body.numResults, 100);
+    return new Response(JSON.stringify({ results: [{ title: body.query, url: `https://example.com/${body.query}` }] }), { status: 200, headers: { "content-type": "application/json" } });
   };
   try {
-    const out = await searchTool.execute("id", { queries: ["one", "two"] }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")), isProjectTrusted: () => true });
+    const out = await searchTool.execute("id", { queries: ["one", "two"], numResults: 101 }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")), isProjectTrusted: () => true });
     const parsed = JSON.parse(out.content[0].text);
     assert.deepEqual(parsed.queries.map((q) => q.query), ["one", "two"]);
+    assert.equal(parsed.queries[0].requestedResultLimit, 101);
+    assert.equal(parsed.queries[0].effectiveResultLimit, 100);
+    assert.equal(parsed.queries[0].resultCount, 1);
+    assert.equal(out.details.queries[0].resultCount, 1);
     assert.equal(out.details.queries[0].results[0].snippet, undefined);
   } finally {
     globalThis.fetch = oldFetch;
+    if (oldKey === undefined) delete process.env.EXA_API_KEY;
+    else process.env.EXA_API_KEY = oldKey;
   }
 });
 
-test("web_search rejects query and numResults limits", async () => {
+test("web_search applies one provider-agnostic context budget", async () => {
+  const oldKey = process.env.BRAVE_SEARCH_API_KEY;
+  const oldFetch = globalThis.fetch;
+  process.env.BRAVE_SEARCH_API_KEY = "test-key";
+  globalThis.fetch = async (url) => {
+    assert.equal(new URL(url).searchParams.get("maximum_number_of_tokens"), "10000");
+    return new Response(JSON.stringify({ grounding: { generic: [
+      { title: "One", url: "https://one.test", snippets: ["a".repeat(30_000)] },
+      { title: "Two", url: "https://two.test", snippets: ["b".repeat(30_000)] },
+    ] }, sources: {} }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const searchTool = registerWithFlags({ "web-provider-search": "brave" }).find((t) => t.name === "web_search");
+    const out = await searchTool.execute("id", { query: "q", numResults: 2, contextTokens: 50_000 }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")), isProjectTrusted: () => true });
+    const group = JSON.parse(out.content[0].text).queries[0];
+    assert.equal(group.requestedContextTokens, 50_000);
+    assert.equal(group.effectiveContextTokens, 10_000);
+    assert.equal(group.contextCharacters, 40_000);
+    assert.equal(group.omittedContextCharacters, 20_000);
+    assert.equal(group.results.reduce((total, result) => total + result.content.length, 0), 40_000);
+  } finally {
+    globalThis.fetch = oldFetch;
+    if (oldKey === undefined) delete process.env.BRAVE_SEARCH_API_KEY;
+    else process.env.BRAVE_SEARCH_API_KEY = oldKey;
+  }
+});
+
+test("web_search rejects query count and invalid numResults", async () => {
   const searchTool = registerWithFlags({}).find((t) => t.name === "web_search");
   const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
   await assert.rejects(() => searchTool.execute("id", { queries: ["a", "b", "c", "d", "e", "f"] }, undefined, undefined, { cwd, isProjectTrusted: () => true }), /Too many queries/);
-  await assert.rejects(() => searchTool.execute("id", { query: "a", numResults: 21 }, undefined, undefined, { cwd, isProjectTrusted: () => true }), /numResults/);
+  await assert.rejects(() => searchTool.execute("id", { query: "a", numResults: 0 }, undefined, undefined, { cwd, isProjectTrusted: () => true }), /numResults/);
+  await assert.rejects(() => searchTool.execute("id", { query: "a", numResults: 1.5 }, undefined, undefined, { cwd, isProjectTrusted: () => true }), /numResults/);
 });
 
 test("web_fetch rejects offset with multiple URLs", async () => {
@@ -231,7 +267,7 @@ test("web_fetch rejects invalid range params", async () => {
 });
 
 test("single-URL cache hit avoids provider refetch", async () => {
-  const config = { provider_search: "exa_mcp", provider_fetch: "markdown_new", apiKeys: {}, markdownNew: { method: "auto", retainImages: false } };
+  const config = { provider_search: "exa", provider_fetch: "markdown_new", apiKeys: {}, markdownNew: { method: "auto", retainImages: false } };
   let calls = 0;
   const oldFetch = globalThis.fetch;
   globalThis.fetch = async () => {
@@ -279,6 +315,17 @@ test("large search output preserves result URLs while fitting snippets", () => {
   assert.equal(parsed.queries.reduce((total, group) => total + group.results.length, 0), 100);
   assert.equal(parsed.queries[4].results[19].url, "https://example.com/4/19");
   assert((parsed.queries[0].results[0].snippet?.length ?? 0) < 1_000);
+});
+
+test("search resultCount reflects results retained by output bounding", () => {
+  const results = Array.from({ length: 100 }, (_, i) => ({ title: "t".repeat(1_000), url: `https://example.com/${i}`, content: "c".repeat(1_000) }));
+  const out = jsonToolResult({ provider: "test", queries: [{ query: "q", requestedResultLimit: 100, effectiveResultLimit: 100, contextCharacters: 100_000, resultCount: 100, results }] });
+  const group = JSON.parse(out.content[0].text).queries[0];
+  assert(group.results.length < results.length);
+  assert.equal(group.resultCount, group.results.length);
+  assert.equal(group.omittedResultCount, results.length - group.results.length);
+  assert.equal(group.contextCharacters, group.results.reduce((total, result) => total + (result.content?.length ?? 0), 0));
+  assert.equal(group.omittedContextCharacters, 100_000 - group.contextCharacters);
 });
 
 test("oversized fetch metadata is bounded without discarding page content", () => {

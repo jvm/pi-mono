@@ -70,11 +70,10 @@ Pi chooses `web_search` or `web_fetch` automatically when the request calls for 
 
 ## Providers
 
-Defaults: `provider_search = "exa_mcp"`, `provider_fetch = "exa_mcp"`.
+Defaults: `provider_search = "exa"`, `provider_fetch = "exa"`.
 
 | Provider | Search | Fetch | Key |
 |---|---:|---:|---|
-| `exa_mcp` | yes | yes | optional `EXA_API_KEY` |
 | `exa` | yes | yes | `EXA_API_KEY` |
 | `tinyfish` | yes | yes | `TINYFISH_API_KEY` |
 | `brave` | yes | no | `BRAVE_SEARCH_API_KEY` |
@@ -82,6 +81,18 @@ Defaults: `provider_search = "exa_mcp"`, `provider_fetch = "exa_mcp"`.
 | `markdown_new` | no | yes | none |
 
 Tool schemas are tailored to the configured providers at startup/reload, so only supported provider-specific fields are exposed. Restart/reload Pi after changing provider config.
+
+Provider-native efficiencies are used as follows:
+
+| Service | Efficient path |
+|---|---|
+| Exa API | Keep included highlights; request bounded text in the same search only when requested; batch `/contents` fetches with freshness controls. |
+| TinyFish | Paginate only as needed; use dedicated filters; batch only enough top-result fetches to fill requested context; pass TTL and intent. |
+| Brave | Return pre-extracted LLM Context in one search call with native URL, token, snippet, threshold, and Goggles controls. |
+| Firecrawl | Return search metadata by default; use scrape-on-search only when requested; pass cache/main-content options. |
+| markdown.new | Keep `method: auto` so native Markdown falls back to AI and browser rendering only as needed; keep images opt-in. |
+| Context7 | Support `fast` mode to skip reranking and reduce latency. |
+| Exa Code | Send the requested/dynamic context token target directly to Exa Code Context. |
 
 ## Configuration
 
@@ -92,8 +103,8 @@ Resolution order: defaults < environment variables < global config < trusted pro
 ```bash
 PI_OFFLINE=1        # disables install/update telemetry
 PI_TELEMETRY=0      # disables install/update telemetry
-PI_WEB_KIT_PROVIDER_SEARCH=exa_mcp|exa|tinyfish|brave|firecrawl
-PI_WEB_KIT_PROVIDER_FETCH=exa_mcp|exa|tinyfish|markdown_new|firecrawl
+PI_WEB_KIT_PROVIDER_SEARCH=exa|tinyfish|brave|firecrawl
+PI_WEB_KIT_PROVIDER_FETCH=exa|tinyfish|markdown_new|firecrawl
 EXA_API_KEY=...          # enables Exa provider and code_search
 CONTEXT7_API_KEY=...     # enables library_search and library_docs
 TINYFISH_API_KEY=...
@@ -148,9 +159,15 @@ Searches with the active search provider and returns compact results grouped by 
 |---|---|---|
 | `query` | string | Single search query. |
 | `queries` | string[] | Multiple related search queries. Max 5 after de-duplication. |
-| `numResults` | integer | Results per query. Range: 1-20. Default: 10. |
+| `numResults` | integer | Desired results per query. Default: 10. Values above the active provider's limit are capped rather than rejected. |
+| `contextTokens` | integer | Desired extracted context across the result set. Omitted native context uses an 8,192-token output budget; an explicit value can enable extraction. Any positive value; capped at 10,000. |
+| `purpose` | string | Optional task/use-case hint for providers that support separate intent. |
 
-Provider-specific parameters are exposed only for the configured provider, such as Exa date/domain filters, TinyFish `page`, Brave locale/freshness options, or Firecrawl scrape/search options.
+`numResults` controls source breadth. `contextTokens` controls grounding depth. The tool automatically keeps native/included Exa highlights and Brave LLM Context. Explicit `contextTokens` enables extra extraction for Exa, TinyFish, and Firecrawl; this can add provider calls or provider cost. Search results keep a compact `snippet` plus ranked `content` and `contentFormat`, with one shared context budget and the existing 50KB tool-output limit.
+
+Provider caps are Exa 100, Brave 50, and Firecrawl 100. TinyFish is paginated internally through its service maximum of page 10 and may make up to 11 search requests for one query. Search output reports requested, effective, returned, and omitted result/context counts. Brave `maxUrls` remains as a deprecated alias for `numResults`.
+
+Other provider-specific parameters are exposed only for the configured provider. These include Exa date/domain filters; TinyFish domain, date, geography, language, and publication filters; Brave locale, freshness, spellcheck, Goggles, and LLM Context controls; and Firecrawl scrape/search options.
 
 ### `web_fetch`
 
@@ -163,8 +180,9 @@ Fetches page content with the active fetch provider. Results are cached in memor
 | `offset` | integer | Character offset for cached/ranged reads. Single URL only. |
 | `limit` | integer | Maximum characters to return. Default: 30,000 for one URL, 8,000 for multiple URLs. |
 | `refresh` | boolean | Refetch even if cached. |
+| `maxAgeMs` | integer | Desired maximum local/provider-cached page age in milliseconds. `0` requests live content where supported. |
 
-Provider-specific parameters are exposed only for the configured provider, such as TinyFish `format`, markdown.new `method` / `retainImages`, or Firecrawl `format`, `waitFor`, `mobile`, `location`, and `maxAge`.
+Provider-specific parameters are exposed only for the configured provider. TinyFish supports `purpose`, `format`, links/images, selectors, per-URL timeout, and a seconds-based `ttl` alias. Exa supports the hours-based `maxAgeHours` alias. markdown.new supports `method` / `retainImages`. Firecrawl supports `format`, `waitFor`, `mobile`, structured `location`, and its existing `maxAge` alias. `refresh: true` also requests live content from Exa, TinyFish, and Firecrawl instead of only bypassing the local cache.
 
 ### `library_search`
 
@@ -210,7 +228,8 @@ Finds practical code examples, implementation context, setup snippets, migration
 | Max cached bytes | 20 MiB |
 | Max URLs per call | 10 |
 | Max queries per call | 5 |
-| Max `numResults` | 20 |
+| Provider `numResults` caps | Exa 100; Brave 50; Firecrawl 100 |
+| Search context budget | 10,000 tokens |
 | Max URL length | 2048 characters |
 
 Cache keys include the provider, canonical URL, fetch-affecting parameters, relevant provider defaults, and an opaque SHA-256 API-key/account scope. Internal cache keys are never returned in tool output. `refresh: true` bypasses and replaces the cached entry.
