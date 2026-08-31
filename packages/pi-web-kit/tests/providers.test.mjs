@@ -58,13 +58,16 @@ test("Brave uses POST for Goggles and caps its native query constraints", async 
     assert.equal(init.method, "POST");
     const body = JSON.parse(init.body);
     assert.deepEqual(body.goggles, ["one", "two"]);
+    assert.equal(body.maximum_number_of_urls, 3);
+    assert.equal(body.maximum_number_of_tokens, 1_024);
+    assert.equal(body.spellcheck, false);
     assert(body.q.length <= 400);
     assert(body.q.split(" ").length <= 50);
     return new Response(JSON.stringify({ grounding: { generic: [] }, sources: {} }), { status: 200, headers: { "content-type": "application/json" } });
   };
   try {
     const query = Array.from({ length: 80 }, (_, i) => `word${i}`).join(" ");
-    await new BraveProvider(cfg({ brave: "test-key" })).search({ query, goggles: ["one", "two"] });
+    await new BraveProvider(cfg({ brave: "test-key" })).search({ query, goggles: ["one", "two"], numResults: 3, contextTokens: 500, spellcheck: false });
   } finally {
     globalThis.fetch = oldFetch;
   }
@@ -107,6 +110,23 @@ test("TinyFish paginates without its ignored limit parameter and slices returned
     assert.deepEqual(pages, [0, 1]);
     assert.equal(result.results.length, 15);
     assert.equal(result.results[14].position, 15);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("TinyFish deduplicates canonical-equivalent result URLs", async () => {
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    results: [
+      { url: "https://example.test/a" },
+      { url: "https://example.test/a/#section" },
+      { url: "https://example.test/b" },
+    ],
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const result = await new TinyFishProvider(cfg({ tinyfish: "test-key" })).search({ query: "q", numResults: 2 });
+    assert.deepEqual(result.results.map((item) => item.url), ["https://example.test/a", "https://example.test/b"]);
   } finally {
     globalThis.fetch = oldFetch;
   }
@@ -189,8 +209,8 @@ test("TinyFish fetch uses cache, intent, selector options, and exact per-URL err
 test("TinyFish extracts only enough top results for the requested context budget", async () => {
   const oldFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
-    if (String(url).startsWith("https://api.search.tinyfish.ai")) {
-      return new Response(JSON.stringify({ results: Array.from({ length: 20 }, (_, i) => ({ title: `R${i}`, url: `https://e.test/${i}`, snippet: "s" })) }), { status: 200, headers: { "content-type": "application/json" } });
+    if (new URL(url).origin === "https://api.search.tinyfish.ai") {
+      return new Response(JSON.stringify({ results: Array.from({ length: 20 }, (_, i) => ({ title: `R${i}`, url: `https://e.test/${i}${i === 0 ? "#section" : ""}`, snippet: "s" })) }), { status: 200, headers: { "content-type": "application/json" } });
     }
     const body = JSON.parse(init.body);
     assert.equal(body.urls.length, 2);
@@ -200,6 +220,7 @@ test("TinyFish extracts only enough top results for the requested context budget
     const result = await new TinyFishProvider(cfg({ tinyfish: "test-key" })).search({ query: "q", numResults: 20, contextTokens: 1_024 });
     assert.equal(result.results.length, 20);
     assert.equal(result.results.filter((item) => item.content).length, 2);
+    assert.equal(result.results[0].content.length, 3_000);
   } finally {
     globalThis.fetch = oldFetch;
   }

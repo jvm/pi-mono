@@ -4,7 +4,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { fetchCache, type CachedPage } from "../src/cache.js";
 import { resolveConfig } from "../src/config.js";
-import { capSearchResultLimit, DEFAULT_FETCH_LIMIT, DEFAULT_NUM_RESULTS, DEFAULT_SEARCH_CONTEXT_TOKENS, MAX_LIMIT, MAX_NUM_RESULTS, MAX_OFFSET, MAX_QUERY_COUNT, MAX_SEARCH_CONTEXT_TOKENS, MAX_URL_COUNT, MULTI_FETCH_LIMIT, TINYFISH_MAX_PAGE } from "../src/limits.js";
+import { applySearchContextBudget, capSearchResultLimit, DEFAULT_FETCH_LIMIT, DEFAULT_NUM_RESULTS, DEFAULT_SEARCH_CONTEXT_TOKENS, MAX_LIMIT, MAX_NUM_RESULTS, MAX_OFFSET, MAX_QUERY_COUNT, MAX_SEARCH_CONTEXT_TOKENS, MAX_URL_COUNT, MULTI_FETCH_LIMIT, safePrefix, TINYFISH_MAX_PAGE } from "../src/limits.js";
 import { createCodeSearchProvider, createContext7Provider, createFetchProvider, createSearchProvider } from "../src/providers/index.js";
 import { mapFetchResults } from "../src/providers/fallback.js";
 import type { FetchProviderName, SearchProviderName, WebFetchResult } from "../src/types.js";
@@ -345,24 +345,6 @@ function normalizeQueries(params: Record<string, any>): string[] {
   return queries;
 }
 
-function applySearchContextBudget(results: Array<{ content?: string; [key: string]: unknown }>, maxCharacters: number) {
-  let remaining = maxCharacters;
-  let remainingContentResults = results.filter((result) => typeof result.content === "string").length;
-  let contextCharacters = 0;
-  let omittedContextCharacters = 0;
-  const bounded = results.map((result) => {
-    if (typeof result.content !== "string") return result;
-    const share = Math.max(0, Math.floor(remaining / remainingContentResults));
-    const content = safePrefix(result.content, share);
-    remaining -= content.length;
-    remainingContentResults--;
-    contextCharacters += content.length;
-    omittedContextCharacters += result.content.length - content.length;
-    return { ...result, content };
-  });
-  return { results: bounded, contextCharacters, omittedContextCharacters };
-}
-
 function normalizeUrls(params: Record<string, any>): string[] {
   return normalizeUrlInput({ url: params.url, urls: params.urls }, MAX_URL_COUNT);
 }
@@ -621,12 +603,6 @@ function fetchResultWithContentLimit(value: { provider?: string; results: any[] 
       };
     }),
   };
-}
-
-function safePrefix(value: string, maxChars: number): string {
-  let end = Math.min(value.length, maxChars);
-  if (end > 0 && /[\uD800-\uDBFF]/.test(value[end - 1])) end--;
-  return value.slice(0, end);
 }
 
 function limitStrings(value: unknown, maxChars: number): unknown {

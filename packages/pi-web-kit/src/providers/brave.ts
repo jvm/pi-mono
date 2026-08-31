@@ -7,28 +7,29 @@ export class BraveProvider implements SearchProvider {
   constructor(config: WebKitConfig) { this.key = requireKey(config, "brave"); }
 
   async search(input: SearchInput, signal?: AbortSignal) {
-    const url = new URL("https://api.search.brave.com/res/v1/llm/context");
-    url.searchParams.set("q", boundedQuery(input.query));
+    const params: Record<string, string | number | boolean | string[]> = { q: boundedQuery(input.query) };
     if (input.numResults) {
-      const count = String(input.numResults);
-      url.searchParams.set("count", count);
-      url.searchParams.set("maximum_number_of_urls", count);
+      params.count = input.numResults;
+      params.maximum_number_of_urls = input.numResults;
     }
-    if (input.contextTokens) url.searchParams.set("maximum_number_of_tokens", String(Math.max(1_024, Math.min(input.contextTokens, 32_768))));
-    if (typeof input.country === "string") url.searchParams.set("country", input.country);
-    if (typeof input.searchLang === "string") url.searchParams.set("search_lang", input.searchLang);
-    if (typeof input.safesearch === "string") url.searchParams.set("safesearch", input.safesearch);
-    if (typeof input.freshness === "string") url.searchParams.set("freshness", input.freshness);
-    if (typeof input.spellcheck === "boolean") url.searchParams.set("spellcheck", String(input.spellcheck));
-    if (typeof input.contextThresholdMode === "string") url.searchParams.set("context_threshold_mode", input.contextThresholdMode);
-    if (typeof input.maxSnippets === "number") url.searchParams.set("maximum_number_of_snippets", String(input.maxSnippets));
-    if (typeof input.maxTokensPerUrl === "number") url.searchParams.set("maximum_number_of_tokens_per_url", String(input.maxTokensPerUrl));
-    if (typeof input.maxSnippetsPerUrl === "number") url.searchParams.set("maximum_number_of_snippets_per_url", String(input.maxSnippetsPerUrl));
-    if (typeof input.goggles === "string") url.searchParams.set("goggles", input.goggles);
-    if (Array.isArray(input.goggles)) for (const goggle of input.goggles) if (typeof goggle === "string") url.searchParams.append("goggles", goggle);
+    if (input.contextTokens) params.maximum_number_of_tokens = Math.max(1_024, Math.min(input.contextTokens, 32_768));
+    if (typeof input.country === "string") params.country = input.country;
+    if (typeof input.searchLang === "string") params.search_lang = input.searchLang;
+    if (typeof input.safesearch === "string") params.safesearch = input.safesearch;
+    if (typeof input.freshness === "string") params.freshness = input.freshness;
+    if (typeof input.spellcheck === "boolean") params.spellcheck = input.spellcheck;
+    if (typeof input.contextThresholdMode === "string") params.context_threshold_mode = input.contextThresholdMode;
+    if (typeof input.maxSnippets === "number") params.maximum_number_of_snippets = input.maxSnippets;
+    if (typeof input.maxTokensPerUrl === "number") params.maximum_number_of_tokens_per_url = input.maxTokensPerUrl;
+    if (typeof input.maxSnippetsPerUrl === "number") params.maximum_number_of_snippets_per_url = input.maxSnippetsPerUrl;
+    if (typeof input.goggles === "string" || Array.isArray(input.goggles)) params.goggles = input.goggles;
+
+    const url = new URL("https://api.search.brave.com/res/v1/llm/context");
+    for (const [name, value] of Object.entries(params)) {
+      if (Array.isArray(value)) for (const item of value) url.searchParams.append(name, item);
+      else url.searchParams.set(name, String(value));
+    }
     const usePost = input.goggles != null || url.toString().length > 2_000;
-    const params: Record<string, unknown> = Object.fromEntries(url.searchParams);
-    if (Array.isArray(input.goggles)) params.goggles = input.goggles;
     const data = await requestJson<any>(usePost ? `${url.origin}${url.pathname}` : url.toString(), {
       method: usePost ? "POST" : undefined,
       headers: { "X-Subscription-Token": this.key, accept: "application/json", ...(usePost ? { "content-type": "application/json" } : {}) },

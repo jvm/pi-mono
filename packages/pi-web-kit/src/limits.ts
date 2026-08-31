@@ -27,3 +27,27 @@ export const FETCH_CONCURRENCY = 3;
 export function capSearchResultLimit(provider: SearchProviderName, requested: number): number {
   return Math.min(requested, SEARCH_RESULT_LIMITS[provider] ?? requested);
 }
+
+export function applySearchContextBudget(results: Array<{ content?: string; [key: string]: unknown }>, maxCharacters: number) {
+  let remaining = maxCharacters;
+  let remainingContentResults = results.filter((result) => typeof result.content === "string").length;
+  let contextCharacters = 0;
+  let omittedContextCharacters = 0;
+  const bounded = results.map((result) => {
+    if (typeof result.content !== "string") return result;
+    const share = Math.max(0, Math.floor(remaining / remainingContentResults));
+    const content = safePrefix(result.content, share);
+    remaining -= content.length;
+    remainingContentResults--;
+    contextCharacters += content.length;
+    omittedContextCharacters += result.content.length - content.length;
+    return { ...result, content };
+  });
+  return { results: bounded, contextCharacters, omittedContextCharacters };
+}
+
+export function safePrefix(value: string, maxChars: number): string {
+  let end = Math.min(value.length, maxChars);
+  if (end > 0 && /[\uD800-\uDBFF]/.test(value[end - 1])) end--;
+  return value.slice(0, end);
+}

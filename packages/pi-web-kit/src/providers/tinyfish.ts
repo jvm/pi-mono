@@ -1,7 +1,7 @@
 import { asSnippet, normalizeUrls, requestJson, withoutContent } from "../http.js";
 import { DEFAULT_NUM_RESULTS, MAX_URL_COUNT, TINYFISH_MAX_PAGE } from "../limits.js";
 import type { FetchInput, FetchProvider, SearchInput, SearchProvider, WebKitConfig, WebSearchResult } from "../types.js";
-import { urlsMatch } from "../urls.js";
+import { canonicalWebUrl, urlsMatch } from "../urls.js";
 import { requireKey } from "../config.js";
 
 export class TinyFishProvider implements SearchProvider, FetchProvider {
@@ -43,8 +43,9 @@ export class TinyFishProvider implements SearchProvider, FetchProvider {
       if (!Array.isArray(list) || list.length === 0) break;
       for (const r of list) {
         const resultUrl = r.url ?? r.link;
-        if (!resultUrl || seen.has(resultUrl)) continue;
-        seen.add(resultUrl);
+        const key = typeof resultUrl === "string" ? canonicalResultUrl(resultUrl) : undefined;
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
         results.push({
           title: r.title,
           url: resultUrl,
@@ -66,7 +67,7 @@ export class TinyFishProvider implements SearchProvider, FetchProvider {
         const batch = results.slice(i, i + batchSize);
         const fetched = await this.fetch({ urls: batch.map((item) => item.url), format: "markdown", purpose: input.purpose }, signal);
         for (const item of batch) {
-          const page = fetched.results.find((candidate) => candidate.url === item.url || candidate.metadata?.requestedUrl === item.url);
+          const page = fetched.results.find((candidate) => urlsMatch(candidate.url, item.url) || urlsMatch(candidate.metadata?.requestedUrl, item.url));
           if (page?.content) {
             item.content = page.content;
             item.contentFormat = "markdown";
@@ -151,4 +152,13 @@ function orderedNumbers(a: unknown, b: unknown): [number | undefined, number | u
 
 function stringifyContent(value: unknown): string | undefined {
   return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
+function canonicalResultUrl(value: string): string {
+  try {
+    const canonical = canonicalWebUrl(value);
+    return canonical.endsWith("/") ? canonical.slice(0, -1) : canonical;
+  } catch {
+    return value;
+  }
 }
