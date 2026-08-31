@@ -8,7 +8,7 @@ import { MarkdownNewProvider } from "../src/providers/markdown-new.ts";
 import { fetchWithCache } from "../extensions/index.ts";
 import { mapFetchResults } from "../src/providers/fallback.ts";
 
-const cfg = (apiKeys = {}) => ({ provider_search: "exa_mcp", provider_fetch: "exa_mcp", apiKeys, markdownNew: { method: "auto", retainImages: false } });
+const cfg = (apiKeys = {}) => ({ provider_search: "exa", provider_fetch: "exa", apiKeys, markdownNew: { method: "auto", retainImages: false } });
 
 test("FetchCache enforces TTL, LRU, max entries, and max bytes", () => {
   const ttl = new FetchCache({ maxEntries: 10, maxBytes: 10_000, ttlMs: 10 });

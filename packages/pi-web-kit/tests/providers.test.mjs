@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ExaMcpProvider } from "../src/providers/exa-mcp.ts";
 import { ExaProvider } from "../src/providers/exa.ts";
 import { TinyFishProvider } from "../src/providers/tinyfish.ts";
 import { BraveProvider } from "../src/providers/brave.ts";
@@ -12,33 +11,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const cfg = (apiKeys = {}) => ({ provider_search: "exa_mcp", provider_fetch: "exa_mcp", apiKeys, markdownNew: { method: "auto", retainImages: false } });
-
-test("Exa MCP stores mcp-session-id header and sends it on tools/call", async () => {
-  const calls = [];
-  const oldFetch = globalThis.fetch;
-  globalThis.fetch = async (_url, init) => {
-    calls.push(init);
-    const body = JSON.parse(init.body);
-    if (body.method === "initialize") {
-      return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {} }), { status: 200, headers: { "content-type": "application/json", "mcp-session-id": "session-123" } });
-    }
-    if (body.method === "notifications/initialized") return new Response("", { status: 202 });
-    if (body.method === "tools/call") {
-      assert.equal(init.headers["mcp-session-id"], "session-123");
-      return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { structuredContent: { results: [{ title: "T", url: "https://example.com", snippet: "S" }] } } }), { status: 200, headers: { "content-type": "application/json" } });
-    }
-    throw new Error(`unexpected ${body.method}`);
-  };
-  try {
-    const provider = new ExaMcpProvider(cfg());
-    const result = await provider.search({ query: "q" });
-    assert.equal(result.results[0].url, "https://example.com");
-    assert.equal(calls.length, 3);
-  } finally {
-    globalThis.fetch = oldFetch;
-  }
-});
+const cfg = (apiKeys = {}) => ({ provider_search: "exa", provider_fetch: "exa", apiKeys, markdownNew: { method: "auto", retainImages: false } });
 
 test("keyed providers fail clearly when keys are missing", () => {
   assert.throws(() => new ExaProvider(cfg()), /EXA_API_KEY/);
@@ -50,7 +23,6 @@ test("keyed providers fail clearly when keys are missing", () => {
 
 test("search result limits are capped by provider capability", () => {
   assert.equal(capSearchResultLimit("exa", 101), 100);
-  assert.equal(capSearchResultLimit("exa_mcp", 101), 100);
   assert.equal(capSearchResultLimit("brave", 51), 50);
   assert.equal(capSearchResultLimit("firecrawl", 101), 100);
   assert.equal(capSearchResultLimit("tinyfish", 101), 101);
@@ -247,21 +219,6 @@ test("Firecrawl only enables scrape-on-search for explicit expanded context", as
     assert.equal(bodies[0].scrapeOptions, undefined);
     assert.deepEqual(bodies[1].scrapeOptions, { formats: ["markdown"], onlyMainContent: true });
     assert.equal(expanded.results[0].content, "full content");
-  } finally {
-    globalThis.fetch = oldFetch;
-  }
-});
-
-test("Exa MCP rejects tool-level errors", async () => {
-  const oldFetch = globalThis.fetch;
-  globalThis.fetch = async (_url, init) => {
-    const body = JSON.parse(init.body);
-    if (body.method === "initialize") return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: {} }), { status: 200, headers: { "content-type": "application/json", "mcp-session-id": "s" } });
-    if (body.method === "notifications/initialized") return new Response("", { status: 202 });
-    return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { isError: true, content: [{ type: "text", text: "provider rejected request" }] } }), { status: 200, headers: { "content-type": "application/json" } });
-  };
-  try {
-    await assert.rejects(() => new ExaMcpProvider(cfg()).search({ query: "q" }), /provider rejected request/);
   } finally {
     globalThis.fetch = oldFetch;
   }

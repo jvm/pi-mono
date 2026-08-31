@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveConfig, requireKey, validateFetchProvider, validateSearchProvider } from "../src/config.ts";
 
-test("defaults use exa_mcp", () => {
+test("defaults use Exa", () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
   const cfg = resolveConfig({}, cwd, {});
-  assert.equal(cfg.provider_search, "exa_mcp");
-  assert.equal(cfg.provider_fetch, "exa_mcp");
+  assert.equal(cfg.provider_search, "exa");
+  assert.equal(cfg.provider_fetch, "exa");
 });
 
 test("config precedence defaults < env < file < flags", () => {

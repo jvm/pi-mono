@@ -1,5 +1,5 @@
-export type SearchProviderName = "exa_mcp" | "exa" | "tinyfish" | "brave" | "firecrawl";
-export type FetchProviderName = "exa_mcp" | "exa" | "tinyfish" | "markdown_new" | "firecrawl";
+export type SearchProviderName = "exa" | "tinyfish" | "brave" | "firecrawl";
+export type FetchProviderName = "exa" | "tinyfish" | "markdown_new" | "firecrawl";
 export type FetchFormat = "markdown" | "html" | "json";
 
 export interface WebKitConfig {

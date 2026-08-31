@@ -70,11 +70,10 @@ Pi chooses `web_search` or `web_fetch` automatically when the request calls for 
 
 ## Providers
 
-Defaults: `provider_search = "exa_mcp"`, `provider_fetch = "exa_mcp"`.
+Defaults: `provider_search = "exa"`, `provider_fetch = "exa"`.
 
 | Provider | Search | Fetch | Key |
 |---|---:|---:|---|
-| `exa_mcp` | yes | yes | optional `EXA_API_KEY` |
 | `exa` | yes | yes | `EXA_API_KEY` |
 | `tinyfish` | yes | yes | `TINYFISH_API_KEY` |
 | `brave` | yes | no | `BRAVE_SEARCH_API_KEY` |
@@ -87,7 +86,6 @@ Provider-native efficiencies are used as follows:
 
 | Service | Efficient path |
 |---|---|
-| Exa MCP | Keep search context; batch URL extraction only when requested; batch fetch URLs. |
 | Exa API | Keep included highlights; request bounded text in the same search only when requested; batch `/contents` fetches with freshness controls. |
 | TinyFish | Paginate only as needed; use dedicated filters; batch only enough top-result fetches to fill requested context; pass TTL and intent. |
 | Brave | Return pre-extracted LLM Context in one search call with native URL, token, snippet, threshold, and Goggles controls. |
@@ -105,8 +103,8 @@ Resolution order: defaults < environment variables < global config < trusted pro
 ```bash
 PI_OFFLINE=1        # disables install/update telemetry
 PI_TELEMETRY=0      # disables install/update telemetry
-PI_WEB_KIT_PROVIDER_SEARCH=exa_mcp|exa|tinyfish|brave|firecrawl
-PI_WEB_KIT_PROVIDER_FETCH=exa_mcp|exa|tinyfish|markdown_new|firecrawl
+PI_WEB_KIT_PROVIDER_SEARCH=exa|tinyfish|brave|firecrawl
+PI_WEB_KIT_PROVIDER_FETCH=exa|tinyfish|markdown_new|firecrawl
 EXA_API_KEY=...          # enables Exa provider and code_search
 CONTEXT7_API_KEY=...     # enables library_search and library_docs
 TINYFISH_API_KEY=...
@@ -165,9 +163,9 @@ Searches with the active search provider and returns compact results grouped by 
 | `contextTokens` | integer | Desired extracted context across the result set. Omitted native context uses an 8,192-token output budget; an explicit value can enable extraction. Any positive value; capped at 10,000. |
 | `purpose` | string | Optional task/use-case hint for providers that support separate intent. |
 
-`numResults` controls source breadth. `contextTokens` controls grounding depth. The tool automatically keeps native/included Exa highlights and Brave LLM Context. Explicit `contextTokens` enables extra extraction for Exa MCP, TinyFish, and Firecrawl; this can add provider calls or provider cost. Search results keep a compact `snippet` plus ranked `content` and `contentFormat`, with one shared context budget and the existing 50KB tool-output limit.
+`numResults` controls source breadth. `contextTokens` controls grounding depth. The tool automatically keeps native/included Exa highlights and Brave LLM Context. Explicit `contextTokens` enables extra extraction for Exa, TinyFish, and Firecrawl; this can add provider calls or provider cost. Search results keep a compact `snippet` plus ranked `content` and `contentFormat`, with one shared context budget and the existing 50KB tool-output limit.
 
-Provider caps are Exa/Exa MCP 100, Brave 50, and Firecrawl 100. TinyFish is paginated internally through its service maximum of page 10 and may make up to 11 search requests for one query. Search output reports requested, effective, returned, and omitted result/context counts. Brave `maxUrls` remains as a deprecated alias for `numResults`.
+Provider caps are Exa 100, Brave 50, and Firecrawl 100. TinyFish is paginated internally through its service maximum of page 10 and may make up to 11 search requests for one query. Search output reports requested, effective, returned, and omitted result/context counts. Brave `maxUrls` remains as a deprecated alias for `numResults`.
 
 Other provider-specific parameters are exposed only for the configured provider. These include Exa date/domain filters; TinyFish domain, date, geography, language, and publication filters; Brave locale, freshness, spellcheck, Goggles, and LLM Context controls; and Firecrawl scrape/search options.
 
@@ -230,7 +228,7 @@ Finds practical code examples, implementation context, setup snippets, migration
 | Max cached bytes | 20 MiB |
 | Max URLs per call | 10 |
 | Max queries per call | 5 |
-| Provider `numResults` caps | Exa/Exa MCP 100; Brave 50; Firecrawl 100 |
+| Provider `numResults` caps | Exa 100; Brave 50; Firecrawl 100 |
 | Search context budget | 10,000 tokens |
 | Max URL length | 2048 characters |
 

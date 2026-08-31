@@ -14,11 +14,11 @@ import { reportInstallTelemetry } from "../src/install-telemetry.js";
 export default function (pi: ExtensionAPI) {
   void reportInstallTelemetry();
   pi.registerFlag("web-provider-search", {
-    description: "Temporary pi-web-kit search provider override (exa_mcp, exa, tinyfish, brave, firecrawl)",
+    description: "Temporary pi-web-kit search provider override (exa, tinyfish, brave, firecrawl)",
     type: "string",
   });
   pi.registerFlag("web-provider-fetch", {
-    description: "Temporary pi-web-kit fetch provider override (exa_mcp, exa, tinyfish, markdown_new, firecrawl)",
+    description: "Temporary pi-web-kit fetch provider override (exa, tinyfish, markdown_new, firecrawl)",
     type: "string",
   });
 
@@ -669,7 +669,6 @@ function fetchConfigDefaults(provider: FetchProviderName, config?: any): Record<
 function providerScope(provider: FetchProviderName, config?: any): string {
   const keyMap: Partial<Record<FetchProviderName, string | undefined>> = {
     exa: config?.apiKeys?.exa,
-    exa_mcp: config?.apiKeys?.exa,
     tinyfish: config?.apiKeys?.tinyfish,
     firecrawl: config?.apiKeys?.firecrawl,
   };

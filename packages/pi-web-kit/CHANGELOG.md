@@ -23,6 +23,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - Send markdown.new's documented `retain_images` field and report its response metadata.
 - Match TinyFish fetch responses and per-URL errors by canonical URL instead of response position.
 
+### Removed
+
+- Remove the Exa MCP search/fetch surface and make the direct Exa API the default.
+
 ## [0.2.4] - 2026-07-28
 
 ### Changed

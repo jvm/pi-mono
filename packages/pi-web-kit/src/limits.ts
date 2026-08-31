@@ -8,7 +8,6 @@ export const DEFAULT_NUM_RESULTS = 10;
 export const DEFAULT_SEARCH_CONTEXT_TOKENS = 8_192;
 export const MAX_SEARCH_CONTEXT_TOKENS = 10_000;
 export const SEARCH_RESULT_LIMITS: Readonly<Record<SearchProviderName, number | undefined>> = {
-  exa_mcp: 100,
   exa: 100,
   brave: 50,
   firecrawl: 100,
