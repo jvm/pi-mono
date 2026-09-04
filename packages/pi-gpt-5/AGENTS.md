@@ -12,8 +12,9 @@ Root `AGENTS.md` applies.
   fields may be added or rewritten for them.
 - Beta features (multi-agent) and usage-increasing features (pro mode, PTC)
   default to off and require explicit per-session opt-in.
-- Codex-auth entitlement checks use the backend model catalog; plan-name
-  sniffing is forbidden.
+- Codex-auth pro-mode entitlement cannot be verified from the backend catalog
+  (no marker exists); the toggle warns instead of probing. Plan-name sniffing
+  is forbidden.
 - The extension must not read, log, or persist prompts, credentials, or
   provider response data.
 

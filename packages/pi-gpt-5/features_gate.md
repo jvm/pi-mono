@@ -110,8 +110,13 @@ Notes:
   header `OpenAI-Beta: responses_multi_agent=v1`. Adds `multi_agent_call`,
   `multi_agent_call_output`, `agent_message` items. Unsupported alongside:
   `/responses/compact`, `reasoning.summary`, `max_tool_calls`.
-- `detail:"original"` means no downscale to a patch budget. Translate to
-  `high` (Codex's default) for non-5.6 models.
+- `detail:"original"` means no downscale to a patch budget. Pinning `original`
+  on non-5.6 models sends `high` (Codex's default) instead. Note: the Codex
+  backend catalog advertises `supports_image_detail_original` for older models
+  too; the API-level guarantee (dimensions preserved with `auto`/`original`)
+  is documented for 5.6, so this gate stays conservative.
+- Pi's own provider hardcodes `detail:"auto"` on every image part; the
+  `imageDetail` pin rewrites those parts on the outgoing payload.
 - `phase` (`commentary` / `final_answer`) is documented for 5.5 and 5.4;
   preserve original values when replaying history manually. Pi currently drops
   it at parse time — closing that gap requires a provider patch (tracked in the
@@ -138,12 +143,18 @@ available.
 | Business | Sol, Terra, Luna | yes | yes | no | yes |
 | Enterprise | Sol, Terra, Luna | yes | yes | yes | yes |
 
-This table is orientation, not truth at runtime. Entitlement MUST come from the
-Codex backend per-account model catalog (`GET {backend}/models`, authenticated,
-ETag-cached — the mechanism Codex itself uses). A plan row can change without
-notice; a catalog row cannot lie. Gate pro mode on the catalog advertising it
-for the active model, and degrade on 4xx: clear the flag, notify once, retry
-without it.
+This table is orientation, not truth at runtime. The backend catalog
+(`GET {backend}/models`, authenticated, ETag-cached) carries per-model rows but
+— verified against the schema Codex itself consumes — has no pro-mode marker:
+`available_in_plans` is unconditional and `supported_reasoning_levels` lists
+no `pro` preset. Plan entitlement for `reasoning.mode` is therefore not
+discoverable from the catalog.
+
+Gating consequence: API-key sessions are always entitled (standard Responses
+API feature). Codex-auth sessions get the toggle with an explicit
+"cannot be verified" warning; if the plan rejects the request, the provider
+error surfaces in the transcript and the user toggles it off. Plan-name
+sniffing is forbidden.
 
 ## Gating rules (code contract)
 
@@ -153,9 +164,10 @@ without it.
   literals at call sites.
 - Effort requests: intersect the requested level with `features.efforts`;
   fall back one level down (`max` → `xhigh` → `high`) instead of erroring.
-- Pro mode toggle: requires `proMode` AND (API-key auth OR catalog probe).
-  Legacy pro slugs (`legacyProSlug`) surface pro capability as a model choice,
-  never by sending `reasoning.mode`.
+- Pro mode toggle: requires `proMode` AND API-key auth for a silent enable;
+  OAuth (Codex) sessions enable with an explicit unverified-entitlement
+  warning. Legacy pro slugs (`legacyProSlug`) surface pro capability as a
+  model choice, never by sending `reasoning.mode`.
 - Beta features (multi-agent): additionally require explicit user opt-in per
   session; never enable by default.
 - PTC tool opt-in: read-only, schema-documented tools only. Tools requiring

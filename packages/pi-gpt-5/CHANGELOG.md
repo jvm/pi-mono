@@ -8,9 +8,15 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Added
 
-- Initial scaffold: package contract, install telemetry, `/gpt5` feature report
-  command, and the `features_gate.md` gating reference mirrored by
-  `src/features.ts`.
+- Core pack: `before_provider_request` payload shaping for GPT-5.x models —
+  `reasoning.mode: "pro"`, `reasoning.context` pin, `text.verbosity` pin, and
+  image `detail` pin with `original` → `high` clamping off GPT-5.6.
+- `/gpt5` subcommands: `pro`, `context`, `verbosity`, `detail`, `status`;
+  session-local toggles with TUI status indicator and auth-kind-aware pro-mode
+  entitlement (`resolveProModeEntitlement`).
+- `features_gate.md`: per-model feature availability reference for OpenAI
+  GPT-5.x models, mirrored by `src/features.ts`, including the verified
+  catalog-schema note on pro-mode entitlement.
 
 ## [0.1.0] - 2026-09-04
 
