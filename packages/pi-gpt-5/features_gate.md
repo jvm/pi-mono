@@ -106,14 +106,33 @@ Notes:
 - PTC: opt eligible tools in with `allowed_callers`; handle `program`,
   program-issued `function_call`, and `program_output` items with `call_id`/
   `caller` linkage preserved on replay. ZDR-compatible, no container cost.
-- **PTC auth gate (live-probed 2026-09-04)**: the Codex backend
-  (`chatgpt.com/backend-api/codex/responses`) rejects the hosted tool with
-  `400: Unsupported tool type: programmatic_tool_calling`. PTC is reachable
-  only on `api.openai.com` with an API key. Additional blockers for an
-  extension-only implementation: pi's Responses parser drops `program` and
-  `program_output` items and reconstructs `function_call` field-by-field
-  (dropping `caller`), which breaks program resumption mid-loop. PTC requires
-  both an API-key session and an upstream pi parser patch before it can ship.
+- **PTC auth gate (live-probed 2026-09-04, four request variants)**: the
+  Codex backend (`chatgpt.com/backend-api/codex/responses`) rejects the hosted
+  tool with `400: Unsupported tool type: programmatic_tool_calling` —
+  verified with `OpenAI-Beta: responses=experimental` (pi) and `responses=v1`
+  (third-party contract), `originator: pi` and `codex_cli_rs`, with and
+  without `client_version`. Re-probe with the payload below when OpenAI ships
+  changes; a `200` here means the gate can flip to API-key-or-OAuth.
+  PTC remains reachable on `api.openai.com` with an API key (documented;
+  not verifiable from this machine — no API key configured).
+
+  Re-probe payload: `POST .../codex/responses` with `stream: true`,
+  `store: false`, tools `[{type:"function", name:"get_time", ...,
+  "allowed_callers":["programmatic"]}, {type:"programmatic_tool_calling"}]`.
+
+  Context: OpenAI's own subscriber client does not use hosted PTC. Codex CLI
+  never sends the tool on any transport; its catalog marks `gpt-5.6-sol`
+  `tool_mode: "code_mode_only"` and it implements orchestration as a
+  **client-side** V8 runtime (codex-rs `code-mode-*` crates). The only
+  community artifact proposing hosted PTC over the Codex OAuth endpoint is an
+  open feature request (NousResearch/hermes-agent #99827) that explicitly
+  warns not to assume backend support. No working report exists.
+
+  Additional blockers for an extension-only implementation remain: pi's
+  Responses parser drops `program` and `program_output` items and
+  reconstructs `function_call` field-by-field (dropping `caller`), which
+  breaks program resumption mid-loop. PTC requires both a route that accepts
+  the tool and an upstream pi parser patch before it can ship.
 - Multi-agent: `multi_agent.enabled` + `max_concurrent_subagents` (default 3),
   header `OpenAI-Beta: responses_multi_agent=v1`. Adds `multi_agent_call`,
   `multi_agent_call_output`, `agent_message` items. Unsupported alongside:
