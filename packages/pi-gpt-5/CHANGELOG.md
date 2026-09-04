@@ -8,6 +8,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Added
 
+- PTC availability gate (`resolvePtcAvailability`) with the live-probe verdict:
+  the Codex backend rejects `programmatic_tool_calling` (verified 2026-09-04);
+  PTC is reported as unavailable on non-API-key sessions, and `/gpt5` shows
+  the active blocker per session.
 - Core pack: `before_provider_request` payload shaping for GPT-5.x models —
   `reasoning.mode: "pro"`, `reasoning.context` pin, `text.verbosity` pin, and
   image `detail` pin with `original` → `high` clamping off GPT-5.6.

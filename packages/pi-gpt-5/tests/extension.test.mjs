@@ -10,6 +10,7 @@ process.env.PI_CODING_AGENT_DIR = await mkdtemp(join(tmpdir(), "pi-gpt-5-extensi
 const { default: piGpt5 } = await import("../extensions/index.ts");
 const { MODEL_FEATURES, featuresFor } = await import("../src/features.ts");
 const { DEFAULT_SETTINGS, applyCorePack, applyImageDetail } = await import("../src/core-pack.ts");
+const { resolvePtcAvailability } = await import("../src/entitlement.ts");
 const { resolveProModeEntitlement } = await import("../src/entitlement.ts");
 
 function makePi() {
@@ -97,6 +98,24 @@ test("gate table invariants hold", () => {
   }
   assert.equal(featuresFor("gpt-5.6"), featuresFor("gpt-5.6-sol"));
   assert.equal(featuresFor("gpt-4.1"), undefined);
+});
+
+test("PTC availability: backend gate verified by live probe", () => {
+  const apiModel = { id: "gpt-5.6-sol", baseUrl: "https://api.openai.com/v1" };
+  const ptcParserBlocked = resolvePtcAvailability({ isUsingOAuth: () => false }, apiModel);
+  assert.equal(ptcParserBlocked.available, false);
+  assert.equal(ptcParserBlocked.blockedOnParser, true);
+
+  const oauth = resolvePtcAvailability({ isUsingOAuth: () => true }, apiModel);
+  assert.match(oauth.reason, /API key/);
+
+  const backend = resolvePtcAvailability(
+    { isUsingOAuth: () => true },
+    { id: "gpt-5.6-sol", baseUrl: "https://chatgpt.com/backend-api/codex" },
+  );
+  assert.match(backend.reason, /official OpenAI API|Codex backend/i);
+
+  assert.equal(resolvePtcAvailability({ isUsingOAuth: () => false }, undefined).available, false);
 });
 
 test("entitlement allows api-key, warns on oauth, unknown registry warns", () => {

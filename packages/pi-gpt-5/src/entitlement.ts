@@ -9,6 +9,54 @@ export interface ProModeEntitlement {
   warning?: string;
 }
 
+export type PtcAvailability =
+  | { available: false; reason: string }
+  | { available: false; reason: string; blockedOnParser: true }
+  | { available: true };
+
+/**
+ * Programmatic Tool Calling availability for the active session.
+ *
+ * Live-probed 2026-09-04: the Codex backend rejects the hosted tool
+ * (`400: Unsupported tool type: programmatic_tool_calling`), so PTC needs an
+ * API-key session on api.openai.com. Even then it stays disabled until the
+ * upstream pi Responses parser preserves `program`/`program_output` items and
+ * the `caller` field (see features_gate.md) — flagged via `blockedOnParser`.
+ */
+export function resolvePtcAvailability(
+  modelRegistry: unknown,
+  model: (Model<any> & { baseUrl?: string }) | undefined,
+): PtcAvailability {
+  if (!model) return { available: false, reason: "No model selected." };
+  const baseUrl = typeof model.baseUrl === "string" ? model.baseUrl : "";
+  if (!baseUrl.includes("api.openai.com")) {
+    return {
+      available: false,
+      reason: "PTC is only supported on the official OpenAI API (api.openai.com); the Codex backend rejects it.",
+    };
+  }
+  const isUsingOAuth = isRecord(modelRegistry) ? modelRegistry.isUsingOAuth : undefined;
+  let oauth = false;
+  if (typeof isUsingOAuth === "function") {
+    try {
+      oauth = isUsingOAuth.call(modelRegistry, model);
+    } catch {
+      oauth = false;
+    }
+  }
+  if (oauth) {
+    return {
+      available: false,
+      reason: "PTC requires an OpenAI API key; ChatGPT/Codex subscription auth is rejected by the backend.",
+    };
+  }
+  return {
+    available: false,
+    reason: "PTC needs an upstream pi parser patch (program/caller preservation) before it can run safely.",
+    blockedOnParser: true,
+  };
+}
+
 /**
  * Decide whether pro mode may be requested for the active session.
  *

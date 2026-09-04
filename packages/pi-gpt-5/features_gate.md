@@ -79,9 +79,9 @@ Notes:
 
 | Model | Explicit prompt cache (`prompt_cache_options`) | PTC (`programmatic_tool_calling`) | Multi-agent beta | Image `detail:"original"` | `phase` on assistant messages | Grammar tools (apply_patch) | Additional tools / tool search | Strict schemas |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| gpt-5.6-sol | yes | yes | beta | yes | yes | yes | yes | yes |
-| gpt-5.6-terra | yes | yes | beta | yes | yes | yes | yes | yes |
-| gpt-5.6-luna | yes | yes | beta | yes | yes | yes | yes | yes |
+| gpt-5.6-sol | yes | api-key only | beta | yes | yes | yes | yes | yes |
+| gpt-5.6-terra | yes | api-key only | beta | yes | yes | yes | yes | yes |
+| gpt-5.6-luna | yes | api-key only | beta | yes | yes | yes | yes | yes |
 | gpt-5.5 | no | no | no | no | yes | yes | yes | yes |
 | gpt-5.5-pro | no | no | no | no | yes | yes | no | yes |
 | gpt-5.4 | no | no | no | no | yes | yes | yes | yes |
@@ -106,6 +106,14 @@ Notes:
 - PTC: opt eligible tools in with `allowed_callers`; handle `program`,
   program-issued `function_call`, and `program_output` items with `call_id`/
   `caller` linkage preserved on replay. ZDR-compatible, no container cost.
+- **PTC auth gate (live-probed 2026-09-04)**: the Codex backend
+  (`chatgpt.com/backend-api/codex/responses`) rejects the hosted tool with
+  `400: Unsupported tool type: programmatic_tool_calling`. PTC is reachable
+  only on `api.openai.com` with an API key. Additional blockers for an
+  extension-only implementation: pi's Responses parser drops `program` and
+  `program_output` items and reconstructs `function_call` field-by-field
+  (dropping `caller`), which breaks program resumption mid-loop. PTC requires
+  both an API-key session and an upstream pi parser patch before it can ship.
 - Multi-agent: `multi_agent.enabled` + `max_concurrent_subagents` (default 3),
   header `OpenAI-Beta: responses_multi_agent=v1`. Adds `multi_agent_call`,
   `multi_agent_call_output`, `agent_message` items. Unsupported alongside:

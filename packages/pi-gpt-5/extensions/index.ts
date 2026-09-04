@@ -9,7 +9,7 @@ import {
   type ReasoningContextPin,
   type VerbosityPin,
 } from "../src/core-pack.js";
-import { resolveProModeEntitlement } from "../src/entitlement.js";
+import { resolveProModeEntitlement, resolvePtcAvailability } from "../src/entitlement.js";
 
 const STATUS_KEY = "pi-gpt-5";
 
@@ -89,7 +89,9 @@ export default function piGpt5(pi: ExtensionAPI): void {
       lines.push(`  verbosity: ${features.verbosity ? "yes" : "no"} (pin: ${settings.verbosity})`);
       lines.push(`  originalImageDetail: ${features.originalImageDetail ? "yes" : "no"} (pin: ${settings.imageDetail})`);
       lines.push(`  efforts: ${features.efforts.join(" ")}`);
-      lines.push(`  PTC / multi-agent: ${features.programmaticToolCalling ? "gated, planned" : "no"} / ${features.multiAgent ? "gated, planned" : "no"}`);
+      const ptc = resolvePtcAvailability(ctx.modelRegistry, ctx.model);
+      lines.push(`  PTC: ${ptc.available ? "available" : `unavailable — ${ptc.reason}`}`);
+      lines.push(`  multi-agent beta: ${features.multiAgent ? "gated, planned" : "no"}`);
     }
     if (ctx.hasUI) ctx.ui.notify(lines.join("\n"), "info");
     else console.log(lines.join("\n"));
