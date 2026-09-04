@@ -23,6 +23,7 @@ Each package installs independently. Pick the capability you need, then follow i
 | Use supported provider fast modes on demand | [pi-fast](./packages/pi-fast) | Session-local Fast toggles for provider/model pairs that advertise faster processing. |
 | Give grammar-capable Codex models their native patch tool | [pi-codex-tools](./packages/pi-codex-tools) | Raw `apply_patch` grammar tooling with safe local mutation and model-aware activation. |
 | Use Codex provider-side compaction | [pi-codex-compaction](./packages/pi-codex-compaction) | RemoteCompactionV2 checkpoints for supported OpenAI Codex sessions. |
+| Unlock GPT-5.x reasoning, caching, and hosted-execution features | [pi-gpt-5](./packages/pi-gpt-5) | Model-gated pro mode, persisted reasoning, explicit caching, and PTC with subscription-aware entitlement. |
 
 ### Research and create
 

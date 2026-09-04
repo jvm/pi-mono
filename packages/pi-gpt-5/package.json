@@ -1,0 +1,72 @@
+{
+  "name": "pi-gpt-5",
+  "version": "0.1.0",
+  "description": "First-class GPT-5.x feature support in Pi: pro mode, persisted reasoning, explicit caching, PTC, and model-aware feature gating.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Jose Mocito",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jvm/pi-mono.git",
+    "directory": "packages/pi-gpt-5"
+  },
+  "bugs": {
+    "url": "https://github.com/jvm/pi-mono/issues"
+  },
+  "homepage": "https://github.com/jvm/pi-mono/tree/main/packages/pi-gpt-5#readme",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "openai",
+    "gpt-5",
+    "gpt-5.6",
+    "reasoning",
+    "feature-gating"
+  ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "files": [
+    "index.ts",
+    "extensions",
+    "src",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.mjs",
+    "pack:dry-run": "npm pack --dry-run"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.1",
+    "@earendil-works/pi-tui": "^0.84.1",
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.5",
+    "typescript": "^7.0.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "dependencies": {
+    "@mocito/install-telemetry": "0.1.1"
+  }
+}
