@@ -66,11 +66,14 @@ Notes:
 - `reasoning.context: "all_turns"` is documented as model-dependent ("only
   supported models accept this value"). Gate it to 5.6 until OpenAI documents
   wider support. The response's `reasoning.context` field echoes the effective
-  mode; log it once per session when debugging.
+  mode; log it once per session when debugging. Verified accepted (HTTP 200)
+  on the Codex backend with `gpt-5.6-luna`, 2026-09-04.
 - `text.verbosity` values are low/medium/high. Defaults in parentheses come
   from the Codex backend catalog (the only per-model source OpenAI publishes).
   gpt-5/5-mini/5-nano are marked "unverified": Pi sends `low` there today
-  without errors, but no catalog row confirms support.
+  without errors, but no catalog row confirms support. Non-default values
+  (high) verified accepted (HTTP 200) on the Codex backend with
+  `gpt-5.6-luna`, 2026-09-04.
 - With `store: false`, encrypted reasoning items arrive by default now; the
   explicit `include: ["reasoning.encrypted_content"]` Pi sends is accepted but
   no longer required.
