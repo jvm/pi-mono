@@ -79,9 +79,9 @@ Notes:
 
 | Model | Explicit prompt cache (`prompt_cache_options`) | PTC (`programmatic_tool_calling`) | Multi-agent beta | Image `detail:"original"` | `phase` on assistant messages | Grammar tools (apply_patch) | Additional tools / tool search | Strict schemas |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| gpt-5.6-sol | yes | api-key only | beta | yes | yes | yes | yes | yes |
-| gpt-5.6-terra | yes | api-key only | beta | yes | yes | yes | yes | yes |
-| gpt-5.6-luna | yes | api-key only | beta | yes | yes | yes | yes | yes |
+| gpt-5.6-sol | yes | api-key only | beta, api-key only | yes | yes | yes | yes | yes |
+| gpt-5.6-terra | yes | api-key only | beta, api-key only | yes | yes | yes | yes | yes |
+| gpt-5.6-luna | yes | api-key only | beta, api-key only | yes | yes | yes | yes | yes |
 | gpt-5.5 | no | no | no | no | yes | yes | yes | yes |
 | gpt-5.5-pro | no | no | no | no | yes | yes | no | yes |
 | gpt-5.4 | no | no | no | no | yes | yes | yes | yes |
@@ -137,6 +137,12 @@ Notes:
   header `OpenAI-Beta: responses_multi_agent=v1`. Adds `multi_agent_call`,
   `multi_agent_call_output`, `agent_message` items. Unsupported alongside:
   `/responses/compact`, `reasoning.summary`, `max_tool_calls`.
+  **Live-probed 2026-09-04**: the Codex backend rejects the parameter
+  (`400: Unsupported parameter: multi_agent`, with or without the beta
+  header) — same allowlist behavior as PTC. Hosted multi-agent is
+  API-key-only today; the subscriber equivalent is Codex's client-side
+  subagent orchestration, which is model-agnostic and out of scope for this
+  package.
 - `detail:"original"` means no downscale to a patch budget. Pinning `original`
   on non-5.6 models sends `high` (Codex's default) instead. Note: the Codex
   backend catalog advertises `supports_image_detail_original` for older models
@@ -184,6 +190,10 @@ error surfaces in the transcript and the user toggles it off. Plan-name
 sniffing is forbidden.
 
 ## Gating rules (code contract)
+
+- Out of scope, by design: generic client-side code orchestration (Codex's
+  "code mode"). It is model-agnostic, so it belongs in a dedicated extension,
+  not here. Only hosted, GPT-5-specific features are gated in this package.
 
 - Model resolution: apply the `gpt-5.6` → `gpt-5.6-sol` alias before lookup.
 - Unknown model id (not in `src/features.ts`): stay passive. Never guess.
