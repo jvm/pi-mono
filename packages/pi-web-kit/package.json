@@ -58,12 +58,12 @@
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.84.1",
-    "@earendil-works/pi-coding-agent": "^0.84.1",
-    "@earendil-works/pi-tui": "^0.84.1",
-    "@types/node": "^26.2.0",
-    "tsx": "^4.23.5",
-    "typebox": "^1.3.10",
+    "@earendil-works/pi-ai": "^0.84.4",
+    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@earendil-works/pi-tui": "^0.84.4",
+    "@types/node": "^26.4.0",
+    "tsx": "^4.23.13",
+    "typebox": "^1.3.23",
     "typescript": "^7.0.2"
   },
   "publishConfig": {
