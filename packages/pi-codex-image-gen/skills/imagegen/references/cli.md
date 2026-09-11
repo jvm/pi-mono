@@ -73,7 +73,7 @@ python "$IMAGE_GEN" edit \
 
 `gpt-image-2` is the default model for new CLI fallback work.
 
-For explicit Images 2.5 requests, use `--model gpt-image-2.5-flare` or `--model gpt-image-2.5-sunburst`. Their `2026-09-08` snapshots are also supported. Both accept `--quality xhigh` and `--quality max`. Use `--size auto` or standard sizes; extended 2.5 resolution rules and input-fidelity controls are not verified. These options do not apply to the Pi tool.
+For explicit Images 2.5 requests, use `--model gpt-image-2.5-flare` or `--model gpt-image-2.5-sunburst`. Their `2026-09-08` snapshots are also supported. Both accept `--quality xhigh` and `--quality max`, and the flexible size constraints below, including `1536x864`. Sizes above `2560x1440` are experimental. Leave 2.5 `--input-fidelity` unset; support is not verified. These options do not apply to the Pi tool.
 
 - Use `--quality low` for fast drafts, thumbnails, and quick iterations.
 - Use `--quality medium`, `--quality high`, or `--quality auto` for final assets, dense text, diagrams, identity-sensitive edits, and high-resolution outputs.
@@ -231,7 +231,7 @@ Notes:
 - For many requested deliverable assets, provide one prompt/job per distinct asset and use semantic filenames when possible.
 
 ## CLI notes
-- Supported sizes depend on the model. `gpt-image-2` supports flexible constrained sizes; older GPT Image models support `1024x1024`, `1536x1024`, `1024x1536`, or `auto`.
+- Supported sizes depend on the model. GPT Image 2 and 2.5 (including the documented snapshots) support flexible constrained sizes; older GPT Image models support `1024x1024`, `1536x1024`, `1024x1536`, or `auto`.
 - Native transparent CLI outputs require `output_format` to be `png` or `webp`. GPT Image 2 support is in preview.
 - `--prompt-file`, `--output-compression`, `--moderation`, `--max-attempts`, `--fail-fast`, `--force`, and `--no-augment` are supported.
 - This CLI is intended for GPT Image models. Do not assume older non-GPT image-model behavior applies here.

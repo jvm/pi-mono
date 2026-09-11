@@ -26,6 +26,8 @@ Within CLI fallback, the CLI exposes three subcommands:
 
 Rules:
 - Use the Pi `codex_generate_image` tool by default for new image generation requests.
+- The tool's `model` parameter selects a Codex routing model, not Flare or Sunburst. Do not claim a specific served image model unless the response reports it. Read `details.reportedImage` for backend-reported output settings, then inspect the actual image; prompt requests for quality, dimensions, or transparency are not guarantees.
+- Do not automatically repeat quota, connection, timeout, or incomplete-stream failures. The remote generation may already have consumed quota.
 - Use `referencedImagePaths` for edits when every target has a local path. Use `numLastImagesToInclude` only when a target is available solely in recent conversation history. Never provide both selectors. Masks and advanced CLI-only controls still require confirmed CLI fallback.
 - Do not switch to CLI fallback for ordinary generation quality, size, or output file-path control.
 - If the user explicitly asks for a transparent image/background, stay on Pi `codex_generate_image` first: prompt for a flat removable chroma-key background, then remove it locally with the installed helper at `scripts/remove_chroma_key.py`.
@@ -39,7 +41,7 @@ Rules:
 Pi tool save-path policy:
 - In Pi tool mode, generated images are saved under Pi's agent directory by default: `<pi-agent-dir>/generated-images/<pi-session-id>/<image-call-id>.*`. The default Pi agent directory is `~/.pi/agent`, but it can be overridden with `PI_CODING_AGENT_DIR`; use Pi's configured agent directory, not a hardcoded home path.
 - Do not describe or rely on OS temp as the default Pi tool destination.
-- Do not describe or rely on a destination-path argument (if any) on the Pi `codex_generate_image` tool. If a specific location is needed, generate first and then copy the selected output from `<pi-agent-dir>/generated-images/<pi-session-id>/<image-call-id>.*`.
+- Use the tool's `save` and `saveDir` controls to choose a save directory. Custom mode appends a session directory; it does not accept an exact output filename. If an exact asset path is needed, copy the generated image there and leave the original in place.
 - Save-path precedence in Pi tool mode:
   1. If the user names a destination, copy the selected output there and leave the original in place.
   2. If the image is meant for the current project, copy the final selected image into the workspace before finishing and leave the original in place.
@@ -291,14 +293,14 @@ Asset-type templates (website assets, game assets, wireframes, logo) are consoli
 
 The fallback CLI defaults to `gpt-image-2`.
 
-- Keep `gpt-image-2` as the CLI default. For explicit 2.5 requests, use `gpt-image-2.5-flare` for fast generation or `gpt-image-2.5-sunburst` for editing precision. Both also accept `xhigh` and `max` quality and their `2026-09-08` snapshots. Use `size auto` or standard sizes; extended 2.5 resolution rules are not verified.
+- Keep `gpt-image-2` as the CLI default. For explicit 2.5 requests, use `gpt-image-2.5-flare` for fast generation or `gpt-image-2.5-sunburst` for editing precision. Both also accept `xhigh` and `max` quality and their `2026-09-08` snapshots. Both support the flexible size constraints below; sizes above `2560x1440` are experimental. Leave 2.5 `input_fidelity` unset; support for that control is not verified.
 - Native transparency is available in preview with CLI `gpt-image-2 --background transparent --output-format png` (or `webp`). Ask before switching from Pi to this separately billed API path.
 - `gpt-image-2` always uses high fidelity for image inputs; do not set `input_fidelity` with this model.
 - `gpt-image-2` supports `quality` values `low`, `medium`, `high`, and `auto`.
 - Use `quality low` for fast drafts, thumbnails, and quick iterations. Use `medium`, `high`, or `auto` for final assets, dense text, diagrams, identity-sensitive edits, or high-resolution outputs.
 - Square images are typically fastest to generate. Use `1024x1024` for fast square drafts.
 - If the user asks for 4K-style output, use `3840x2160` for landscape or `2160x3840` for portrait.
-- `gpt-image-2` size may be `auto` or `WIDTHxHEIGHT` if all constraints hold: max edge `<= 3840px`, both edges multiples of `16px`, long-to-short ratio `<= 3:1`, total pixels between `655,360` and `8,294,400`.
+- GPT Image 2 and 2.5 API size may be `auto` or `WIDTHxHEIGHT` if all constraints hold: max edge `<= 3840px`, both edges multiples of `16px`, long-to-short ratio `<= 3:1`, total pixels between `655,360` and `8,294,400`.
 
 Popular `gpt-image-2` sizes:
 - `1024x1024` square

@@ -12,8 +12,8 @@ These parameters describe the Image API and bundled CLI fallback surface. Do not
 
 | Model | Quality | Input fidelity | Resolutions | Recommended use |
 | --- | --- | --- | --- | --- |
-| `gpt-image-2.5-flare` | `low`, `medium`, `high`, `xhigh`, `max`, `auto` | Leave unset; not verified | Use `auto` or standard sizes; extended rules not verified | Optional fast generation |
-| `gpt-image-2.5-sunburst` | `low`, `medium`, `high`, `xhigh`, `max`, `auto` | Leave unset; not verified | Use `auto` or standard sizes; extended rules not verified | Optional precision editing |
+| `gpt-image-2.5-flare` | `low`, `medium`, `high`, `xhigh`, `max`, `auto` | Leave unset; not verified | `auto` or flexible sizes below | Optional fast generation |
+| `gpt-image-2.5-sunburst` | `low`, `medium`, `high`, `xhigh`, `max`, `auto` | Leave unset; not verified | `auto` or flexible sizes below | Optional precision editing |
 | `gpt-image-2` | `low`, `medium`, `high`, `auto` | Always high fidelity for image inputs; do not set `input_fidelity` | `auto` or flexible sizes that satisfy the constraints below | Default for new CLI/API workflows: high-quality generation and editing, text-heavy images, photorealism, compositing, identity-sensitive edits, and workflows where fewer retries matter |
 | `gpt-image-1.5` | `low`, `medium`, `high`, `auto` | `low`, `high` | `1024x1024`, `1024x1536`, `1536x1024`, `auto` | True transparent-background fallback and backward-compatible workflows |
 | `gpt-image-1` | `low`, `medium`, `high`, `auto` | `low`, `high` | `1024x1024`, `1024x1536`, `1536x1024`, `auto` | Legacy compatibility |
@@ -21,16 +21,18 @@ These parameters describe the Image API and bundled CLI fallback surface. Do not
 
 The CLI also recognizes the `2026-09-08` snapshots of both 2.5 models for extended quality settings. Defaults remain unchanged.
 
-Sources: [Flare](https://developers.openai.com/api/docs/models/gpt-image-2.5-flare), [Sunburst](https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst), and [image tool options](https://developers.openai.com/api/docs/guides/tools-image-generation).
+Sources: [Flare](https://developers.openai.com/api/docs/models/gpt-image-2.5-flare), [Sunburst](https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst), [image generation guide](https://developers.openai.com/api/docs/guides/image-generation.md), and [image tool options](https://developers.openai.com/api/docs/guides/tools-image-generation).
 
-## gpt-image-2 sizes
+## Flexible sizes: GPT Image 2 and 2.5
 
-`gpt-image-2` accepts `auto` or any `WIDTHxHEIGHT` size that satisfies all constraints:
+GPT Image 2 and both 2.5 models accept `auto` or any `WIDTHxHEIGHT` size that satisfies all constraints. The CLI also recognizes their documented dated snapshots.
 
 - Maximum edge length must be less than or equal to `3840px`.
 - Both edges must be multiples of `16px`.
 - Long edge to short edge ratio must not exceed `3:1`.
 - Total pixels must be at least `655,360` and no more than `8,294,400`.
+
+For 2.5, resolutions above `2560x1440` are experimental.
 
 Popular sizes:
 
@@ -55,7 +57,7 @@ Square images are typically fastest to generate. For 4K-style output, use `3840x
 - `prompt`: text prompt
 - `model`: image model
 - `n`: number of images (1-10)
-- `size`: `auto` by default for `gpt-image-2`; flexible `WIDTHxHEIGHT` sizes are allowed only for `gpt-image-2`; older GPT Image models use `1024x1024`, `1536x1024`, `1024x1536`, or `auto`
+- `size`: `auto` by default; GPT Image 2 and 2.5 accept flexible `WIDTHxHEIGHT` sizes under the constraints above; older models use `1024x1024`, `1536x1024`, `1024x1536`, or `auto`
 - `quality`: `low`, `medium`, `high`, or `auto`; the documented 2.5 models also accept `xhigh` and `max`
 - `background`: output transparency behavior (`transparent`, `opaque`, or `auto`) for generated output; this is not the same thing as the prompt's visual scene/backdrop
 - `output_format`: `png` (default), `jpeg`, `webp`
@@ -75,6 +77,8 @@ Model-specific note for `input_fidelity`:
 ## Transparent backgrounds
 
 `gpt-image-2` supports `background=transparent` in preview with PNG or WebP. The Pi tool has no background parameter, so its default path remains chroma-key generation followed by local alpha extraction.
+
+Both 2.5 API models also document native transparency with PNG or WebP. This public API capability does not establish that subscription parameters are honored.
 
 Use CLI `gpt-image-2 --background transparent --output-format png` (or `webp`) only after the user chooses the API path. Explain that it requires an API key and separate billing. Do not silently switch to an older model if preview transparency fails.
 

@@ -10,6 +10,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 - Report backend image metadata, generation stages, byte counts, and elapsed time without guessing the served image model.
 - Support Flare and Sunburst Images 2.5 API model IDs and their September 8 snapshots with `xhigh` and `max` CLI quality settings. Keep existing defaults.
+- Validate documented flexible dimensions for both 2.5 models and the GPT Image 2 dated snapshot in CLI generation, editing, and batch workflows.
 
 ### Changed
 

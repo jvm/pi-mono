@@ -59,11 +59,13 @@ The tool reports generation stages and the backend's returned size, quality, bac
 
 ### Images 2.5 and API fallback
 
-The optional `skills/imagegen/scripts/image_gen.py` API CLI accepts `--model gpt-image-2.5-flare` or `--model gpt-image-2.5-sunburst`, including their `2026-09-08` snapshots. Both accept `--quality xhigh` and `--quality max` in addition to the existing quality settings. The CLI default remains `gpt-image-2`. For 2.5, use `--size auto` or the existing standard sizes; extended resolution rules are not yet verified.
+The optional `skills/imagegen/scripts/image_gen.py` API CLI accepts `--model gpt-image-2.5-flare` or `--model gpt-image-2.5-sunburst`, including their `2026-09-08` snapshots. Both accept `--quality xhigh` and `--quality max` in addition to the existing quality settings. The CLI default remains `gpt-image-2`. Both 2.5 models support `--size auto` and custom dimensions such as `1536x864`, under the [documented size constraints](skills/imagegen/references/image-api.md#flexible-sizes-gpt-image-2-and-25). Resolutions above `2560x1440` are experimental.
 
 GPT Image 2 now supports native transparency in preview: use `--model gpt-image-2 --background transparent --output-format png` (or `webp`) in confirmed CLI mode. This uses `OPENAI_API_KEY` and separate API billing. The Pi tool still uses chroma-key removal because it has no background parameter.
 
 Public API model selection does not establish support for the same options on the private Codex backend. The extension does not expose Flare/Sunburst selection or claim that your account has received the Images 2.5 rollout.
+
+In subscription tests on September 11, 2026, the direct endpoint accepted Flare, Sunburst, and an invalid model name without reporting a served model. It also returned different size, quality, and background values than requested. The Responses route generated an image successfully. These account-specific results do not justify a guaranteed subscription model selector. See [the investigation and test procedure](CONTRIBUTING.md#subscription-capability-check).
 
 ## Authentication
 

@@ -118,7 +118,7 @@ def _parse_size(size: str) -> Optional[Tuple[int, int]]:
     return int(match.group(1)), int(match.group(2))
 
 
-def _validate_gpt_image_2_size(size: str) -> None:
+def _validate_flexible_size(size: str, model: str) -> None:
     if size == "auto":
         return
 
@@ -132,26 +132,30 @@ def _validate_gpt_image_2_size(size: str) -> None:
     total_pixels = width * height
 
     if max_edge > GPT_IMAGE_2_MAX_EDGE:
-        _die("gpt-image-2 size maximum edge length must be less than or equal to 3840px.")
+        _die(f"{model} size maximum edge length must be less than or equal to 3840px.")
     if width % 16 != 0 or height % 16 != 0:
-        _die("gpt-image-2 size width and height must be multiples of 16px.")
+        _die(f"{model} size width and height must be multiples of 16px.")
     if max_edge / min_edge > GPT_IMAGE_2_MAX_RATIO:
-        _die("gpt-image-2 size long edge to short edge ratio must not exceed 3:1.")
+        _die(f"{model} size long edge to short edge ratio must not exceed 3:1.")
     if total_pixels < GPT_IMAGE_2_MIN_PIXELS or total_pixels > GPT_IMAGE_2_MAX_PIXELS:
         _die(
-            "gpt-image-2 size total pixels must be at least 655,360 and no more than 8,294,400."
+            f"{model} size total pixels must be at least 655,360 and no more than 8,294,400."
         )
 
 
 def _validate_size(size: str, model: str) -> None:
-    if model == GPT_IMAGE_2_MODEL:
-        _validate_gpt_image_2_size(size)
+    if _is_gpt_image_2(model) or _is_gpt_image_2_5(model):
+        _validate_flexible_size(size, model)
         return
 
     if size not in ALLOWED_LEGACY_SIZES:
         _die(
             "size must be one of 1024x1024, 1536x1024, 1024x1536, or auto for this GPT Image model."
         )
+
+
+def _is_gpt_image_2(model: str) -> bool:
+    return model in {GPT_IMAGE_2_MODEL, "gpt-image-2-2026-04-21"}
 
 
 def _is_gpt_image_2_5(model: str) -> bool:
@@ -197,7 +201,7 @@ def _validate_model_specific_options(
     background: Optional[str],
     input_fidelity: Optional[str] = None,
 ) -> None:
-    if model != GPT_IMAGE_2_MODEL:
+    if not _is_gpt_image_2(model):
         return
     if input_fidelity is not None:
         _die(
