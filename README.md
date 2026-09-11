@@ -23,6 +23,7 @@ Each package installs independently. Pick the capability you need, then follow i
 | Use supported provider fast modes on demand | [pi-fast](./packages/pi-fast) | Session-local Fast toggles for provider/model pairs that advertise faster processing. |
 | Give grammar-capable Codex models their native patch tool | [pi-codex-tools](./packages/pi-codex-tools) | Raw `apply_patch` grammar tooling with safe local mutation and model-aware activation. |
 | Use Codex provider-side compaction | [pi-codex-compaction](./packages/pi-codex-compaction) | RemoteCompactionV2 checkpoints for supported OpenAI Codex sessions. |
+| Change Codex thinking effort without changing the cached prefix | [pi-openai-reasoning](./packages/pi-openai-reasoning) | Branch-aware reasoning updates using Pi's existing thinking controls. |
 
 ### Research and create
 

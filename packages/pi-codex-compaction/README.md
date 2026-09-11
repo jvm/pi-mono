@@ -49,6 +49,9 @@ With `pi-fast` installed, direct compaction requests use the current Fast toggle
 With `pi-codex-tools` installed, `apply_patch` keeps its raw grammar definition,
 custom-tool calls, and custom-tool results during compaction. Neither package is
 required. No package reads a private Pi tool registry.
+With `pi-openai-reasoning` installed, verified Astra requests keep the original
+request effort and receive the current effort as a configuration update.
+Failed compaction does not change saved reasoning state.
 
 Pi 0.85.1 does not expose grammar metadata in `getAllTools()`. Two synchronous,
 versioned `pi.events` contracts let cooperating extensions supply it:

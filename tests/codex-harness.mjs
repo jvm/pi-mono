@@ -51,7 +51,7 @@ export async function codexHarness(factories, options = {}) {
   await credentials.modify("openai-codex", async () => ({
     type: "oauth", access: testToken, refresh: "unused-fixture", expires: Date.now() + 3_600_000,
   }));
-  const modelRuntime = await ModelRuntime.create({
+  const modelRuntime = options.modelRuntime ?? await ModelRuntime.create({
     credentials, modelsPath: null, modelsStorePath: join(dir, "models-store.json"),
   });
   const model = modelRuntime.getModel("openai-codex", "gpt-6-astra");
