@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-09-11
+
 ### Added
 
 - Report backend image metadata, generation stages, byte counts, and elapsed time without guessing the served image model.
