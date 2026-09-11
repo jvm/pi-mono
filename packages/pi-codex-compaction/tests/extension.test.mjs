@@ -113,6 +113,10 @@ test("resolves only HTTPS Codex Responses endpoints", () => {
   assert.throws(() => resolveCodexResponsesUrl("http://localhost:1234"), /HTTPS/);
   assert.throws(() => resolveCodexResponsesUrl("https://example.com/backend-api"), /trusted Codex origin/);
   assert.throws(() => resolveCodexResponsesUrl("https://user:pass@chatgpt.com/backend-api"), /credentials/);
+  for (const url of [
+    "https://chatgpt.com:444/backend-api", "https://chatgpt.com/backend-api?key=x",
+    "https://chatgpt.com/backend-api#fragment", "https://chatgpt.com/other",
+  ]) assert.throws(() => resolveCodexResponsesUrl(url));
 });
 
 test("parses the completed remote compaction checkpoint", () => {
@@ -138,7 +142,7 @@ test("parses usage without exposing the opaque checkpoint", () => {
           input_tokens: 123,
           output_tokens: 7,
           total_tokens: 130,
-          input_tokens_details: { cached_tokens: 80 },
+          input_tokens_details: { cached_tokens: 80, cache_write_tokens: 20 },
           output_tokens_details: { reasoning_tokens: 4 },
         },
       },
@@ -152,9 +156,85 @@ test("parses usage without exposing the opaque checkpoint", () => {
       outputTokens: 7,
       totalTokens: 130,
       cachedInputTokens: 80,
+      cacheWriteInputTokens: 20,
       reasoningTokens: 4,
     },
   });
+});
+
+test("finishes a completed stream without waiting for the server to close it", async (t) => {
+  let cancelled = false;
+  t.mock.method(globalThis, "fetch", async () => new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({
+        type: "response.completed",
+        response: { status: "completed", output: [{ type: "compaction", encrypted_content: "checkpoint" }] },
+      })}\n\n`));
+    },
+    cancel() { cancelled = true; },
+  })));
+  const result = await requestRemoteCompactionWithUsage({ model, apiKey: token, body: {} });
+  assert.equal(result.encryptedContent, "checkpoint");
+  assert.equal(cancelled, true);
+});
+
+test("retains beta features and stops cancellation during retry without another request", async (t) => {
+  let attempts = 0;
+  const controller = new AbortController();
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    attempts++;
+    assert.equal(new Headers(init.headers).get("x-codex-beta-features"), "other,remote_compaction_v2");
+    queueMicrotask(() => controller.abort(new Error("fixture cancelled")));
+    return new Response("", { status: 429, headers: { "retry-after": "10000" } });
+  });
+  await assert.rejects(() => requestRemoteCompactionWithUsage({
+    model, apiKey: token, body: {}, signal: controller.signal,
+    authHeaders: { "X-Codex-Beta-Features": "other,remote_compaction_v2" },
+  }), /fixture cancelled/);
+  assert.equal(attempts, 1);
+});
+
+test("bounds retries and does not retry malformed provider data", async (t) => {
+  for (const malformed of [false, true]) {
+    let attempts = 0;
+    t.mock.method(globalThis, "fetch", async () => {
+      attempts++;
+      return malformed ? new Response("data: invalid-json\n\n") : new Response("", {
+        status: 503, headers: { "retry-after-ms": "0" },
+      });
+    });
+    await assert.rejects(() => requestRemoteCompactionWithUsage({ model, apiKey: token, body: {} }));
+    assert.equal(attempts, malformed ? 1 : 3);
+  }
+});
+
+test("total deadline stops a stream even when heartbeats prevent idle timeout", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let streamController;
+  let signal;
+  let attempts = 0;
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    attempts++;
+    signal = init.signal;
+    return new Response(new ReadableStream({
+      start(controller) {
+        streamController = controller;
+        signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+      },
+    }));
+  });
+  const failed = assert.rejects(
+    () => requestRemoteCompactionWithUsage({ model, apiKey: token, body: {} }),
+    /total time limit/,
+  );
+  await new Promise(setImmediate);
+  for (let minute = 1; minute <= 5; minute++) {
+    t.mock.timers.tick(60_000);
+    if (!signal.aborted) streamController.enqueue(new TextEncoder().encode(": heartbeat\n\n"));
+    await new Promise(setImmediate);
+  }
+  await failed;
+  assert.equal(attempts, 1);
 });
 
 test("rejects multiple compaction output items", () => {
@@ -317,9 +397,9 @@ test("keeps the normal prompt envelope while compacting only discardable history
 
 test("honors an already-aborted compaction signal", async () => {
   const originalFetch = globalThis.fetch;
-  let capturedSignal;
-  globalThis.fetch = async (_url, init) => {
-    capturedSignal = init.signal;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
     throw new Error("fetch called");
   };
 
@@ -328,9 +408,9 @@ test("honors an already-aborted compaction signal", async () => {
   try {
     await assert.rejects(
       () => requestRemoteCompaction({ model, apiKey: token, body: {}, signal: controller.signal }),
-      /fetch called/,
+      /cancelled/,
     );
-    assert.equal(capturedSignal.aborted, true);
+    assert.equal(calls, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -401,7 +481,7 @@ test("omits null provider headers", async () => {
 
   try {
     const result = await requestRemoteCompactionWithUsage({
-      model,
+      model: { ...model, headers: { "x-suppressed": "must-remove" } },
       apiKey: token,
       authHeaders: { "x-test": "yes", "x-suppressed": null },
       body: { input: [] },

@@ -16,6 +16,7 @@ Use provider fast modes in Pi when you need lower latency, while keeping the pai
 
 The current OpenAI Codex catalog advertises Fast support for:
 
+- `gpt-6-astra`
 - `gpt-5.4`
 - `gpt-5.5`
 - `gpt-5.6-luna`
@@ -23,6 +24,14 @@ The current OpenAI Codex catalog advertises Fast support for:
 - `gpt-5.6-terra`
 
 The support list follows the upstream Codex model catalog and may need an update when that catalog changes. Models without an advertised Fast tier are left untouched.
+
+Checked against `openai/codex` commit
+`654b0a77d0d2f81aa21f61caf7af4be88fe550bb` (2026-09-11).
+This package uses the Codex subscription backend, not the public OpenAI API.
+Fast mode consumes more subscription usage. Public API dollar prices and Pi's
+token-cost estimates are not your ChatGPT credit bill. Consult
+[Codex speed documentation](https://developers.openai.com/codex/speed)
+for current plan rates and availability. No latency guarantee is made.
 
 ## Installation
 
@@ -51,6 +60,8 @@ pi -e /path/to/pi-mono/packages/pi-fast
 ```
 
 This is an npm-compatible TypeScript Pi package. There is no runtime build step.
+With an updated `pi-codex-compaction` installed, the same Fast toggle also applies
+to its direct compaction requests through Pi's event bus.
 
 ## Usage
 
@@ -88,3 +99,7 @@ npm run -w packages/pi-fast check
 npm test -w packages/pi-fast
 npm run -w packages/pi-fast pack:dry-run
 ```
+
+Smoke test (Pi 0.85.1 or later): select `openai-codex/gpt-6-astra`, enable
+`/fast on`, and send a short prompt. Check `Fast on`. Switch to a different
+provider and check `Fast n/a`. Switch back, run `/fast off`, and check `Fast off`.

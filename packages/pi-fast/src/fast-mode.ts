@@ -6,6 +6,7 @@ export interface FastModel {
 }
 
 const OPENAI_CODEX_FAST_MODELS: ReadonlySet<string> = new Set([
+  "gpt-6-astra",
   "gpt-5.4",
   "gpt-5.5",
   "gpt-5.6-luna",

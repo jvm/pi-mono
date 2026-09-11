@@ -25,4 +25,14 @@ The extension bounds request, compaction input, and response size, validates the
 
 The extension never logs prompts, conversation contents, credentials, authorization headers, or raw provider responses. Install/update telemetry is best-effort and sends only package/version/runtime metadata; it can be disabled with `PI_OFFLINE=1`, `PI_TELEMETRY=0`, or Pi's `enableInstallTelemetry: false` setting.
 
+Direct requests allow only the official `/backend-api/codex/responses` endpoint
+on the default HTTPS port, without query strings or fragments. Total request
+time is limited to five minutes, including retries. Completed streams are closed
+without waiting for a server disconnect. A pre-aborted request does no network I/O.
+Null auth headers remove matching model headers; beta features are merged.
+
+Cooperating local extensions can inspect and transform compaction inputs through
+the documented event bus before size checks. These events contain no credentials.
+They have the same trust level as other installed Pi extensions.
+
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development and validation instructions.

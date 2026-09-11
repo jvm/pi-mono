@@ -1,6 +1,6 @@
 {
   "name": "pi-codex-compaction",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Use OpenAI Codex RemoteCompactionV2 for supported Pi sessions.",
   "type": "module",
   "license": "MIT",
@@ -52,8 +52,8 @@
     "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.84.1",
-    "@earendil-works/pi-coding-agent": "^0.84.1",
+    "@earendil-works/pi-ai": "^0.85.1",
+    "@earendil-works/pi-coding-agent": "^0.85.1",
     "@types/node": "^26.2.0",
     "tsx": "^4.23.5",
     "typescript": "^7.0.2"

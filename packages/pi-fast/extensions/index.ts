@@ -69,6 +69,12 @@ export default function piFast(pi: ExtensionAPI): void {
     return applyFastMode(event.payload, ctx.model);
   });
 
+  pi.events?.on("pi-codex-compaction:request:v1", (value) => {
+    const data = value as { payload: unknown; ctx?: ExtensionContext } | undefined;
+    if (!enabled || !data?.ctx || !supportsFastMode(data.ctx.model)) return;
+    data.payload = applyFastMode(data.payload, data.ctx.model);
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     enabled = await isFastModeEnabledByDefault();
     updateStatus(ctx);

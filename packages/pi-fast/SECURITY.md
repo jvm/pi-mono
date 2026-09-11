@@ -23,6 +23,10 @@ The extension does not read or log prompts, credentials, auth headers, or provid
 
 Fast mode is off by default unless `pi-fast.enabledByDefault` is explicitly `true`. Session toggles are not persisted. Models without an advertised Fast tier are not modified. The `priority` tier can increase provider usage, so the setting is an explicit opt-in and the footer and toggle notifications make the active state visible.
 
+The same in-memory service-tier transform applies to the
+`pi-codex-compaction:request:v1` event when that package is installed.
+This does not read the conversation or add a network request.
+
 On startup, `@mocito/install-telemetry` sends a best-effort install/update telemetry ping to the configured telemetry endpoint once per package version unless Pi telemetry is disabled, offline mode is enabled, or Pi runs in CI. The ping contains only the package name, version, and parsed platform/runtime/architecture from its User-Agent; it does not include prompts, file paths, config values, environment variables, or API keys.
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development and validation instructions.

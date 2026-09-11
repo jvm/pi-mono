@@ -1,5 +1,5 @@
 import { stream as captureProviderPayload } from "@earendil-works/pi-ai/compat";
-import type { Model, Tool } from "@earendil-works/pi-ai";
+import { calculateCost, type Model, type Tool, type Usage } from "@earendil-works/pi-ai";
 import type { ExtensionContext, SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
 import { convertToLlm, serializeConversation, sessionEntryToContextMessages } from "@earendil-works/pi-coding-agent";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
@@ -95,11 +95,13 @@ export async function createRemoteCompaction(
   ctx: ExtensionContext,
   getTools: () => readonly ToolInfoLike[],
   thinkingLevel?: string,
+  prepareRequest?: (payload: Record<string, unknown>, messages: readonly AgentMessage[]) => Record<string, unknown>,
 ): Promise<{
   summary: string;
   firstKeptEntryId: string;
   tokensBefore: number;
   details: RemoteCompactionDetails;
+  usage?: Usage;
 } | undefined> {
   // Pi's custom focus is part of the standard summarizer contract. The
   // Responses compaction envelope has no documented equivalent, so do not
@@ -139,16 +141,20 @@ export async function createRemoteCompaction(
   const providerTools = Array.isArray(providerPayload.tools) ? providerPayload.tools : [];
 
   const input = appendCompactionItems(providerInput, event.preparation, compatiblePrevious);
-  const requestBody = {
+  const requestBody = prepareRequest?.({
     ...providerPayload,
+    input,
+  }, messages) ?? { ...providerPayload, input };
+  Object.assign(requestBody, {
     model: model.id,
     store: false,
     stream: true,
-  };
+  });
+  if (!Array.isArray(requestBody.input)) return undefined;
   const boundedInput = boundCompactionInput(
-    input,
+    requestBody.input,
     instructions,
-    providerTools,
+    Array.isArray(requestBody.tools) ? requestBody.tools : providerTools,
     model.contextWindow,
     requestBody,
   );
@@ -171,6 +177,11 @@ export async function createRemoteCompaction(
     summary: `${REMOTE_SUMMARY_MARKER}\n\n${fallback}`,
     firstKeptEntryId: event.preparation.firstKeptEntryId,
     tokensBefore: event.preparation.tokensBefore,
+    ...(result.usage ? { usage: toPiUsage(
+      result.usage,
+      ctx.model!,
+      result.serviceTier && result.serviceTier !== "default" ? result.serviceTier : requestBody.service_tier,
+    ) } : {}),
     details: {
       kind: REMOTE_COMPACTION_KIND,
       version: 2,
@@ -534,7 +545,27 @@ function limitText(text: string, maxChars: number): string {
   return `${text.slice(0, head)}${omission}${text.slice(text.length - (available - head))}`;
 }
 
-type ToolInfoLike = Pick<Tool, "name" | "description" | "parameters">;
+type ToolInfoLike = Tool;
+
+function toPiUsage(raw: CodexCompactionUsage, model: Model<any>, tier: unknown): Usage {
+  const cacheRead = raw.cachedInputTokens ?? 0;
+  const cacheWrite = raw.cacheWriteInputTokens ?? 0;
+  const output = raw.outputTokens ?? 0;
+  const usage: Usage = {
+    input: Math.max(0, (raw.inputTokens ?? 0) - cacheRead - cacheWrite),
+    output,
+    cacheRead,
+    cacheWrite,
+    ...(raw.reasoningTokens !== undefined ? { reasoning: raw.reasoningTokens } : {}),
+    totalTokens: raw.totalTokens ?? (raw.inputTokens ?? 0) + output,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+  calculateCost(model, usage);
+  // Match Pi 0.85.1's catalog estimates, not subscription credit accounting.
+  const multiplier = tier === "priority" ? (model.id === "gpt-5.5" ? 2.5 : 2) : tier === "flex" ? 0.5 : 1;
+  for (const key of ["input", "output", "cacheRead", "cacheWrite", "total"] as const) usage.cost[key] *= multiplier;
+  return usage;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

@@ -90,6 +90,20 @@ export default function piCodexTools(pi: ExtensionAPI): void {
 
   let replacedToolsWasActive: Record<ReplacedTool, boolean> | undefined;
 
+  pi.events?.on("pi-codex-compaction:tools:v1", (value) => {
+    const data = value as {
+      model?: ExtensionContext["model"];
+      tools?: Array<{ name: string; parameters: unknown; constrainedSampling?: OpenAIGrammarSampling }>;
+    } | undefined;
+    if (!data || !supportsOpenAIGrammarTools(data.model) || !Array.isArray(data.tools)) return;
+    for (const tool of data.tools) {
+      // Do not attach our grammar to another extension's apply_patch override.
+      if (tool.name === APPLY_PATCH && tool.parameters === APPLY_PATCH_PARAMETERS) {
+        tool.constrainedSampling = createOpenAILarkSampling(APPLY_PATCH_GRAMMAR);
+      }
+    }
+  });
+
   function synchronizeTools(ctx: ExtensionContext): void {
     if (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function") return;
 

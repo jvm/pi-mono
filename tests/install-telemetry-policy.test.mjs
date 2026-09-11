@@ -14,6 +14,7 @@ const packageNames = [
   "pi-fast",
   "pi-goal",
   "pi-insomnia",
+  "pi-openai-reasoning",
   "pi-scout",
   "pi-skillful",
   "pi-web-kit",
