@@ -6,6 +6,14 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve pi-codex-tools grammar metadata and custom-tool history during remote compaction.
+- Honor pi-fast on direct compaction requests through a public event-bus contract.
+- Include cache writes and standard Pi compaction usage in session totals.
+- Restrict endpoint paths and ports; merge beta features and honor null auth headers.
+- Avoid I/O after pre-cancellation, bound total request time, and close completed SSE streams promptly.
+
 ## [0.1.1] - 2026-08-06
 
 ### Fixed

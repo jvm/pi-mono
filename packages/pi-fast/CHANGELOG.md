@@ -9,6 +9,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 ### Added
 
 - Support GPT-6 Astra Fast mode on the Codex subscription backend.
+- Apply the current Fast toggle to cooperating Codex compaction requests.
 
 ### Changed
 

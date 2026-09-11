@@ -40,6 +40,11 @@ These choices are based on the Codex tool specifications in `codex-rs/core/src/t
 
 ## Compatibility notes
 
+With an updated `pi-codex-compaction` installed, the package supplies its owned
+grammar metadata through Pi's public event bus. This keeps raw `apply_patch`
+calls and results intact in direct Codex compaction requests, including Astra.
+No private Pi registry is patched.
+
 `apply_patch` is line-oriented rather than byte-oriented:
 
 - `*** Add File` requires at least one `+` line and writes a trailing newline. A `+`-only hunk creates a one-newline file, not a zero-byte file.

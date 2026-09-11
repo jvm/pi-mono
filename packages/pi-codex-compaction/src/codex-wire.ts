@@ -5,6 +5,7 @@ const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_ENCRYPTED_CONTENT_CHARS = 2_000_000;
 const REQUEST_HEADER_TIMEOUT_MS = 30_000;
 const REQUEST_IDLE_TIMEOUT_MS = 120_000;
+const REQUEST_TOTAL_TIMEOUT_MS = 300_000;
 const MAX_RETRIES = 2;
 const RETRY_BASE_DELAY_MS = 200;
 const MAX_RETRY_DELAY_MS = 30_000;
@@ -30,12 +31,14 @@ export interface CodexCompactionUsage {
   outputTokens?: number;
   totalTokens?: number;
   cachedInputTokens?: number;
+  cacheWriteInputTokens?: number;
   reasoningTokens?: number;
 }
 
 export interface CodexCompactionResult {
   encryptedContent: string;
   usage?: CodexCompactionUsage;
+  serviceTier?: "default" | "priority" | "flex";
 }
 
 /**
@@ -49,6 +52,7 @@ export async function requestRemoteCompaction(request: CodexCompactionRequest): 
 export async function requestRemoteCompactionWithUsage(
   request: CodexCompactionRequest,
 ): Promise<CodexCompactionResult> {
+  request.signal?.throwIfAborted();
   const endpoint = resolveCodexResponsesUrl(request.model.baseUrl);
   const accountId = extractAccountId(request.apiKey);
   const headers = buildHeaders(request, accountId);
@@ -60,6 +64,7 @@ export async function requestRemoteCompactionWithUsage(
   const requestState = requestSignal(request.signal);
   try {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      requestState.signal.throwIfAborted();
       requestState.startAttempt();
 
       try {
@@ -116,8 +121,14 @@ export function resolveCodexResponsesUrl(baseUrl: string): string {
   if (url.username || url.password) {
     throw new Error("Codex compaction endpoint must not contain URL credentials");
   }
+  if (url.port || url.search || url.hash) {
+    throw new Error("Codex compaction endpoint must use the default port without query or fragment");
+  }
 
   const path = url.pathname.replace(/\/+$/, "");
+  if (!["/backend-api", "/backend-api/codex", "/backend-api/codex/responses"].includes(path)) {
+    throw new Error("Codex compaction endpoint must use the Codex Responses path");
+  }
   if (path.endsWith("/codex/responses")) {
     return url.toString();
   }
@@ -145,13 +156,15 @@ function buildHeaders(request: CodexCompactionRequest, accountId: string): Heade
   }
   for (const [name, value] of Object.entries(request.authHeaders ?? {})) {
     if (value !== null) headers.set(name, value);
+    else headers.delete(name);
   }
 
   headers.set("Authorization", `Bearer ${request.apiKey}`);
   headers.set("chatgpt-account-id", accountId);
   headers.set("originator", "pi");
   headers.set("OpenAI-Beta", "responses=experimental");
-  headers.set("x-codex-beta-features", BETA_FEATURE);
+  const features = headers.get("x-codex-beta-features")?.split(",").map((part) => part.trim()).filter(Boolean) ?? [];
+  headers.set("x-codex-beta-features", [...new Set([...features, BETA_FEATURE])].join(","));
   headers.set("accept", "text/event-stream");
   headers.set("content-type", "application/json");
 
@@ -212,6 +225,7 @@ async function readCompactionSse(
         throw new CodexCompactionError("Codex compaction response exceeded the size limit", false);
       }
       parser.push(decoder.decode(value, { stream: true }));
+      if (parser.isComplete) return parser.finish();
     }
     parser.push(decoder.decode());
     return parser.finish();
@@ -231,6 +245,11 @@ class CompactionSseParser {
   private status: string | undefined;
   private compactionItems: Array<string | undefined> = [];
   private usage: CodexCompactionUsage | undefined;
+  private serviceTier: CodexCompactionResult["serviceTier"];
+
+  get isComplete(): boolean {
+    return this.completed;
+  }
 
   push(chunk: string): void {
     this.buffer += chunk;
@@ -266,6 +285,7 @@ class CompactionSseParser {
     return {
       encryptedContent,
       ...(this.usage ? { usage: this.usage } : {}),
+      ...(this.serviceTier ? { serviceTier: this.serviceTier } : {}),
     };
   }
 
@@ -298,6 +318,8 @@ class CompactionSseParser {
       const response = isRecord(event.response) ? event.response : undefined;
       this.status = typeof response?.status === "string" ? response.status : undefined;
       this.usage = parseUsage(response?.usage ?? event.usage);
+      const tier = response?.service_tier;
+      this.serviceTier = tier === "default" || tier === "priority" || tier === "flex" ? tier : undefined;
 
       // Codex emits output_item.done before response.completed. Retain this
       // fallback for compact Responses implementations that only return the
@@ -335,12 +357,14 @@ function parseUsage(value: unknown): CodexCompactionUsage | undefined {
   const inputDetails = isRecord(value.input_tokens_details) ? value.input_tokens_details : undefined;
   const outputDetails = isRecord(value.output_tokens_details) ? value.output_tokens_details : undefined;
   const cachedInputTokens = finiteNonNegativeNumber(inputDetails?.cached_tokens);
+  const cacheWriteInputTokens = finiteNonNegativeNumber(inputDetails?.cache_write_tokens);
   const reasoningTokens = finiteNonNegativeNumber(outputDetails?.reasoning_tokens);
   if (
     inputTokens === undefined &&
     outputTokens === undefined &&
     totalTokens === undefined &&
     cachedInputTokens === undefined &&
+    cacheWriteInputTokens === undefined &&
     reasoningTokens === undefined
   ) {
     return undefined;
@@ -350,6 +374,7 @@ function parseUsage(value: unknown): CodexCompactionUsage | undefined {
     ...(outputTokens !== undefined ? { outputTokens } : {}),
     ...(totalTokens !== undefined ? { totalTokens } : {}),
     ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+    ...(cacheWriteInputTokens !== undefined ? { cacheWriteInputTokens } : {}),
     ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
   };
 }
@@ -432,6 +457,10 @@ interface RequestSignal {
 
 function requestSignal(signal: AbortSignal | undefined): RequestSignal {
   const controller = new AbortController();
+  const totalTimeout = setTimeout(
+    () => controller.abort(new Error("Codex compaction request exceeded the total time limit")),
+    REQUEST_TOTAL_TIMEOUT_MS,
+  );
   let headerTimeout: ReturnType<typeof setTimeout> | undefined;
   let idleTimeout: ReturnType<typeof setTimeout> | undefined;
 
@@ -472,6 +501,7 @@ function requestSignal(signal: AbortSignal | undefined): RequestSignal {
     },
     touch,
     cleanup: () => {
+      clearTimeout(totalTimeout);
       clearTimers();
       signal?.removeEventListener("abort", onAbort);
     },

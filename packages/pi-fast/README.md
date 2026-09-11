@@ -60,6 +60,8 @@ pi -e /path/to/pi-mono/packages/pi-fast
 ```
 
 This is an npm-compatible TypeScript Pi package. There is no runtime build step.
+With an updated `pi-codex-compaction` installed, the same Fast toggle also applies
+to its direct compaction requests through Pi's event bus.
 
 ## Usage
 

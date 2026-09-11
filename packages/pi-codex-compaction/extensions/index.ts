@@ -23,10 +23,21 @@ export default function piCodexCompaction(pi: ExtensionAPI): void {
     try {
       const compaction = await createRemoteCompaction(event, ctx, () => {
         const active = new Set(pi.getActiveTools());
-        return pi.getAllTools()
-          .filter((tool) => active.has(tool.name))
-          .map(({ name, description, parameters }) => ({ name, description, parameters }));
-      }, pi.getThinkingLevel?.());
+        const data = {
+          model: ctx.model,
+          tools: pi.getAllTools().filter((tool) => active.has(tool.name)),
+        };
+        // Pi's public ToolInfo omits constrainedSampling. Tool owners can supply
+        // it here without exposing executors or inspecting private registries.
+        pi.events?.emit("pi-codex-compaction:tools:v1", data);
+        return data.tools;
+      }, pi.getThinkingLevel?.(), (payload, messages) => {
+        const data = { payload, messages, ctx };
+        // Synchronous bus contract: apply pure request transforms before bounds
+        // and before network I/O. Never include auth in this event.
+        pi.events?.emit("pi-codex-compaction:request:v1", data);
+        return data.payload;
+      });
       return compaction ? { compaction } : undefined;
     } catch {
       if (!event.signal.aborted && ctx.hasUI) {

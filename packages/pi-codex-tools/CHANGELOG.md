@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Supply owned apply_patch grammar metadata to pi-codex-compaction through Pi's public event bus.
+
 ## [0.2.3] - 2026-08-11
 
 ### Changed

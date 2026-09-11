@@ -13,7 +13,7 @@ Keep long Pi sessions usable on OpenAI Codex models by replacing Pi's local summ
 - Falls back to standard Pi compaction on failure or when custom compaction instructions are requested.
 - Keeps a bounded readable transcript excerpt so switching models or providers remains usable.
 
-The current Codex catalog includes models such as `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Capability detection follows the provider/API contract (`openai-codex` + `openai-codex-responses`) rather than a brittle model-name list.
+The current Codex catalog includes `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Capability detection follows the provider/API contract (`openai-codex` + `openai-codex-responses`) rather than a brittle model-name list. Use Pi 0.85.1 or later.
 
 ## Installation
 
@@ -42,6 +42,42 @@ Compaction uses the model active when Pi triggers it. If a session switches from
 If the remote request fails, is cancelled, or returns an unexpected response, Pi's standard compaction path runs. Custom compaction instructions also use Pi's standard path because RemoteCompactionV2 has no documented custom-instructions field. The direct checkpoint request is restricted to `https://chatgpt.com`, rejects redirects, limits request/response size, and never decodes or logs `encrypted_content`. No configuration is required.
 
 ## Development
+
+### Other Codex extensions
+
+With `pi-fast` installed, direct compaction requests use the current Fast toggle.
+With `pi-codex-tools` installed, `apply_patch` keeps its raw grammar definition,
+custom-tool calls, and custom-tool results during compaction. Neither package is
+required. No package reads a private Pi tool registry.
+
+Pi 0.85.1 does not expose grammar metadata in `getAllTools()`. Two synchronous,
+versioned `pi.events` contracts let cooperating extensions supply it:
+
+- `pi-codex-compaction:tools:v1`: `{ model, tools }`, before provider serialization.
+  A tool owner can attach its own `constrainedSampling` metadata.
+- `pi-codex-compaction:request:v1`: `{ ctx, messages, payload }`, after input
+  assembly and before size checks. A listener can replace `payload`. This event
+  is not the general `before_provider_request` chain and does not carry auth.
+
+Other extensions' private request changes are not applied automatically.
+Unknown third-party grammar metadata needs cooperation through the tools event.
+The checkpoint entry includes standard Pi `usage`, including cache reads and
+cache writes, as well as the original bounded token counters in `details`.
+Costs follow Pi's catalog estimates. They are not a ChatGPT subscription bill.
+
+### Reference and smoke test
+
+Behavior was checked against `openai/codex` commit
+`654b0a77d0d2f81aa21f61caf7af4be88fe550bb` (2026-09-11), notably
+`core/src/compact_remote_v2{,_attempt}.rs`. No Codex code was copied.
+RemoteCompactionV2 is a changing Codex protocol, not the public `/responses/compact`
+API. Async tools and mid-turn steering require upstream Pi support.
+
+For a small live test, load this package and select `openai-codex/gpt-6-astra`.
+Send two short messages, run `/compact`, then ask about the first message.
+Repeat with `/fast on` and `pi-codex-tools` loaded. Check that compaction succeeds,
+the continuation retains context, and session usage includes compaction tokens.
+Use only a temporary file if you test `apply_patch`. Do not generate images.
 
 ```bash
 npm install
