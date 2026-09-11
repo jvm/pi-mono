@@ -355,7 +355,9 @@ export async function resolveInputImages(
 			if (image.data.length > Math.ceil(MAX_INPUT_IMAGE_BYTES / 3) * 4) throw new Error("Conversation image exceeds 20 MiB.");
 			const format = OUTPUT_FORMATS.find(format => mimeForFormat(format) === image.mimeType);
 			if (!format) throw new Error("Conversation image has an unsupported format.");
-			total += decodeImageData(image.data, format).length;
+			const bytes = decodeImageData(image.data, format);
+			if (bytes.length > MAX_INPUT_IMAGE_BYTES) throw new Error("Conversation image exceeds 20 MiB.");
+			total += bytes.length;
 			if (total > MAX_TOTAL_INPUT_BYTES) throw new Error("Conversation images exceed 50 MiB in total.");
 		}
 		return images;

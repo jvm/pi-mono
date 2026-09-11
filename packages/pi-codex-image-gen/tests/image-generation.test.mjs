@@ -21,7 +21,7 @@ const WEBP = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("W
 
 function jwt() {
   const payload = Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "account" } })).toString("base64url");
-  return `header.${payload}.signature`;
+  return `${Buffer.from('{"alg":"none"}').toString("base64url")}.${payload}.signature`;
 }
 
 function sseResponse(image = PNG.toString("base64")) {
@@ -405,6 +405,14 @@ test("tool cancellation interrupts a stalled stream without another generation",
   assert.equal(h.calls.length, 1);
 });
 
+test("tool withholds stream exceptions and does not retry an interrupted response", async (t) => {
+  const h = await harness(t, () => new Response(new ReadableStream({
+    start(controller) { controller.error(new Error(jwt())); },
+  })));
+  await assert.rejects(h.run(), error => /stream was interrupted/.test(error.message) && !error.message.includes(jwt()));
+  assert.equal(h.calls.length, 1);
+});
+
 test("tool validates save settings, routing model, prompts, and input files before generating", async (t) => {
   const h = await harness(t, () => { throw new Error("Must not call backend"); });
   await assert.rejects(h.run({ save: "custom", saveDir: "" }), /save=custom/);
@@ -433,6 +441,26 @@ test("tool redacts credentials from revised prompts and split response text", as
     { type: "response.completed" },
   ]);
   await assert.rejects(h.run(), error => !error.message.includes(jwt()));
+  globalThis.fetch = async () => streamEvents([
+    { type: "response.output_text.delta", delta: "x".repeat(3980) + " " + jwt() },
+    { type: "response.completed" },
+  ]);
+  await assert.rejects(h.run(), error => !error.message.includes(jwt().slice(0, 15)));
+});
+
+test("tool enforces decoded reference and output image limits", async (t) => {
+  const h = await harness(t, () => { throw new Error("Must not generate"); });
+  // This count shares the same base64 length as the maximum accepted input,
+  // so a pre-decode length check alone is not sufficient.
+  const input = Buffer.concat([PNG, Buffer.alloc(20 * 1024 * 1024 + 1 - PNG.length)]);
+  await assert.rejects(h.run({ numLastImagesToInclude: 1 }, undefined, undefined,
+    context(h.cwd, [{ content: [{ type: "image", mimeType: "image/png", data: input.toString("base64") }] }])), /20 MiB/);
+  assert.equal(h.calls.length, 0);
+  globalThis.fetch = async () => streamEvents([
+    imageEvent({ result: "A".repeat(Math.ceil(32 * 1024 * 1024 / 3) * 4 + 4) }),
+    { type: "response.completed" },
+  ]);
+  await assert.rejects(h.run(), /32 MiB/);
 });
 
 test("tool preserves an existing image on a repeated backend image ID", async (t) => {

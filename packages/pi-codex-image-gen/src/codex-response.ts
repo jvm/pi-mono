@@ -38,7 +38,10 @@ function text(value: unknown, secrets: string[] = []): string {
 	for (const secret of secrets) {
 		if (secret) result = result.split(secret).join("[redacted]");
 	}
-	return result.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").slice(0, MAX_TEXT_CHARS);
+	// Also hide a JWT cut short by the text bound; exact-token matching alone
+	// cannot redact a credential that arrives across the truncation boundary.
+	return result.replace(/\beyJ[A-Za-z0-9_.-]*/g, "[redacted]")
+		.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").slice(0, MAX_TEXT_CHARS);
 }
 
 function identifier(value: unknown, secrets: string[]): string | undefined {
@@ -87,7 +90,14 @@ async function* chunks(response: Response, limit: number, signal: AbortSignal): 
 		if (declared > limit) throw new Error("Codex response exceeded the size limit.");
 		while (true) {
 			signal.throwIfAborted();
-			const { done, value } = await abortable(reader.read(), signal);
+			let part: ReadableStreamReadResult<Uint8Array>;
+			try {
+				part = await abortable(reader.read(), signal);
+			} catch {
+				signal.throwIfAborted();
+				throw new Error("Codex response stream was interrupted. The backend may still finish; no automatic retry was made.");
+			}
+			const { done, value } = part;
 			if (done) break;
 			bytes += value.byteLength;
 			if (bytes > limit) throw new Error("Codex response exceeded the size limit.");
@@ -102,12 +112,17 @@ async function* chunks(response: Response, limit: number, signal: AbortSignal): 
 
 const QUOTA_CODES = new Set([
 	"insufficient_quota", "quota_exceeded", "usage_limit_reached", "usage_limit_exceeded",
-	"billing_hard_limit_reached", "billing_not_active",
+	"billing_hard_limit_reached", "billing_not_active", "organization_usage_limit_exceeded",
+	"workspace_member_usage_limit_reached",
 ]);
+
+function isQuota(error: Record<string, unknown>): boolean {
+	return [error.code, error.type].some(value => typeof value === "string" && QUOTA_CODES.has(value));
+}
 
 function errorHint(error: unknown): string {
 	const { code, type } = object(error);
-	if (QUOTA_CODES.has(String(code)) || QUOTA_CODES.has(String(type))) {
+	if (isQuota({ code, type })) {
 		return "Codex subscription quota is unavailable or exhausted. Check your plan or wait for its reset.";
 	}
 	if (code === "moderation_blocked" || type === "image_generation_user_error") {
@@ -134,7 +149,7 @@ export async function httpFailure(response: Response, signal: AbortSignal): Prom
 	try {
 		error = object(object(JSON.parse(body)).error);
 	} catch { /* HTML and other non-JSON error bodies are not diagnostics. */ }
-	const terminal = QUOTA_CODES.has(String(error.code)) || QUOTA_CODES.has(String(error.type))
+	const terminal = isQuota(error)
 		|| error.code === "moderation_blocked" || error.type === "image_generation_user_error";
 	const hint = response.status === 401
 		? "Codex login was rejected. Run /login for openai-codex again."
