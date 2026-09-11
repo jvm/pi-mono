@@ -11,6 +11,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 ### Fixed
 
 - Estimate compaction tokens separately from request bytes so long Codex sessions do not fall back merely because UTF-8 bytes exceed the token budget.
+- Respect request-transform field removals when sizing, restrict warnings to TUI mode, and distinguish preparation failures from transport failures.
 - Preserve the independent 16 MiB request ceiling, count the complete transformed envelope, and reject unavailable context limits.
 - Record safe fallback reasons and numeric size diagnostics in local custom session entries; notify when UI is available without exposing request or provider content.
 

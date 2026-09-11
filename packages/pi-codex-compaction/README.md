@@ -65,13 +65,15 @@ A fallback on a supported model records a local custom session entry with type
 `context-window-unavailable`, `context-limit`, `request-size-limit`, or
 `remote-failed`. Size failures also include estimated tokens, token budget,
 request bytes, byte limit, and the number of tool outputs reduced.
+Unexpected preparation failures use `request-unavailable`; `remote-failed`
+is reserved for failures from the transport call.
 
 No prompt, tool content, encrypted checkpoint, account identifier, credential, or
 raw provider error is included. These entries are not sent to the model. Pi
-shows a warning when UI notifications are available; print/JSON mode gets no
-extra console output. Unsupported models and cancelled attempts do not create
-fallback diagnostics. Diagnostic storage or notification failure does not stop
-the standard compactor.
+shows a warning only in TUI mode when notifications are available; print, JSON,
+and RPC modes get no extra notifications or console output. Unsupported models
+and cancelled attempts do not create fallback diagnostics. Diagnostic storage
+or notification failure does not stop the standard compactor.
 
 ## Development
 
@@ -93,6 +95,7 @@ versioned `pi.events` contracts let cooperating extensions supply it:
 - `pi-codex-compaction:request:v1`: `{ ctx, messages, payload }`, after input
   assembly and before size checks. A listener can replace `payload`. This event
   is not the general `before_provider_request` chain and does not carry auth.
+  Size checks use the transformed envelope, including field removals.
 
 Other extensions' private request changes are not applied automatically.
 Unknown third-party grammar metadata needs cooperation through the tools event.

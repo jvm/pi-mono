@@ -170,3 +170,40 @@ test("real Pi records a size fallback and keeps its diagnostic out of later mode
     assert.deepEqual(h.errors, []);
   } finally { await h.close(); }
 });
+
+test("real Pi sizes the envelope after a cooperating extension removes fields", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    const body = requestBody(init);
+    requests.push(body);
+    return body.input.some((item) => item.type === "compaction_trigger")
+      ? compactionResponse()
+      : textResponse("unexpected standard fallback");
+  });
+  const h = await codexHarness([compaction, (pi) => {
+    pi.events.on("pi-codex-compaction:tools:v1", (data) => {
+      assert.ok(data.tools.length > 0);
+      data.tools = [{ ...data.tools[0], description: "omitted schema ".repeat(8_000) }];
+    });
+    pi.events.on("pi-codex-compaction:request:v1", (data) => {
+      delete data.payload.instructions;
+      delete data.payload.tools;
+    });
+  }]);
+  try {
+    await h.session.setModel({ ...h.model, contextWindow: 20_000 });
+    for (const [index, content] of ["old request", "kept request"].entries()) {
+      h.sessionManager.appendMessage({ role: "user", content, timestamp: index + 1 });
+    }
+    const result = await h.session.compact();
+    assert.equal(result.details?.kind, "pi-codex-compaction");
+    assert.equal(requests.length, 1);
+    assert.equal(Object.hasOwn(requests[0], "instructions"), false);
+    assert.equal(Object.hasOwn(requests[0], "tools"), false);
+    assert.equal(requests[0].input.at(-1).type, "compaction_trigger");
+    assert.equal(JSON.stringify(requests[0].input).includes("kept request"), false);
+    assert.equal(h.sessionManager.getBranch().findLast((entry) => entry.type === "compaction").fromHook, true);
+    assert.equal(h.sessionManager.getBranch().some((entry) => entry.customType === COMPACTION_FALLBACK_ENTRY), false);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});

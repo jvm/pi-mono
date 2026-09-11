@@ -192,6 +192,11 @@ export async function createRemoteCompaction(
       input: boundedInput,
     },
     signal: event.signal,
+  }).catch((error: unknown) => {
+    // Only failures from the transport path receive this reason. Preparation
+    // failures are classified by the extension's outer fallback handler.
+    if (!event.signal.aborted) onFallback?.({ reason: "remote-failed" });
+    throw error;
   });
 
   const fallback = buildFallbackSummary(event.preparation, messages);
@@ -530,12 +535,12 @@ function buildCompactionRequest(
   instructions: string,
   tools: readonly unknown[],
 ): Record<string, unknown> {
-  const payload: Record<string, unknown> = requestPayload ? { ...requestPayload } : {};
-  // Measure the actual transformed envelope, including cooperating extensions'
-  // instruction/tool changes. The separate arguments are defaults only.
-  if (!("instructions" in payload)) payload.instructions = instructions;
+  // A supplied envelope is authoritative, including fields a listener removed.
+  // Separate defaults apply only to callers without a complete payload.
+  const payload: Record<string, unknown> = requestPayload
+    ? { ...requestPayload }
+    : { instructions, ...(tools.length > 0 ? { tools } : {}) };
   payload.input = input;
-  if (!("tools" in payload) && tools.length > 0) payload.tools = tools;
   return payload;
 }
 

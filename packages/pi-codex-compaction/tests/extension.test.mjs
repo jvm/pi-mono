@@ -94,6 +94,7 @@ function makePi() {
 function makeContext(overrides = {}) {
   return {
     model,
+    mode: "tui",
     hasUI: false,
     ui: { notify() {} },
     getSystemPrompt: () => "system",
@@ -812,11 +813,14 @@ test("the hook records explicit byte-limit and unavailable-context reasons witho
   assert.equal(requests, 0);
 });
 
-test("fallback diagnostics omit custom instructions, missing auth details, and raw failures", async () => {
+test("fallback diagnostics classify preparation failures without exposing private details", async (t) => {
+  let requests = 0;
+  t.mock.method(globalThis, "fetch", async () => { requests++; throw new Error("must not send"); });
   for (const [event, context, reason] of [
     [{ customInstructions: "PRIVATE_INSTRUCTIONS" }, {}, "custom-instructions"],
     [{}, { modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: false }) } }, "auth-unavailable"],
-    [{}, { modelRegistry: { getApiKeyAndHeaders: async () => { throw new Error(token); } } }, "remote-failed"],
+    [{}, { modelRegistry: { getApiKeyAndHeaders: async () => { throw new Error(token); } } }, "request-unavailable"],
+    [{}, { getSystemPrompt: () => { throw new Error("PRIVATE_PREPARATION"); } }, "request-unavailable"],
   ]) {
     const pi = makePi();
     const result = await pi.handlers.get("session_before_compact")({
@@ -826,6 +830,50 @@ test("fallback diagnostics omit custom instructions, missing auth details, and r
     assert.deepEqual(pi.diagnostics, [{
       customType: COMPACTION_FALLBACK_ENTRY, data: { version: 1, reason },
     }]);
+  }
+  assert.equal(requests, 0);
+});
+
+test("the compaction hook sizes deleted and undefined envelope fields as transmitted", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return new Response(`data: ${JSON.stringify({
+      type: "response.completed",
+      response: { status: "completed", output: [{ type: "compaction", encrypted_content: "fixture-checkpoint" }] },
+    })}\n\n`);
+  });
+  for (const fields of [["instructions"], ["tools"], ["instructions", "tools"]]) {
+    for (const removal of ["delete", "undefined"]) {
+      const pi = makePi();
+      pi.getActiveTools = () => ["fixture"];
+      pi.getAllTools = () => [{
+        name: "fixture",
+        description: fields.includes("tools") ? "omitted schema ".repeat(8_000) : "small schema",
+        parameters: { type: "object", properties: {} },
+      }];
+      pi.events = {
+        emit(name, data) {
+          if (name !== "pi-codex-compaction:request:v1") return;
+          for (const field of fields) {
+            assert.ok(Object.hasOwn(data.payload, field));
+            if (removal === "delete") delete data.payload[field];
+            else data.payload[field] = undefined;
+          }
+        },
+      };
+      const before = requests.length;
+      const result = await pi.handlers.get("session_before_compact")({
+        preparation: preparation(), signal: new AbortController().signal,
+      }, makeContext({
+        model: { ...model, contextWindow: 20_000 },
+        getSystemPrompt: () => fields.includes("instructions") ? "omitted prompt ".repeat(8_000) : "system",
+      }));
+      assert.equal(result?.compaction?.details?.kind, "pi-codex-compaction", `${removal}: ${fields}`);
+      assert.equal(requests.length, before + 1);
+      for (const field of fields) assert.equal(Object.hasOwn(requests.at(-1), field), false);
+      assert.deepEqual(pi.diagnostics, []);
+    }
   }
 });
 
@@ -869,12 +917,17 @@ test("diagnostic write/notification failures do not stop standard fallback", asy
   assert.equal(result, undefined);
 });
 
-test("non-UI fallback records its reason without calling notification APIs", async () => {
-  const pi = makePi();
-  let notices = 0;
-  await pi.handlers.get("session_before_compact")({
-    preparation: preparation(), customInstructions: "focus", signal: new AbortController().signal,
-  }, makeContext({ hasUI: false, mode: "print", ui: { notify() { notices++; } } }));
-  assert.equal(notices, 0);
-  assert.equal(pi.diagnostics[0].data.reason, "custom-instructions");
+test("non-TUI and non-UI fallback never call notification APIs", async () => {
+  for (const mode of ["tui", "print", "json", "rpc"]) {
+    for (const hasUI of [false, true]) {
+      if (mode === "tui" && hasUI) continue;
+      const pi = makePi();
+      let notices = 0;
+      await pi.handlers.get("session_before_compact")({
+        preparation: preparation(), customInstructions: "focus", signal: new AbortController().signal,
+      }, makeContext({ hasUI, mode, ui: { notify() { notices++; } } }));
+      assert.equal(notices, 0, `${mode}, hasUI: ${hasUI}`);
+      assert.equal(pi.diagnostics[0].data.reason, "custom-instructions");
+    }
+  }
 });

@@ -48,7 +48,7 @@ export default function piCodexCompaction(pi: ExtensionAPI): void {
       } catch {
         // Diagnostics must not prevent the standard compactor from running.
       }
-      if (ctx.hasUI) {
+      if (ctx.mode === "tui" && ctx.hasUI) {
         try {
           ctx.ui.notify(`Codex remote compaction skipped: ${FALLBACK_MESSAGES[diagnostic.reason]}. Using standard Pi compaction.`, "warning");
         } catch {
@@ -76,7 +76,9 @@ export default function piCodexCompaction(pi: ExtensionAPI): void {
       }, reportFallback);
       return compaction ? { compaction } : undefined;
     } catch {
-      reportFallback({ reason: "remote-failed" });
+      // Transport failures already have a reason; other exceptions mean the
+      // compaction request could not be prepared or processed.
+      reportFallback({ reason: "request-unavailable" });
       return undefined;
     }
   };
