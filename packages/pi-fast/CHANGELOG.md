@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-11
+
 ### Added
 
 - Support GPT-6 Astra Fast mode on the Codex subscription backend.

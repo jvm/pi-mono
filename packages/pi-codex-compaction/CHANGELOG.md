@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-11
+
 ### Fixed
 
 - Preserve pi-codex-tools grammar metadata and custom-tool history during remote compaction.
