@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { beforeEach } from "node:test";
 import { codexHarness, compactionResponse, requestBody, textResponse } from "../../../tests/codex-harness.mjs";
 
 process.env.CI = "1";
 process.env.PI_OFFLINE = "1";
+beforeEach((t) => {
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("Unmocked network request blocked"); });
+});
 const { default: fast } = await import("../../pi-fast/extensions/index.ts");
 const { default: tools } = await import("../../pi-codex-tools/extensions/index.ts");
 const { default: compaction } = await import("../extensions/index.ts");
+const { COMPACTION_FALLBACK_ENTRY } = await import("../src/index.ts");
 const zeroUsage = {
   input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
@@ -99,6 +103,9 @@ test("a remote rejection uses the actual standard Pi compactor", async (t) => {
     assert.notEqual(result.details?.kind, "pi-codex-compaction");
     assert.equal(requests.length, 2);
     assert.equal(requests[1].input.some((item) => item.type === "compaction_trigger"), false);
+    assert.deepEqual(h.sessionManager.getBranch().find((entry) => entry.customType === COMPACTION_FALLBACK_ENTRY)?.data, {
+      version: 1, reason: "remote-failed",
+    });
     assert.deepEqual(h.errors, []);
   } finally { await h.close(); }
 });
@@ -128,6 +135,38 @@ test("real Pi uses remote compaction when transcript bytes exceed the token budg
     assert.ok(requests[0].input.some((item) => JSON.stringify(item).includes(oldText.slice(0, 50))));
     assert.equal(JSON.stringify(requests[0].input).includes("kept request"), false);
     assert.equal(h.sessionManager.getBranch().findLast((entry) => entry.type === "compaction").fromHook, true);
+    assert.equal(h.sessionManager.getBranch().some((entry) => entry.customType === COMPACTION_FALLBACK_ENTRY), false);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
+test("real Pi records a size fallback and keeps its diagnostic out of later model input", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    const body = requestBody(init);
+    requests.push(body);
+    assert.equal(body.input.some((item) => item.type === "compaction_trigger"), false);
+    return textResponse("standard summary");
+  });
+  const h = await codexHarness([compaction]);
+  try {
+    await h.session.setModel({ ...h.model, contextWindow: 20_000 });
+    for (const [index, content] of ["PRIVATE_HISTORY ".repeat(6_000), "kept request"].entries()) {
+      h.sessionManager.appendMessage({ role: "user", content, timestamp: index + 1 });
+    }
+    const result = await h.session.compact();
+    assert.equal(result.summary, "standard summary");
+    assert.equal(requests.length, 1);
+    const branch = h.sessionManager.getBranch();
+    const data = branch.find((entry) => entry.customType === COMPACTION_FALLBACK_ENTRY)?.data;
+    assert.equal(data.reason, "context-limit");
+    assert.ok(data.estimatedTokens > data.tokenBudget);
+    assert.doesNotMatch(JSON.stringify(data), /PRIVATE_HISTORY|acct_fixture|test-signature/);
+    assert.equal(branch.findLast((entry) => entry.type === "compaction").fromHook, false);
+    await h.session.prompt("continue", { expandPromptTemplates: false });
+    assert.equal(requests.length, 2);
+    assert.equal(JSON.stringify(requests[1]).includes(COMPACTION_FALLBACK_ENTRY), false);
+    assert.equal(JSON.stringify(requests[1]).includes("estimatedTokens"), false);
     assert.deepEqual(h.errors, []);
   } finally { await h.close(); }
 });

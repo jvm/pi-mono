@@ -39,7 +39,7 @@ When Pi starts compaction on a supported Codex model, the extension sends a stre
 
 Compaction uses the model active when Pi triggers it. If a session switches from a larger to a smaller model, the remote request is bounded against the new model's context window and tool outputs are reduced before sending. A previous opaque checkpoint is treated as incompatible after a model, endpoint, account, or authentication-mode switch; Pi's readable previous summary is sent instead. If the full request still cannot fit, the extension leaves compaction to Pi's normal implementation.
 
-If the remote request fails, is cancelled, or returns an unexpected response, Pi's standard compaction path runs. Custom compaction instructions also use Pi's standard path because RemoteCompactionV2 has no documented custom-instructions field. The direct checkpoint request is restricted to `https://chatgpt.com`, rejects redirects, limits request/response size, and never decodes or logs `encrypted_content`. No configuration is required.
+If the remote request fails or returns an unexpected response, Pi's standard compaction path runs. Cancellation remains cancelled. Custom compaction instructions also use Pi's standard path because RemoteCompactionV2 has no documented custom-instructions field. The direct checkpoint request is restricted to `https://chatgpt.com`, rejects redirects, limits request/response size, and never decodes or logs `encrypted_content`. No configuration is required.
 
 ### Size limits
 
@@ -56,6 +56,22 @@ tool calls, and opaque checkpoints are not removed. If the remaining request
 still cannot fit, or the model's context limit is unknown, standard Pi compaction
 runs. The estimate can differ from the server's token count; a server rejection
 still uses the existing fallback.
+
+### Fallback diagnostics
+
+A fallback on a supported model records a local custom session entry with type
+`pi-codex-compaction:fallback:v1`. It contains `version: 1` and a reason:
+`custom-instructions`, `auth-unavailable`, `request-unavailable`,
+`context-window-unavailable`, `context-limit`, `request-size-limit`, or
+`remote-failed`. Size failures also include estimated tokens, token budget,
+request bytes, byte limit, and the number of tool outputs reduced.
+
+No prompt, tool content, encrypted checkpoint, account identifier, credential, or
+raw provider error is included. These entries are not sent to the model. Pi
+shows a warning when UI notifications are available; print/JSON mode gets no
+extra console output. Unsupported models and cancelled attempts do not create
+fallback diagnostics. Diagnostic storage or notification failure does not stop
+the standard compactor.
 
 ## Development
 

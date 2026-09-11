@@ -35,4 +35,18 @@ Cooperating local extensions can inspect and transform compaction inputs through
 the documented event bus before size checks. These events contain no credentials.
 They have the same trust level as other installed Pi extensions.
 
+Context sizing uses `ceil(UTF-8 serialized request bytes / 4)` with an 8,192-token
+reserve from the active model's context window. It is an estimate, not a strict
+tokenizer bound. The complete transformed envelope is counted, including opaque
+content at its serialized size. A separate 16 MiB uncompressed request limit is
+enforced before network I/O. The HTTPS, redirect, response-size, checkpoint
+compatibility, and cancellation checks remain independent of token estimation.
+
+Fallback diagnostics store only a fixed reason code and finite non-negative
+size counters in `pi-codex-compaction:fallback:v1` custom session entries.
+These local records never include credentials, account/model identifiers,
+request content, encrypted checkpoints, or raw errors, and do not enter model
+context. No external diagnostic telemetry is added. They use the existing
+session's permissions and retention policy.
+
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for development and validation instructions.

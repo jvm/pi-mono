@@ -10,6 +10,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 - Estimate compaction tokens separately from request bytes so long Codex sessions do not fall back merely because UTF-8 bytes exceed the token budget.
 - Preserve the independent 16 MiB request ceiling, count the complete transformed envelope, and reject unavailable context limits.
+- Record safe fallback reasons and numeric size diagnostics in local custom session entries; notify when UI is available without exposing request or provider content.
 
 ## [0.1.2] - 2026-09-11
 

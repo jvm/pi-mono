@@ -13,6 +13,17 @@ import {
 
 export const REMOTE_SUMMARY_MARKER = "[pi-codex-compaction:v1]";
 export const REMOTE_COMPACTION_KIND = "pi-codex-compaction";
+export const COMPACTION_FALLBACK_ENTRY = "pi-codex-compaction:fallback:v1";
+
+export interface CompactionFallback {
+  reason: "custom-instructions" | "auth-unavailable" | "request-unavailable" |
+    "context-window-unavailable" | "context-limit" | "request-size-limit" | "remote-failed";
+  estimatedTokens?: number;
+  tokenBudget?: number;
+  requestBytes?: number;
+  byteLimit?: number;
+  trimmedToolOutputs?: number;
+}
 
 const FALLBACK_SUMMARY_MAX_CHARS = 12_000;
 const MAX_ENCRYPTED_CONTENT_CHARS = 2_000_000;
@@ -100,6 +111,7 @@ export async function createRemoteCompaction(
   getTools: () => readonly ToolInfoLike[],
   thinkingLevel?: string,
   prepareRequest?: (payload: Record<string, unknown>, messages: readonly AgentMessage[]) => Record<string, unknown>,
+  onFallback?: (diagnostic: CompactionFallback) => void,
 ): Promise<{
   summary: string;
   firstKeptEntryId: string;
@@ -107,17 +119,22 @@ export async function createRemoteCompaction(
   details: RemoteCompactionDetails;
   usage?: Usage;
 } | undefined> {
+  if (event.signal.aborted) return undefined;
+  const skip = (reason: CompactionFallback["reason"]) => {
+    onFallback?.({ reason });
+    return undefined;
+  };
   // Pi's custom focus is part of the standard summarizer contract. The
   // Responses compaction envelope has no documented equivalent, so do not
   // silently discard it.
-  if (event.customInstructions?.trim()) return undefined;
+  if (event.customInstructions?.trim()) return skip("custom-instructions");
 
   const model = ctx.model as CodexModel | undefined;
   if (!model || !supportsRemoteCompaction(model)) return undefined;
 
   const endpoint = resolveCodexResponsesUrl(model.baseUrl);
   const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model as Model<any>);
-  if (!auth.ok || !auth.apiKey) return undefined;
+  if (!auth.ok || !auth.apiKey) return skip("auth-unavailable");
   const accountFingerprint = getCodexAccountFingerprint(auth.apiKey);
   const authKind = getCodexAuthKind(ctx.modelRegistry, model as Model<any>);
 
@@ -139,9 +156,9 @@ export async function createRemoteCompaction(
     event.signal,
     thinkingLevel,
   );
-  if (!providerPayload) return undefined;
+  if (!providerPayload) return skip("request-unavailable");
   const providerInput = providerPayload.input;
-  if (!Array.isArray(providerInput)) return undefined;
+  if (!Array.isArray(providerInput)) return skip("request-unavailable");
   const providerTools = Array.isArray(providerPayload.tools) ? providerPayload.tools : [];
 
   const input = appendCompactionItems(providerInput, event.preparation, compatiblePrevious);
@@ -154,13 +171,14 @@ export async function createRemoteCompaction(
     store: false,
     stream: true,
   });
-  if (!Array.isArray(requestBody.input)) return undefined;
+  if (!Array.isArray(requestBody.input)) return skip("request-unavailable");
   const boundedInput = boundCompactionInput(
     requestBody.input,
     instructions,
     Array.isArray(requestBody.tools) ? requestBody.tools : providerTools,
     model.contextWindow,
     requestBody,
+    onFallback,
   );
   if (!boundedInput) return undefined;
 
@@ -215,17 +233,25 @@ export function boundCompactionInput(
   tools: readonly unknown[],
   contextWindow: number,
   requestPayload?: Record<string, unknown>,
+  onLimit?: (diagnostic: CompactionFallback) => void,
 ): unknown[] | undefined {
-  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return undefined;
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) {
+    onLimit?.({ reason: "context-window-unavailable" });
+    return undefined;
+  }
   const budgetTokens = Math.max(0, Math.floor(contextWindow) - COMPACTION_RESPONSE_RESERVE_TOKENS);
   const bounded = input.map((item) => item);
   let requestBytes = serializedBytes(
     buildCompactionRequest(requestPayload, bounded, instructions, tools),
   );
-  if (!Number.isFinite(requestBytes)) return undefined;
+  if (!Number.isFinite(requestBytes)) {
+    onLimit?.({ reason: "request-unavailable" });
+    return undefined;
+  }
   const fits = () => requestBytes <= MAX_COMPACTION_REQUEST_BYTES &&
     Math.ceil(requestBytes / APPROX_BYTES_PER_TOKEN) <= budgetTokens;
   if (fits()) return bounded;
+  let trimmedToolOutputs = 0;
 
   // ponytail: trim tool outputs first; if structural content still exceeds the active model window,
   // let Pi's standard compaction path handle the request instead of inventing a lossy transcript rewrite.
@@ -240,9 +266,18 @@ export function boundCompactionInput(
     if (removedBytes <= 0) continue;
     requestBytes -= removedBytes;
     bounded[index] = replacement;
+    trimmedToolOutputs++;
     if (fits()) return bounded;
   }
 
+  onLimit?.({
+    reason: requestBytes > MAX_COMPACTION_REQUEST_BYTES ? "request-size-limit" : "context-limit",
+    estimatedTokens: Math.ceil(requestBytes / APPROX_BYTES_PER_TOKEN),
+    tokenBudget: budgetTokens,
+    requestBytes,
+    byteLimit: MAX_COMPACTION_REQUEST_BYTES,
+    trimmedToolOutputs,
+  });
   return undefined;
 }
 
