@@ -58,7 +58,7 @@ export async function codexHarness(factories, options = {}) {
   if (!model) throw new Error("Pi catalog has no Astra");
   const settingsManager = SettingsManager.inMemory({
     compaction: { enabled: false, reserveTokens: 8192, keepRecentTokens: 1 },
-    retry: { enabled: false },
+    retry: options.retry ?? { enabled: false },
   });
   const sessionManager = options.sessionManager ?? SessionManager.inMemory(dir);
   let api;

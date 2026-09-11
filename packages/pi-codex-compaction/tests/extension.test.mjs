@@ -208,6 +208,35 @@ test("bounds retries and does not retry malformed provider data", async (t) => {
   }
 });
 
+test("total deadline stops a stream even when heartbeats prevent idle timeout", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let streamController;
+  let signal;
+  let attempts = 0;
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    attempts++;
+    signal = init.signal;
+    return new Response(new ReadableStream({
+      start(controller) {
+        streamController = controller;
+        signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+      },
+    }));
+  });
+  const failed = assert.rejects(
+    () => requestRemoteCompactionWithUsage({ model, apiKey: token, body: {} }),
+    /total time limit/,
+  );
+  await new Promise(setImmediate);
+  for (let minute = 1; minute <= 5; minute++) {
+    t.mock.timers.tick(60_000);
+    if (!signal.aborted) streamController.enqueue(new TextEncoder().encode(": heartbeat\n\n"));
+    await new Promise(setImmediate);
+  }
+  await failed;
+  assert.equal(attempts, 1);
+});
+
 test("rejects multiple compaction output items", () => {
   const item = (encrypted_content) => `data: ${JSON.stringify({
     type: "response.output_item.done",

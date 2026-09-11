@@ -66,6 +66,33 @@ test("identical retries and repeated toggles do not duplicate or move updates", 
   assert.deepEqual(updates(next.payload).map((u) => u.reasoning.effort), ["high", "max"]);
 });
 
+test("actual provider retries resend the same update without another state entry", async (t) => {
+  const requests = [];
+  let failNext = false;
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    requests.push(requestBody(init));
+    if (failNext) {
+      failNext = false;
+      return new Response(JSON.stringify({ error: { message: "Service unavailable", code: "server_error" } }), {
+        status: 503, headers: { "retry-after-ms": "0" },
+      });
+    }
+    return textResponse();
+  });
+  const h = await codexHarness([reasoning], { retry: { enabled: true, maxRetries: 1, baseDelayMs: 1 } });
+  try {
+    await h.session.prompt("first");
+    h.session.setThinkingLevel("high");
+    failNext = true;
+    await h.session.prompt("retry");
+    assert.equal(h.session.messages.at(-1).stopReason, "stop");
+    assert.equal(requests.length, 3);
+    assert.deepEqual(requests[1], requests[2]);
+    assert.deepEqual(updates(requests[2]).map((u) => u.reasoning.effort), ["high"]);
+    assert.equal(h.sessionManager.getBranch().filter((e) => e.customType === STATE_TYPE).length, 2);
+  } finally { await h.close(); }
+});
+
 test("tool-only continuations and retry recovery never produce adjacent updates", () => {
   let input = [user("first")];
   let result = rewriteReasoning(body(input), model, []);
