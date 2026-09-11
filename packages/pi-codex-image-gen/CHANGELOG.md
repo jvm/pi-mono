@@ -8,6 +8,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Added
 
+- Report backend image metadata, generation stages, byte counts, and elapsed time without guessing the served image model.
 - Support Flare and Sunburst Images 2.5 API model IDs and their September 8 snapshots with `xhigh` and `max` CLI quality settings. Keep existing defaults.
 
 ### Changed
@@ -17,6 +18,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Fixed
 
+- Identify subscription requests with a Pi User-Agent and distinguish Cloudflare challenges from account/model failures.
+- Bound network time, streamed/error output, prompts, and input images; handle fragmented CRLF streams and incomplete results; avoid quota-error retries and accidental file overwrites.
 - Allow GPT Image 2 native transparency preview with PNG/WebP in the API CLI, and remove outdated older-model fallback requirements from skill guidance.
 - Let `enableInstallTelemetry: false` override an enabled `PI_TELEMETRY` environment flag.
 

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { MAX_RESPONSE_BYTES, REQUEST_TIMEOUT_MS } from "../.test-dist/src/codex-response.js";
 
 import extension, {
   abortableDelay,
@@ -228,4 +229,218 @@ test("malformed backend payload fails before saving or returning image content",
   globalThis.fetch = async () => sseResponse("!!!!");
   await assert.rejects(createTool().execute("call", { prompt: "test", save: "custom", saveDir: "out" }, undefined, undefined, context(cwd)), /invalid base64/);
   await assert.rejects(readFile(join(cwd, "out", "session-1", "image-1.png")));
+});
+
+async function harness(t, responder) {
+  const cwd = await mkdtemp(join(tmpdir(), "imagegen-contract-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, ...init });
+    return responder(url, init);
+  };
+  const tool = createTool();
+  return {
+    cwd, calls, tool,
+    run: (params = {}, signal, onUpdate, ctx = context(cwd)) =>
+      tool.execute("call", { prompt: "test", save: "none", ...params }, signal, onUpdate, ctx),
+  };
+}
+
+function imageEvent(extra = {}) {
+  return { type: "response.output_item.done", item: {
+    type: "image_generation_call", id: "image-1", status: "completed", result: PNG.toString("base64"), ...extra,
+  } };
+}
+
+function streamEvents(events, { crlf = false, fragment = false, close = true, cancel = () => {} } = {}) {
+  const newline = crlf ? "\r\n" : "\n";
+  const bytes = Buffer.from(events.map(event => `data: ${JSON.stringify(event)}${newline}${newline}`).join(""));
+  return new Response(new ReadableStream({
+    start(controller) {
+      if (fragment) for (let i = 0; i < bytes.length; i++) controller.enqueue(bytes.subarray(i, i + 1));
+      else controller.enqueue(bytes);
+      if (close) controller.close();
+    },
+    cancel,
+  }));
+}
+
+test("tool sends an honest Pi User-Agent, blocks redirects, and retains the subscription route", async (t) => {
+  const h = await harness(t, () => sseResponse());
+  await h.run();
+  assert.equal(h.calls[0].url, "https://chatgpt.com/backend-api/codex/responses");
+  assert.equal(h.calls[0].headers["User-Agent"], "pi-codex-image-gen");
+  assert.equal(h.calls[0].headers.originator, "pi");
+  assert.equal(h.calls[0].redirect, "error");
+  assert.ok(h.calls[0].signal instanceof AbortSignal);
+});
+
+test("tool handles fragmented CRLF events and reports backend metadata and progress", async (t) => {
+  let cancelled = false;
+  const h = await harness(t, () => streamEvents([
+    { type: "response.image_generation_call.in_progress" },
+    { type: "response.image_generation_call.generating" },
+    imageEvent({ size: "1254x1254", quality: "low", background: "opaque", output_format: "png" }),
+    { type: "response.completed", response: { usage: {
+      total_tokens: 10, input_tokens_details: { cached_tokens: 4 }, private_data: "DO_NOT_COPY",
+    } } },
+  ], { crlf: true, fragment: true, close: false, cancel: () => { cancelled = true; } }));
+  const updates = [];
+  const result = await h.run({}, undefined, update => updates.push(update));
+  assert.deepEqual(result.details.reportedImage, {
+    size: "1254x1254", quality: "low", background: "opaque", outputFormat: "png",
+  });
+  assert.equal(result.details.backendImageModel, "unknown");
+  assert.equal(result.details.byteCount, PNG.length);
+  assert.match(result.content[0].text, /Backend-reported size: 1254x1254/);
+  assert.ok(updates.some(update => update.details?.stage === "generating"));
+  assert.deepEqual(result.details.usage, { total_tokens: 10, input_tokens_details: { cached_tokens: 4 } });
+  assert.equal(cancelled, true);
+});
+
+test("tool accepts completion-only image output and only records a model when explicitly reported", async (t) => {
+  const h = await harness(t, () => streamEvents([
+    { type: "response.completed", response: { output: [
+      imageEvent({ model: "gpt-image-2.5-flare", background: "transparent" }).item,
+    ] } },
+  ]));
+  const result = await h.run();
+  assert.equal(result.details.backendImageModel, "gpt-image-2.5-flare");
+  assert.equal(result.details.reportedImage.background, "transparent");
+});
+
+test("tool rejects incomplete, failed, malformed, and multiple-image streams without retrying", async (t) => {
+  for (const events of [
+    [imageEvent()],
+    [imageEvent(), { type: "response.incomplete" }],
+    [imageEvent({ status: "failed" }), { type: "response.completed" }],
+    [imageEvent(), imageEvent({ id: "image-2" }), { type: "response.completed" }],
+    [{ type: "error", message: jwt() }],
+  ]) {
+    await t.test(JSON.stringify(events.map(event => event.type)), async (t) => {
+      const h = await harness(t, () => streamEvents(events));
+      await assert.rejects(h.run(), error => !error.message.includes(jwt()));
+      assert.equal(h.calls.length, 1);
+    });
+  }
+  const h = await harness(t, () => new Response(`data: invalid-${jwt()}\n\n`));
+  await assert.rejects(h.run(), error => /invalid stream event/.test(error.message) && !error.message.includes(jwt()));
+  assert.equal(h.calls.length, 1);
+});
+
+test("tool classifies Cloudflare, auth, quota, and moderation failures without exposing response bodies", async (t) => {
+  for (const [status, error, headers, message] of [
+    [403, "PRIVATE_HTML", { "cf-mitigated": "challenge" }, /Cloudflare/],
+    [401, "PRIVATE_AUTH", {}, /login/],
+    [429, { error: { code: "insufficient_quota", message: jwt() } }, {}, /quota/],
+    [429, { error: { type: "usage_limit_reached", message: jwt() } }, {}, /quota/],
+    [429, { error: { type: "image_generation_user_error", message: jwt() } }, {}, /Review the prompt/],
+  ]) {
+    await t.test(String(status) + String(message), async (t) => {
+      const h = await harness(t, () => new Response(JSON.stringify(error), { status, headers }));
+      await assert.rejects(h.run(), failure =>
+        message.test(failure.message) && !failure.message.includes(jwt()) && !failure.message.includes("PRIVATE_"));
+      assert.equal(h.calls.length, 1);
+    });
+  }
+});
+
+test("tool bounds error bodies and never echoes network exceptions", async (t) => {
+  let cancelled = false;
+  const h = await harness(t, () => new Response(new ReadableStream({
+    start(controller) { controller.enqueue(Buffer.from("PRIVATE_BODY".repeat(2000))); },
+    cancel() { cancelled = true; },
+  }), { status: 401 }));
+  await assert.rejects(h.run(), error => /401/.test(error.message) && !error.message.includes("PRIVATE_BODY"));
+  assert.equal(cancelled, true);
+  globalThis.fetch = async () => { throw new Error(jwt()); };
+  await assert.rejects(h.run(), error => /connection failed/.test(error.message) && !error.message.includes(jwt()));
+});
+
+test("tool rejects oversized streams from both declared length and streamed byte count", async (t) => {
+  const h = await harness(t, () => new Response("", { headers: { "content-length": String(MAX_RESPONSE_BYTES + 1) } }));
+  await assert.rejects(h.run(), /size limit/);
+  let cancelled = false;
+  const block = Buffer.from(":" + "x".repeat(1024 * 1024) + "\n\n");
+  globalThis.fetch = async () => new Response(new ReadableStream({
+    pull(controller) { controller.enqueue(block); },
+    cancel() { cancelled = true; },
+  }));
+  await assert.rejects(h.run(), /size limit/);
+  assert.equal(cancelled, true);
+});
+
+test("tool deadline aborts both a pending connection and a stalled stream", async (t) => {
+  for (const stalledStream of [false, true]) {
+    await t.test(stalledStream ? "stream" : "connection", async (t) => {
+      const h = await harness(t, () => stalledStream
+        ? new Response(new ReadableStream({ start() {} }))
+        : new Promise(() => {}));
+      t.mock.timers.enable({ apis: ["setTimeout"] });
+      const rejected = assert.rejects(h.run(), /timed out after 5 minutes/);
+      await new Promise(setImmediate);
+      t.mock.timers.tick(REQUEST_TIMEOUT_MS);
+      await rejected;
+      assert.equal(h.calls.length, 1);
+      assert.equal(h.calls[0].signal.aborted, true);
+    });
+  }
+});
+
+test("tool cancellation interrupts a stalled stream without another generation", async (t) => {
+  let cancelled = false;
+  const h = await harness(t, () => new Response(new ReadableStream({
+    start() {},
+    cancel() { cancelled = true; },
+  })));
+  const controller = new AbortController();
+  const rejected = assert.rejects(h.run({}, controller.signal), /aborted/);
+  await new Promise(setImmediate);
+  controller.abort();
+  await rejected;
+  assert.equal(cancelled, true);
+  assert.equal(h.calls.length, 1);
+});
+
+test("tool validates save settings, routing model, prompts, and input files before generating", async (t) => {
+  const h = await harness(t, () => { throw new Error("Must not call backend"); });
+  await assert.rejects(h.run({ save: "custom", saveDir: "" }), /save=custom/);
+  await assert.rejects(h.run({ model: "gpt-image-2.5-flare" }), /routing model/);
+  await assert.rejects(h.run({ prompt: "x".repeat(32001) }), /32,000/);
+  const large = join(h.cwd, "large.png");
+  const file = await open(large, "w");
+  await file.truncate(20 * 1024 * 1024 + 1);
+  await file.close();
+  await assert.rejects(h.run({ referencedImagePaths: [large] }), /20 MiB/);
+  await assert.rejects(h.run({ referencedImagePaths: [h.cwd] }), /regular files/);
+  await assert.rejects(h.run({ numLastImagesToInclude: 1 }, undefined, undefined,
+    context(h.cwd, [{ content: [{ type: "image", mimeType: "image/png", data: "!!!!" }] }])), /invalid base64/);
+  assert.equal(h.calls.length, 0);
+});
+
+test("tool redacts credentials from revised prompts and split response text", async (t) => {
+  const h = await harness(t, () => streamEvents([
+    imageEvent({ revised_prompt: `Prompt ${jwt()}`, id: jwt() }),
+    { type: "response.completed" },
+  ]));
+  assert.doesNotMatch(JSON.stringify(await h.run()), new RegExp(jwt().replaceAll(".", "\\.")));
+  globalThis.fetch = async () => streamEvents([
+    { type: "response.output_text.delta", delta: jwt().slice(0, 20) },
+    { type: "response.output_text.delta", delta: jwt().slice(20) },
+    { type: "response.completed" },
+  ]);
+  await assert.rejects(h.run(), error => !error.message.includes(jwt()));
+});
+
+test("tool preserves an existing image on a repeated backend image ID", async (t) => {
+  const h = await harness(t, () => sseResponse());
+  const first = await h.run({ save: "custom", saveDir: "out" });
+  await writeFile(first.details.savedPath, "USER_IMAGE");
+  const second = await h.run({ save: "custom", saveDir: "out" });
+  assert.match(second.details.saveWarning, /could not be saved/);
+  assert.equal(await readFile(first.details.savedPath, "utf8"), "USER_IMAGE");
+  assert.equal(second.content[1].type, "image");
 });

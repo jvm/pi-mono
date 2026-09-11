@@ -43,7 +43,19 @@ In a Pi session:
 > Generate a pixel-art sword icon, 32×32, with a blue blade and gold hilt
 ```
 
-The agent will invoke `codex_generate_image` with your prompt, optionally include up to five local or recent conversation images for editing, stream the response from the Codex backend, and save the resulting image to disk. The `model` parameter controls the Codex routing model, not the image model. The backend selects the image model; result metadata reports `backendImageModel: "unknown"` rather than an unverified model ID.
+The agent will invoke `codex_generate_image` with your prompt, optionally include up to five local or recent conversation images for editing, stream the response from the Codex backend, and save the resulting image to disk. The `model` parameter controls the Codex routing model, not the image model. The backend selects the image model; `backendImageModel` is `"unknown"` unless the response explicitly reports an image model.
+
+The tool reports generation stages and the backend's returned size, quality, background, and format in `details.reportedImage`. These are server-reported values, not guarantees inferred from the prompt. `details.byteCount` records decoded bytes; `details.generationDurationMs` records elapsed generation/save time. Check the actual image before using it, especially for exact dimensions or alpha transparency.
+
+### Subscription reliability and limits
+
+- Requests identify this package with a Pi User-Agent. There is no Codex impersonation, browser-cookie import, or paid API fallback.
+- One five-minute network deadline covers the connection, retries, and stream. Escape cancels network work; the remote generation may still finish.
+- Prompts: 32,000 characters. References: five regular PNG/JPEG/WebP files or conversation images, at most 20 MiB each and 50 MiB combined.
+- Responses: 100 MiB total, with at most one 32 MiB decoded output image. Base64 and format signatures are checked; this is not a full image decoder. Backend text and revised prompts are limited to 4,000 characters; HTTP error bodies are read only up to 16 KiB and are not displayed.
+- Transient HTTP failures have bounded retries. Quota exhaustion, moderation errors, failed/incomplete streams, connection errors, and deadlines are not automatically retried. Avoid immediately repeating an ambiguous failure: the first generation may have consumed quota.
+- Local save settings are checked before generation. Existing files are never overwritten; a save failure still returns the inline image and a warning.
+- Cloudflare challenges are reported as connection failures, not as proof that your subscription or image model is unsupported.
 
 ### Images 2.5 and API fallback
 
