@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { beforeEach } from "node:test";
 
 process.env.CI = "1";
+process.env.PI_OFFLINE = "1";
+
+beforeEach((t) => {
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("Unmocked network request blocked"); });
+});
 
 const { default: piCodexCompaction } = await import("../extensions/index.ts");
 const {
   REMOTE_SUMMARY_MARKER,
+  COMPACTION_FALLBACK_ENTRY,
+  MAX_COMPACTION_REQUEST_BYTES,
   applyRemoteCompactionMarker,
   boundCompactionInput,
   buildFallbackSummary,
@@ -60,8 +67,13 @@ function preparation(overrides = {}) {
 
 function makePi() {
   const handlers = new Map();
+  const diagnostics = [];
   const pi = {
     handlers,
+    diagnostics,
+    appendEntry(customType, data) {
+      diagnostics.push({ customType, data });
+    },
     on(event, handler) {
       handlers.set(event, handler);
     },
@@ -82,6 +94,7 @@ function makePi() {
 function makeContext(overrides = {}) {
   return {
     model,
+    mode: "tui",
     hasUI: false,
     ui: { notify() {} },
     getSystemPrompt: () => "system",
@@ -543,9 +556,64 @@ test("reduces tool outputs before rejecting an input that cannot fit the active 
   assert.equal(boundCompactionInput([{ type: "message", content: [{ text: "a".repeat(2_000) }] }], "system", [], 1_000), undefined);
 });
 
-test("rejects token-dense input with the conservative byte bound", () => {
+test("uses UTF-8 bytes rather than UTF-16 length for the token estimate", () => {
   const input = [{ type: "message", content: [{ text: "😀".repeat(100) }] }];
   assert.equal(boundCompactionInput(input, "system", [], 8_292), undefined);
+});
+
+test("checks token boundaries separately from request bytes and rejects unknown context limits", () => {
+  const input = [{ type: "message", content: [{ text: "review this change ".repeat(20_000) }] }];
+  const requestBytes = Buffer.byteLength(JSON.stringify({ instructions: "system", input }), "utf8");
+  const estimate = Math.ceil(requestBytes / 4);
+  assert.deepEqual(boundCompactionInput(input, "system", [], estimate + 8_192), input);
+  assert.equal(boundCompactionInput(input, "system", [], estimate + 8_191), undefined);
+  for (const contextWindow of [NaN, Infinity, -Infinity, 0, -1, 8_192]) {
+    assert.equal(boundCompactionInput(input, "system", [], contextWindow), undefined);
+  }
+});
+
+test("keeps the byte ceiling even with a large token budget", async (t) => {
+  const input = [{ type: "message", content: [{ text: "x".repeat(MAX_COMPACTION_REQUEST_BYTES) }] }];
+  assert.equal(boundCompactionInput(input, "", [], 100_000_000), undefined);
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async () => { calls++; throw new Error("must not send"); });
+  await assert.rejects(requestRemoteCompaction({ model, apiKey: token, body: { input } }), /size limit/);
+  assert.equal(calls, 0);
+});
+
+test("counts the complete transformed envelope and leaves source inputs unchanged", () => {
+  const input = Object.freeze([
+    Object.freeze({ type: "function_call_output", call_id: "short", output: "OK" }),
+    Object.freeze({ type: "function_call_output", call_id: "long", output: "x".repeat(80_000) }),
+  ]);
+  const bounded = boundCompactionInput(input, "system", [], 20_000);
+  assert.equal(bounded[0], input[0]);
+  assert.match(bounded[1].output, /^\[Tool output omitted/);
+  assert.equal(input[1].output.length, 80_000);
+
+  for (const field of ["instructions", "tools", "metadata", "text"]) {
+    const payload = { input: [], [field]: "x".repeat(80_000) };
+    assert.equal(boundCompactionInput([], "small default", [], 20_000, payload), undefined, field);
+  }
+  const cyclic = {};
+  cyclic.self = cyclic;
+  assert.equal(boundCompactionInput([], "", [], 20_000, cyclic), undefined);
+});
+
+test("size trimming preserves opaque checkpoints, reasoning, user input, and custom-tool calls", () => {
+  const input = [
+    { type: "compaction", encrypted_content: "opaque-fixture".repeat(8_000) },
+    { type: "reasoning", encrypted_content: "reasoning-fixture".repeat(2_000) },
+    { type: "message", role: "user", content: [{ type: "input_text", text: "keep this input" }] },
+    { type: "custom_tool_call", call_id: "patch", name: "apply_patch", input: "keep this grammar input" },
+    { type: "custom_tool_call_output", call_id: "patch", output: "large fixture ".repeat(30_000) },
+    { type: "compaction_trigger" },
+  ];
+  const bounded = boundCompactionInput(input, "system", [], 100_000);
+  assert.ok(bounded);
+  for (const index of [0, 1, 2, 3, 5]) assert.equal(bounded[index], input[index]);
+  assert.match(bounded[4].output, /^\[Tool output omitted/);
+  assert.equal(input[4].output.length, "large fixture ".length * 30_000);
 });
 
 test("keeps a bounded readable fallback for model switches", () => {
@@ -697,4 +765,169 @@ test("does not reuse a checkpoint across account, auth-mode, or model changes", 
     },
   });
   assert.equal(await pi.handlers.get("before_provider_request")({ payload }, unknownAuthMode), undefined);
+});
+
+test("the compaction hook reports safe context-limit diagnostics instead of a silent skip", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("must not send"); });
+  const pi = makePi();
+  const notices = [];
+  const context = makeContext({
+    model: { ...model, contextWindow: 20_000 },
+    getSystemPrompt: () => "PRIVATE_PROMPT".repeat(8_000),
+    hasUI: true,
+    ui: { notify(message, level) { notices.push({ message, level }); } },
+  });
+  const result = await pi.handlers.get("session_before_compact")({
+    preparation: preparation(), signal: new AbortController().signal,
+  }, context);
+  assert.equal(result, undefined);
+  assert.equal(pi.diagnostics.length, 1);
+  const { customType, data } = pi.diagnostics[0];
+  assert.equal(customType, COMPACTION_FALLBACK_ENTRY);
+  assert.equal(data.version, 1);
+  assert.equal(data.reason, "context-limit");
+  assert.equal(data.tokenBudget, 11_808);
+  assert.equal(data.estimatedTokens, Math.ceil(data.requestBytes / 4));
+  assert.ok(data.estimatedTokens > data.tokenBudget);
+  assert.equal(data.byteLimit, MAX_COMPACTION_REQUEST_BYTES);
+  assert.equal(data.trimmedToolOutputs, 0);
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].message, /token budget.*standard Pi/);
+  assert.equal(notices[0].level, "warning");
+  assert.doesNotMatch(JSON.stringify([pi.diagnostics, notices]), /PRIVATE_PROMPT|acct_test|signature/);
+});
+
+test("the hook records explicit byte-limit and unavailable-context reasons without a request", async (t) => {
+  let requests = 0;
+  t.mock.method(globalThis, "fetch", async () => { requests++; throw new Error("must not send"); });
+  for (const [contextWindow, text, reason] of [
+    [100_000_000, "x".repeat(MAX_COMPACTION_REQUEST_BYTES), "request-size-limit"],
+    [NaN, "small", "context-window-unavailable"],
+  ]) {
+    const pi = makePi();
+    await pi.handlers.get("session_before_compact")({
+      preparation: preparation(), signal: new AbortController().signal,
+    }, makeContext({ model: { ...model, contextWindow }, getSystemPrompt: () => text }));
+    assert.equal(pi.diagnostics[0].data.reason, reason);
+  }
+  assert.equal(requests, 0);
+});
+
+test("fallback diagnostics classify preparation failures without exposing private details", async (t) => {
+  let requests = 0;
+  t.mock.method(globalThis, "fetch", async () => { requests++; throw new Error("must not send"); });
+  for (const [event, context, reason] of [
+    [{ customInstructions: "PRIVATE_INSTRUCTIONS" }, {}, "custom-instructions"],
+    [{}, { modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: false }) } }, "auth-unavailable"],
+    [{}, { modelRegistry: { getApiKeyAndHeaders: async () => { throw new Error(token); } } }, "request-unavailable"],
+    [{}, { getSystemPrompt: () => { throw new Error("PRIVATE_PREPARATION"); } }, "request-unavailable"],
+  ]) {
+    const pi = makePi();
+    const result = await pi.handlers.get("session_before_compact")({
+      preparation: preparation(), signal: new AbortController().signal, ...event,
+    }, makeContext(context));
+    assert.equal(result, undefined);
+    assert.deepEqual(pi.diagnostics, [{
+      customType: COMPACTION_FALLBACK_ENTRY, data: { version: 1, reason },
+    }]);
+  }
+  assert.equal(requests, 0);
+});
+
+test("the compaction hook sizes deleted and undefined envelope fields as transmitted", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return new Response(`data: ${JSON.stringify({
+      type: "response.completed",
+      response: { status: "completed", output: [{ type: "compaction", encrypted_content: "fixture-checkpoint" }] },
+    })}\n\n`);
+  });
+  for (const fields of [["instructions"], ["tools"], ["instructions", "tools"]]) {
+    for (const removal of ["delete", "undefined"]) {
+      const pi = makePi();
+      pi.getActiveTools = () => ["fixture"];
+      pi.getAllTools = () => [{
+        name: "fixture",
+        description: fields.includes("tools") ? "omitted schema ".repeat(8_000) : "small schema",
+        parameters: { type: "object", properties: {} },
+      }];
+      pi.events = {
+        emit(name, data) {
+          if (name !== "pi-codex-compaction:request:v1") return;
+          for (const field of fields) {
+            assert.ok(Object.hasOwn(data.payload, field));
+            if (removal === "delete") delete data.payload[field];
+            else data.payload[field] = undefined;
+          }
+        },
+      };
+      const before = requests.length;
+      const result = await pi.handlers.get("session_before_compact")({
+        preparation: preparation(), signal: new AbortController().signal,
+      }, makeContext({
+        model: { ...model, contextWindow: 20_000 },
+        getSystemPrompt: () => fields.includes("instructions") ? "omitted prompt ".repeat(8_000) : "system",
+      }));
+      assert.equal(result?.compaction?.details?.kind, "pi-codex-compaction", `${removal}: ${fields}`);
+      assert.equal(requests.length, before + 1);
+      for (const field of fields) assert.equal(Object.hasOwn(requests.at(-1), field), false);
+      assert.deepEqual(pi.diagnostics, []);
+    }
+  }
+});
+
+test("the hook reports invalid transformed requests without exposing their payload", async () => {
+  const pi = makePi();
+  pi.events = {
+    emit(name, data) {
+      if (name === "pi-codex-compaction:request:v1") data.payload.input = "PRIVATE_PAYLOAD";
+    },
+  };
+  await pi.handlers.get("session_before_compact")({
+    preparation: preparation(), signal: new AbortController().signal,
+  }, makeContext());
+  assert.deepEqual(pi.diagnostics, [{
+    customType: COMPACTION_FALLBACK_ENTRY, data: { version: 1, reason: "request-unavailable" },
+  }]);
+});
+
+test("cancellation and unsupported models do not create fallback diagnostics", async (t) => {
+  let authCalls = 0;
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("must not send"); });
+  const pi = makePi();
+  const controller = new AbortController();
+  controller.abort();
+  await pi.handlers.get("session_before_compact")({
+    preparation: preparation(), signal: controller.signal,
+  }, makeContext({ modelRegistry: { getApiKeyAndHeaders() { authCalls++; throw new Error("must not resolve auth"); } } }));
+  await pi.handlers.get("session_before_compact")({
+    preparation: preparation(), signal: new AbortController().signal,
+  }, makeContext({ model: { ...model, provider: "other" } }));
+  assert.equal(authCalls, 0);
+  assert.deepEqual(pi.diagnostics, []);
+});
+
+test("diagnostic write/notification failures do not stop standard fallback", async () => {
+  const pi = makePi();
+  pi.appendEntry = () => { throw new Error("fixture disk failure"); };
+  const result = await pi.handlers.get("session_before_compact")({
+    preparation: preparation(), customInstructions: "focus", signal: new AbortController().signal,
+  }, makeContext({ hasUI: true, ui: { notify() { throw new Error("fixture UI failure"); } } }));
+  assert.equal(result, undefined);
+});
+
+test("non-TUI and non-UI fallback never call notification APIs", async () => {
+  for (const mode of ["tui", "print", "json", "rpc"]) {
+    for (const hasUI of [false, true]) {
+      if (mode === "tui" && hasUI) continue;
+      const pi = makePi();
+      let notices = 0;
+      await pi.handlers.get("session_before_compact")({
+        preparation: preparation(), customInstructions: "focus", signal: new AbortController().signal,
+      }, makeContext({ hasUI, mode, ui: { notify() { notices++; } } }));
+      assert.equal(notices, 0, `${mode}, hasUI: ${hasUI}`);
+      assert.equal(pi.diagnostics[0].data.reason, "custom-instructions");
+    }
+  }
 });

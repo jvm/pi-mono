@@ -5,6 +5,7 @@ import { convertToLlm, serializeConversation, sessionEntryToContextMessages } fr
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
   getCodexAccountFingerprint,
+  MAX_COMPACTION_REQUEST_BYTES,
   requestRemoteCompactionWithUsage,
   resolveCodexResponsesUrl,
   type CodexCompactionUsage,
@@ -12,10 +13,24 @@ import {
 
 export const REMOTE_SUMMARY_MARKER = "[pi-codex-compaction:v1]";
 export const REMOTE_COMPACTION_KIND = "pi-codex-compaction";
+export const COMPACTION_FALLBACK_ENTRY = "pi-codex-compaction:fallback:v1";
+
+export interface CompactionFallback {
+  reason: "custom-instructions" | "auth-unavailable" | "request-unavailable" |
+    "context-window-unavailable" | "context-limit" | "request-size-limit" | "remote-failed";
+  estimatedTokens?: number;
+  tokenBudget?: number;
+  requestBytes?: number;
+  byteLimit?: number;
+  trimmedToolOutputs?: number;
+}
 
 const FALLBACK_SUMMARY_MAX_CHARS = 12_000;
 const MAX_ENCRYPTED_CONTENT_CHARS = 2_000_000;
 const COMPACTION_RESPONSE_RESERVE_TOKENS = 8_192;
+// Codex's ordinary-item estimate uses ceil(UTF-8 bytes / 4), not bytes as
+// tokens. This is a heuristic, not a tokenizer or a context-fit guarantee.
+const APPROX_BYTES_PER_TOKEN = 4;
 const TRUNCATED_TOOL_OUTPUT = "[Tool output omitted from the Codex compaction request to fit the active model context window.]";
 const PI_COMPACTION_SUMMARY_PREFIX = "The conversation history before this point was compacted into the following summary:";
 
@@ -96,6 +111,7 @@ export async function createRemoteCompaction(
   getTools: () => readonly ToolInfoLike[],
   thinkingLevel?: string,
   prepareRequest?: (payload: Record<string, unknown>, messages: readonly AgentMessage[]) => Record<string, unknown>,
+  onFallback?: (diagnostic: CompactionFallback) => void,
 ): Promise<{
   summary: string;
   firstKeptEntryId: string;
@@ -103,17 +119,22 @@ export async function createRemoteCompaction(
   details: RemoteCompactionDetails;
   usage?: Usage;
 } | undefined> {
+  if (event.signal.aborted) return undefined;
+  const skip = (reason: CompactionFallback["reason"]) => {
+    onFallback?.({ reason });
+    return undefined;
+  };
   // Pi's custom focus is part of the standard summarizer contract. The
   // Responses compaction envelope has no documented equivalent, so do not
   // silently discard it.
-  if (event.customInstructions?.trim()) return undefined;
+  if (event.customInstructions?.trim()) return skip("custom-instructions");
 
   const model = ctx.model as CodexModel | undefined;
   if (!model || !supportsRemoteCompaction(model)) return undefined;
 
   const endpoint = resolveCodexResponsesUrl(model.baseUrl);
   const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model as Model<any>);
-  if (!auth.ok || !auth.apiKey) return undefined;
+  if (!auth.ok || !auth.apiKey) return skip("auth-unavailable");
   const accountFingerprint = getCodexAccountFingerprint(auth.apiKey);
   const authKind = getCodexAuthKind(ctx.modelRegistry, model as Model<any>);
 
@@ -135,9 +156,9 @@ export async function createRemoteCompaction(
     event.signal,
     thinkingLevel,
   );
-  if (!providerPayload) return undefined;
+  if (!providerPayload) return skip("request-unavailable");
   const providerInput = providerPayload.input;
-  if (!Array.isArray(providerInput)) return undefined;
+  if (!Array.isArray(providerInput)) return skip("request-unavailable");
   const providerTools = Array.isArray(providerPayload.tools) ? providerPayload.tools : [];
 
   const input = appendCompactionItems(providerInput, event.preparation, compatiblePrevious);
@@ -150,13 +171,14 @@ export async function createRemoteCompaction(
     store: false,
     stream: true,
   });
-  if (!Array.isArray(requestBody.input)) return undefined;
+  if (!Array.isArray(requestBody.input)) return skip("request-unavailable");
   const boundedInput = boundCompactionInput(
     requestBody.input,
     instructions,
     Array.isArray(requestBody.tools) ? requestBody.tools : providerTools,
     model.contextWindow,
     requestBody,
+    onFallback,
   );
   if (!boundedInput) return undefined;
 
@@ -170,6 +192,11 @@ export async function createRemoteCompaction(
       input: boundedInput,
     },
     signal: event.signal,
+  }).catch((error: unknown) => {
+    // Only failures from the transport path receive this reason. Preparation
+    // failures are classified by the extension's outer fallback handler.
+    if (!event.signal.aborted) onFallback?.({ reason: "remote-failed" });
+    throw error;
   });
 
   const fallback = buildFallbackSummary(event.preparation, messages);
@@ -211,16 +238,25 @@ export function boundCompactionInput(
   tools: readonly unknown[],
   contextWindow: number,
   requestPayload?: Record<string, unknown>,
+  onLimit?: (diagnostic: CompactionFallback) => void,
 ): unknown[] | undefined {
-  const budget = Math.max(1, Math.floor(contextWindow - COMPACTION_RESPONSE_RESERVE_TOKENS));
-  // A byte-level bound is conservative when the active model's tokenizer is unavailable:
-  // a token can be represented by a single UTF-8 byte, but not fewer.
-  const budgetBytes = budget;
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) {
+    onLimit?.({ reason: "context-window-unavailable" });
+    return undefined;
+  }
+  const budgetTokens = Math.max(0, Math.floor(contextWindow) - COMPACTION_RESPONSE_RESERVE_TOKENS);
   const bounded = input.map((item) => item);
-  let requestBytes = estimateConservativeBytes(
+  let requestBytes = serializedBytes(
     buildCompactionRequest(requestPayload, bounded, instructions, tools),
   );
-  if (requestBytes <= budgetBytes) return bounded;
+  if (!Number.isFinite(requestBytes)) {
+    onLimit?.({ reason: "request-unavailable" });
+    return undefined;
+  }
+  const fits = () => requestBytes <= MAX_COMPACTION_REQUEST_BYTES &&
+    Math.ceil(requestBytes / APPROX_BYTES_PER_TOKEN) <= budgetTokens;
+  if (fits()) return bounded;
+  let trimmedToolOutputs = 0;
 
   // ponytail: trim tool outputs first; if structural content still exceeds the active model window,
   // let Pi's standard compaction path handle the request instead of inventing a lossy transcript rewrite.
@@ -229,11 +265,24 @@ export function boundCompactionInput(
     const replacement = trimToolOutput(item);
     if (!replacement) continue;
 
-    requestBytes += estimateConservativeBytes(replacement) - estimateConservativeBytes(item);
+    const removedBytes = serializedBytes(item) - serializedBytes(replacement);
+    // A short output can be smaller than the omission notice. Never make a
+    // request larger while trying to fit either limit.
+    if (removedBytes <= 0) continue;
+    requestBytes -= removedBytes;
     bounded[index] = replacement;
-    if (requestBytes <= budgetBytes) return bounded;
+    trimmedToolOutputs++;
+    if (fits()) return bounded;
   }
 
+  onLimit?.({
+    reason: requestBytes > MAX_COMPACTION_REQUEST_BYTES ? "request-size-limit" : "context-limit",
+    estimatedTokens: Math.ceil(requestBytes / APPROX_BYTES_PER_TOKEN),
+    tokenBudget: budgetTokens,
+    requestBytes,
+    byteLimit: MAX_COMPACTION_REQUEST_BYTES,
+    trimmedToolOutputs,
+  });
   return undefined;
 }
 
@@ -486,10 +535,12 @@ function buildCompactionRequest(
   instructions: string,
   tools: readonly unknown[],
 ): Record<string, unknown> {
-  const payload: Record<string, unknown> = requestPayload ? { ...requestPayload } : {};
-  payload.instructions = instructions;
+  // A supplied envelope is authoritative, including fields a listener removed.
+  // Separate defaults apply only to callers without a complete payload.
+  const payload: Record<string, unknown> = requestPayload
+    ? { ...requestPayload }
+    : { instructions, ...(tools.length > 0 ? { tools } : {}) };
   payload.input = input;
-  if (tools.length > 0 || requestPayload && "tools" in requestPayload) payload.tools = tools;
   return payload;
 }
 
@@ -510,10 +561,10 @@ function trimToolOutput(value: unknown): unknown | undefined {
   return undefined;
 }
 
-function estimateConservativeBytes(value: unknown): number {
+function serializedBytes(value: unknown): number {
   try {
     const json = JSON.stringify(value) ?? "";
-    return new TextEncoder().encode(json).byteLength;
+    return Buffer.byteLength(json, "utf8");
   } catch {
     return Number.POSITIVE_INFINITY;
   }

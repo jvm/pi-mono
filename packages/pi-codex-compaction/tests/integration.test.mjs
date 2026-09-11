@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { beforeEach } from "node:test";
 import { codexHarness, compactionResponse, requestBody, textResponse } from "../../../tests/codex-harness.mjs";
 
 process.env.CI = "1";
 process.env.PI_OFFLINE = "1";
+beforeEach((t) => {
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("Unmocked network request blocked"); });
+});
 const { default: fast } = await import("../../pi-fast/extensions/index.ts");
 const { default: tools } = await import("../../pi-codex-tools/extensions/index.ts");
 const { default: compaction } = await import("../extensions/index.ts");
+const { COMPACTION_FALLBACK_ENTRY } = await import("../src/index.ts");
 const zeroUsage = {
   input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
@@ -99,6 +103,107 @@ test("a remote rejection uses the actual standard Pi compactor", async (t) => {
     assert.notEqual(result.details?.kind, "pi-codex-compaction");
     assert.equal(requests.length, 2);
     assert.equal(requests[1].input.some((item) => item.type === "compaction_trigger"), false);
+    assert.deepEqual(h.sessionManager.getBranch().find((entry) => entry.customType === COMPACTION_FALLBACK_ENTRY)?.data, {
+      version: 1, reason: "remote-failed",
+    });
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
+test("real Pi uses remote compaction when transcript bytes exceed the token budget", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    const body = requestBody(init);
+    requests.push(body);
+    return body.input.some((item) => item.type === "compaction_trigger")
+      ? compactionResponse()
+      : textResponse("unexpected standard fallback");
+  });
+  const h = await codexHarness([compaction]);
+  try {
+    // Synthetic history: no private session text or encrypted provider data.
+    const oldText = "Keep the implementation and regression tests consistent.\n".repeat(6_000);
+    const tokenBudget = h.model.contextWindow - 8_192;
+    assert.ok(Buffer.byteLength(oldText) > tokenBudget);
+    for (const [index, content] of [oldText, "kept request"].entries()) {
+      h.sessionManager.appendMessage({ role: "user", content, timestamp: index + 1 });
+    }
+    const result = await h.session.compact();
+    assert.equal(result.details?.kind, "pi-codex-compaction");
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].input.at(-1).type, "compaction_trigger");
+    assert.ok(requests[0].input.some((item) => JSON.stringify(item).includes(oldText.slice(0, 50))));
+    assert.equal(JSON.stringify(requests[0].input).includes("kept request"), false);
+    assert.equal(h.sessionManager.getBranch().findLast((entry) => entry.type === "compaction").fromHook, true);
+    assert.equal(h.sessionManager.getBranch().some((entry) => entry.customType === COMPACTION_FALLBACK_ENTRY), false);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
+test("real Pi records a size fallback and keeps its diagnostic out of later model input", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    const body = requestBody(init);
+    requests.push(body);
+    assert.equal(body.input.some((item) => item.type === "compaction_trigger"), false);
+    return textResponse("standard summary");
+  });
+  const h = await codexHarness([compaction]);
+  try {
+    await h.session.setModel({ ...h.model, contextWindow: 20_000 });
+    for (const [index, content] of ["PRIVATE_HISTORY ".repeat(6_000), "kept request"].entries()) {
+      h.sessionManager.appendMessage({ role: "user", content, timestamp: index + 1 });
+    }
+    const result = await h.session.compact();
+    assert.equal(result.summary, "standard summary");
+    assert.equal(requests.length, 1);
+    const branch = h.sessionManager.getBranch();
+    const data = branch.find((entry) => entry.customType === COMPACTION_FALLBACK_ENTRY)?.data;
+    assert.equal(data.reason, "context-limit");
+    assert.ok(data.estimatedTokens > data.tokenBudget);
+    assert.doesNotMatch(JSON.stringify(data), /PRIVATE_HISTORY|acct_fixture|test-signature/);
+    assert.equal(branch.findLast((entry) => entry.type === "compaction").fromHook, false);
+    await h.session.prompt("continue", { expandPromptTemplates: false });
+    assert.equal(requests.length, 2);
+    assert.equal(JSON.stringify(requests[1]).includes(COMPACTION_FALLBACK_ENTRY), false);
+    assert.equal(JSON.stringify(requests[1]).includes("estimatedTokens"), false);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
+test("real Pi sizes the envelope after a cooperating extension removes fields", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    const body = requestBody(init);
+    requests.push(body);
+    return body.input.some((item) => item.type === "compaction_trigger")
+      ? compactionResponse()
+      : textResponse("unexpected standard fallback");
+  });
+  const h = await codexHarness([compaction, (pi) => {
+    pi.events.on("pi-codex-compaction:tools:v1", (data) => {
+      assert.ok(data.tools.length > 0);
+      data.tools = [{ ...data.tools[0], description: "omitted schema ".repeat(8_000) }];
+    });
+    pi.events.on("pi-codex-compaction:request:v1", (data) => {
+      delete data.payload.instructions;
+      delete data.payload.tools;
+    });
+  }]);
+  try {
+    await h.session.setModel({ ...h.model, contextWindow: 20_000 });
+    for (const [index, content] of ["old request", "kept request"].entries()) {
+      h.sessionManager.appendMessage({ role: "user", content, timestamp: index + 1 });
+    }
+    const result = await h.session.compact();
+    assert.equal(result.details?.kind, "pi-codex-compaction");
+    assert.equal(requests.length, 1);
+    assert.equal(Object.hasOwn(requests[0], "instructions"), false);
+    assert.equal(Object.hasOwn(requests[0], "tools"), false);
+    assert.equal(requests[0].input.at(-1).type, "compaction_trigger");
+    assert.equal(JSON.stringify(requests[0].input).includes("kept request"), false);
+    assert.equal(h.sessionManager.getBranch().findLast((entry) => entry.type === "compaction").fromHook, true);
+    assert.equal(h.sessionManager.getBranch().some((entry) => entry.customType === COMPACTION_FALLBACK_ENTRY), false);
     assert.deepEqual(h.errors, []);
   } finally { await h.close(); }
 });
