@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-11
+
 ### Fixed
 
 - Estimate compaction tokens separately from request bytes so long Codex sessions do not fall back merely because UTF-8 bytes exceed the token budget.
