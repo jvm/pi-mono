@@ -5,6 +5,7 @@ import { convertToLlm, serializeConversation, sessionEntryToContextMessages } fr
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import {
   getCodexAccountFingerprint,
+  MAX_COMPACTION_REQUEST_BYTES,
   requestRemoteCompactionWithUsage,
   resolveCodexResponsesUrl,
   type CodexCompactionUsage,
@@ -16,6 +17,9 @@ export const REMOTE_COMPACTION_KIND = "pi-codex-compaction";
 const FALLBACK_SUMMARY_MAX_CHARS = 12_000;
 const MAX_ENCRYPTED_CONTENT_CHARS = 2_000_000;
 const COMPACTION_RESPONSE_RESERVE_TOKENS = 8_192;
+// Codex's ordinary-item estimate uses ceil(UTF-8 bytes / 4), not bytes as
+// tokens. This is a heuristic, not a tokenizer or a context-fit guarantee.
+const APPROX_BYTES_PER_TOKEN = 4;
 const TRUNCATED_TOOL_OUTPUT = "[Tool output omitted from the Codex compaction request to fit the active model context window.]";
 const PI_COMPACTION_SUMMARY_PREFIX = "The conversation history before this point was compacted into the following summary:";
 
@@ -212,15 +216,16 @@ export function boundCompactionInput(
   contextWindow: number,
   requestPayload?: Record<string, unknown>,
 ): unknown[] | undefined {
-  const budget = Math.max(1, Math.floor(contextWindow - COMPACTION_RESPONSE_RESERVE_TOKENS));
-  // A byte-level bound is conservative when the active model's tokenizer is unavailable:
-  // a token can be represented by a single UTF-8 byte, but not fewer.
-  const budgetBytes = budget;
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return undefined;
+  const budgetTokens = Math.max(0, Math.floor(contextWindow) - COMPACTION_RESPONSE_RESERVE_TOKENS);
   const bounded = input.map((item) => item);
-  let requestBytes = estimateConservativeBytes(
+  let requestBytes = serializedBytes(
     buildCompactionRequest(requestPayload, bounded, instructions, tools),
   );
-  if (requestBytes <= budgetBytes) return bounded;
+  if (!Number.isFinite(requestBytes)) return undefined;
+  const fits = () => requestBytes <= MAX_COMPACTION_REQUEST_BYTES &&
+    Math.ceil(requestBytes / APPROX_BYTES_PER_TOKEN) <= budgetTokens;
+  if (fits()) return bounded;
 
   // ponytail: trim tool outputs first; if structural content still exceeds the active model window,
   // let Pi's standard compaction path handle the request instead of inventing a lossy transcript rewrite.
@@ -229,9 +234,13 @@ export function boundCompactionInput(
     const replacement = trimToolOutput(item);
     if (!replacement) continue;
 
-    requestBytes += estimateConservativeBytes(replacement) - estimateConservativeBytes(item);
+    const removedBytes = serializedBytes(item) - serializedBytes(replacement);
+    // A short output can be smaller than the omission notice. Never make a
+    // request larger while trying to fit either limit.
+    if (removedBytes <= 0) continue;
+    requestBytes -= removedBytes;
     bounded[index] = replacement;
-    if (requestBytes <= budgetBytes) return bounded;
+    if (fits()) return bounded;
   }
 
   return undefined;
@@ -487,9 +496,11 @@ function buildCompactionRequest(
   tools: readonly unknown[],
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = requestPayload ? { ...requestPayload } : {};
-  payload.instructions = instructions;
+  // Measure the actual transformed envelope, including cooperating extensions'
+  // instruction/tool changes. The separate arguments are defaults only.
+  if (!("instructions" in payload)) payload.instructions = instructions;
   payload.input = input;
-  if (tools.length > 0 || requestPayload && "tools" in requestPayload) payload.tools = tools;
+  if (!("tools" in payload) && tools.length > 0) payload.tools = tools;
   return payload;
 }
 
@@ -510,10 +521,10 @@ function trimToolOutput(value: unknown): unknown | undefined {
   return undefined;
 }
 
-function estimateConservativeBytes(value: unknown): number {
+function serializedBytes(value: unknown): number {
   try {
     const json = JSON.stringify(value) ?? "";
-    return new TextEncoder().encode(json).byteLength;
+    return Buffer.byteLength(json, "utf8");
   } catch {
     return Number.POSITIVE_INFINITY;
   }

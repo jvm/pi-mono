@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-const MAX_REQUEST_BYTES = 16 * 1024 * 1024;
+export const MAX_COMPACTION_REQUEST_BYTES = 16 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_ENCRYPTED_CONTENT_CHARS = 2_000_000;
 const REQUEST_HEADER_TIMEOUT_MS = 30_000;
@@ -57,7 +57,7 @@ export async function requestRemoteCompactionWithUsage(
   const accountId = extractAccountId(request.apiKey);
   const headers = buildHeaders(request, accountId);
   const body = JSON.stringify(request.body);
-  if (new TextEncoder().encode(body).byteLength > MAX_REQUEST_BYTES) {
+  if (Buffer.byteLength(body, "utf8") > MAX_COMPACTION_REQUEST_BYTES) {
     throw new Error("Codex compaction request exceeded the size limit");
   }
 

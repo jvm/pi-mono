@@ -9,7 +9,7 @@ Keep long Pi sessions usable on OpenAI Codex models by replacing Pi's local summ
 - Retains the normal Codex Responses request envelope, including system instructions, active tool schemas, reasoning settings, prompt-cache fields, and routing fields.
 - Persists Codex's opaque encrypted checkpoint and rehydrates it only for supported Codex requests.
 - Reuses checkpoints only for the same model, trusted endpoint, Codex account, and authentication mode.
-- Bounds input with a UTF-8-aware token estimate, trims tool output when necessary, retries transient failures, and honors cancellation.
+- Bounds input with a Codex-style UTF-8 token estimate and a separate hard byte limit, trims tool output when necessary, retries transient failures, and honors cancellation.
 - Falls back to standard Pi compaction on failure or when custom compaction instructions are requested.
 - Keeps a bounded readable transcript excerpt so switching models or providers remains usable.
 
@@ -40,6 +40,22 @@ When Pi starts compaction on a supported Codex model, the extension sends a stre
 Compaction uses the model active when Pi triggers it. If a session switches from a larger to a smaller model, the remote request is bounded against the new model's context window and tool outputs are reduced before sending. A previous opaque checkpoint is treated as incompatible after a model, endpoint, account, or authentication-mode switch; Pi's readable previous summary is sent instead. If the full request still cannot fit, the extension leaves compaction to Pi's normal implementation.
 
 If the remote request fails, is cancelled, or returns an unexpected response, Pi's standard compaction path runs. Custom compaction instructions also use Pi's standard path because RemoteCompactionV2 has no documented custom-instructions field. The direct checkpoint request is restricted to `https://chatgpt.com`, rejects redirects, limits request/response size, and never decodes or logs `encrypted_content`. No configuration is required.
+
+### Size limits
+
+Input is estimated as `ceil(UTF-8 request bytes / 4)`, with 8,192 tokens reserved
+from the active model's context window. This uses Codex's ordinary-item heuristic,
+not an exact tokenizer. The complete transformed request is counted, including
+system instructions, tool definitions, and routing fields. Opaque checkpoints
+and image data remain counted at their serialized size; they are not decoded or
+discounted. Non-ASCII text uses UTF-8 bytes, not JavaScript string length.
+
+The uncompressed request also has an independent **16 MiB hard limit**. Tool
+outputs are reduced only when one of these limits is exceeded. User messages,
+tool calls, and opaque checkpoints are not removed. If the remaining request
+still cannot fit, or the model's context limit is unknown, standard Pi compaction
+runs. The estimate can differ from the server's token count; a server rejection
+still uses the existing fallback.
 
 ## Development
 

@@ -6,6 +6,7 @@ process.env.CI = "1";
 const { default: piCodexCompaction } = await import("../extensions/index.ts");
 const {
   REMOTE_SUMMARY_MARKER,
+  MAX_COMPACTION_REQUEST_BYTES,
   applyRemoteCompactionMarker,
   boundCompactionInput,
   buildFallbackSummary,
@@ -543,9 +544,48 @@ test("reduces tool outputs before rejecting an input that cannot fit the active 
   assert.equal(boundCompactionInput([{ type: "message", content: [{ text: "a".repeat(2_000) }] }], "system", [], 1_000), undefined);
 });
 
-test("rejects token-dense input with the conservative byte bound", () => {
+test("uses UTF-8 bytes rather than UTF-16 length for the token estimate", () => {
   const input = [{ type: "message", content: [{ text: "😀".repeat(100) }] }];
   assert.equal(boundCompactionInput(input, "system", [], 8_292), undefined);
+});
+
+test("checks token boundaries separately from request bytes and rejects unknown context limits", () => {
+  const input = [{ type: "message", content: [{ text: "review this change ".repeat(20_000) }] }];
+  const requestBytes = Buffer.byteLength(JSON.stringify({ instructions: "system", input }), "utf8");
+  const estimate = Math.ceil(requestBytes / 4);
+  assert.deepEqual(boundCompactionInput(input, "system", [], estimate + 8_192), input);
+  assert.equal(boundCompactionInput(input, "system", [], estimate + 8_191), undefined);
+  for (const contextWindow of [NaN, Infinity, -Infinity, 0, -1, 8_192]) {
+    assert.equal(boundCompactionInput(input, "system", [], contextWindow), undefined);
+  }
+});
+
+test("keeps the byte ceiling even with a large token budget", async (t) => {
+  const input = [{ type: "message", content: [{ text: "x".repeat(MAX_COMPACTION_REQUEST_BYTES) }] }];
+  assert.equal(boundCompactionInput(input, "", [], 100_000_000), undefined);
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async () => { calls++; throw new Error("must not send"); });
+  await assert.rejects(requestRemoteCompaction({ model, apiKey: token, body: { input } }), /size limit/);
+  assert.equal(calls, 0);
+});
+
+test("counts the complete transformed envelope and leaves source inputs unchanged", () => {
+  const input = Object.freeze([
+    Object.freeze({ type: "function_call_output", call_id: "short", output: "OK" }),
+    Object.freeze({ type: "function_call_output", call_id: "long", output: "x".repeat(80_000) }),
+  ]);
+  const bounded = boundCompactionInput(input, "system", [], 20_000);
+  assert.equal(bounded[0], input[0]);
+  assert.match(bounded[1].output, /^\[Tool output omitted/);
+  assert.equal(input[1].output.length, 80_000);
+
+  for (const field of ["instructions", "tools", "metadata", "text"]) {
+    const payload = { input: [], [field]: "x".repeat(80_000) };
+    assert.equal(boundCompactionInput([], "small default", [], 20_000, payload), undefined, field);
+  }
+  const cyclic = {};
+  cyclic.self = cyclic;
+  assert.equal(boundCompactionInput([], "", [], 20_000, cyclic), undefined);
 });
 
 test("keeps a bounded readable fallback for model switches", () => {

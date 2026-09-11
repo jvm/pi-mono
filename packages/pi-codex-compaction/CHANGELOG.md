@@ -6,6 +6,11 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Estimate compaction tokens separately from request bytes so long Codex sessions do not fall back merely because UTF-8 bytes exceed the token budget.
+- Preserve the independent 16 MiB request ceiling, count the complete transformed envelope, and reject unavailable context limits.
+
 ## [0.1.2] - 2026-09-11
 
 ### Fixed

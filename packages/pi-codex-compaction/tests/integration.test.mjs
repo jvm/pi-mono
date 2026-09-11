@@ -102,3 +102,32 @@ test("a remote rejection uses the actual standard Pi compactor", async (t) => {
     assert.deepEqual(h.errors, []);
   } finally { await h.close(); }
 });
+
+test("real Pi uses remote compaction when transcript bytes exceed the token budget", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    const body = requestBody(init);
+    requests.push(body);
+    return body.input.some((item) => item.type === "compaction_trigger")
+      ? compactionResponse()
+      : textResponse("unexpected standard fallback");
+  });
+  const h = await codexHarness([compaction]);
+  try {
+    // Synthetic history: no private session text or encrypted provider data.
+    const oldText = "Keep the implementation and regression tests consistent.\n".repeat(6_000);
+    const tokenBudget = h.model.contextWindow - 8_192;
+    assert.ok(Buffer.byteLength(oldText) > tokenBudget);
+    for (const [index, content] of [oldText, "kept request"].entries()) {
+      h.sessionManager.appendMessage({ role: "user", content, timestamp: index + 1 });
+    }
+    const result = await h.session.compact();
+    assert.equal(result.details?.kind, "pi-codex-compaction");
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].input.at(-1).type, "compaction_trigger");
+    assert.ok(requests[0].input.some((item) => JSON.stringify(item).includes(oldText.slice(0, 50))));
+    assert.equal(JSON.stringify(requests[0].input).includes("kept request"), false);
+    assert.equal(h.sessionManager.getBranch().findLast((entry) => entry.type === "compaction").fromHook, true);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
