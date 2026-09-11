@@ -470,6 +470,9 @@ export default function codexImageGen(pi: ExtensionAPI) {
 		promptGuidelines: [
 			"Use codex_generate_image when the user asks to generate or edit a raster image with OpenAI/Codex image generation.",
 			"Do not use codex_generate_image without a clear image-generation request, because it consumes the user's Codex image quota.",
+			"The model parameter selects a Codex routing model, not an image model. Do not pass gpt-image-* IDs.",
+			"Output metadata is backend-reported, not independently verified. Check pixels for dimensions and transparency; do not infer a served model from appearance or a successful request.",
+			"Do not automatically repeat quota, connection, deadline, or incomplete-stream failures. The backend may already have consumed image quota.",
 		],
 		parameters: TOOL_PARAMS,
 		executionMode: "parallel", // #4: safe to run concurrently — no shared state, saves serialized per-path

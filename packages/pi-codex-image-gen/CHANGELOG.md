@@ -14,7 +14,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Changed
 
-- Describe the Codex image model as backend-selected. Return `backendImageModel: "unknown"` instead of an unverified `gpt-image-2` label.
+- Describe the Codex image model as backend-selected. Report its ID only if the backend supplies one; otherwise return `backendImageModel: "unknown"`.
 - Share install telemetry mechanics through `@mocito/install-telemetry` while preserving Pi-specific settings and state paths.
 
 ### Fixed
