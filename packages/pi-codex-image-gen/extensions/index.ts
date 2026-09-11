@@ -3,17 +3,19 @@
  *
  * Registers `codex_generate_image`, a tool that uses Pi's existing
  * openai-codex ChatGPT/Codex auth to call the Codex Responses backend with the
- * native `image_generation` tool. The backend maps that tool to gpt-image-2.
+ * native `image_generation` tool. The backend selects the image model.
  */
 
 import { readFileSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { mkdir, open, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { type ExtensionAPI, getAgentDir, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, type ExtensionAPI, getAgentDir, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
+import { abortable, httpFailure, MAX_IMAGE_BYTES, parseCodexSse, withRequestDeadline, type ParsedCodexResponse } from "../src/codex-response.js";
 
 const PACKAGE_NAME = "pi-codex-image-gen";
 const PROVIDER = "openai-codex";
@@ -26,6 +28,9 @@ const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
 const MAX_RETRY_DELAY_MS = 30_000;
 const MAX_EDIT_IMAGES = 5;
+const MAX_INPUT_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_TOTAL_INPUT_BYTES = 50 * 1024 * 1024;
+const MAX_PROMPT_CHARS = 32_000;
 
 const SAVE_MODES = ["none", "project", "global", "custom"] as const;
 type SaveMode = (typeof SAVE_MODES)[number];
@@ -34,11 +39,6 @@ const OUTPUT_FORMATS = ["png", "jpeg", "webp"] as const;
 type OutputFormat = (typeof OUTPUT_FORMATS)[number];
 
 // --- #1: Retry helpers with exponential backoff + jitter ---
-
-function isRetryableStatus(status: number, errorText: string): boolean {
-	if ([429, 500, 502, 503, 504].includes(status)) return true;
-	return /rate.?limit|overloaded|service.?unavailable|upstream.?connect|connection.?refused/i.test(errorText);
-}
 
 export function parseRetryAfter(value: string | null, nowMs = Date.now()): number | undefined {
 	if (!value) return undefined;
@@ -89,9 +89,9 @@ export function abortableDelay(milliseconds: number, signal?: AbortSignal): Prom
 // --- Tool parameter schema ---
 
 const TOOL_PARAMS = Type.Object({
-	prompt: Type.String({ description: "The image prompt. Be specific about subject, composition, style, text, and constraints." }),
+	prompt: Type.String({ minLength: 1, maxLength: MAX_PROMPT_CHARS, description: "The image prompt. Be specific about subject, composition, style, text, and constraints." }),
 	model: Type.Optional(
-		Type.String({ description: `Codex model that should invoke image generation. Defaults to ${DEFAULT_MODEL}.` }),
+		Type.String({ minLength: 1, maxLength: 200, description: `Codex routing model, not an image model selector. Defaults to ${DEFAULT_MODEL}.` }),
 	),
 	outputFormat: Type.Optional(StringEnum(OUTPUT_FORMATS)),
 	save: Type.Optional(StringEnum(SAVE_MODES)),
@@ -130,43 +130,10 @@ interface SaveConfig {
 	outputDir?: string;
 }
 
-interface GeneratedImage {
-	id: string;
-	status: string;
-	result: string;
-	revisedPrompt?: string;
-}
-
-interface ParsedCodexResponse {
-	image?: GeneratedImage;
-	text: string[];
-	responseId?: string;
-	usage?: unknown;
-}
-
 interface InputImage {
 	data: string;
 	mimeType: string;
 }
-
-// --- #11: Typed SSE event discriminated union ---
-
-type CodexSseEvent =
-	| { type: "error"; message?: string; code?: string }
-	| { type: "response.failed"; response?: { error?: { message?: string } } }
-	| { type: "response.created"; response?: { id?: string } }
-	| { type: "response.output_text.delta"; delta?: string }
-	| {
-			type: "response.output_item.done";
-			item?: {
-				type?: string;
-				id?: string | number;
-				status?: string;
-				result?: string;
-				revised_prompt?: string;
-			};
-	  }
-	| { type: "response.completed"; response?: { id?: string; usage?: unknown } };
 
 // --- JWT helpers ---
 
@@ -177,8 +144,8 @@ function decodeJwtPayload(token: string): Record<string, unknown> {
 	}
 	try {
 		return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as Record<string, unknown>;
-	} catch (error) {
-		throw new Error(`Failed to decode OpenAI Codex auth token: ${error instanceof Error ? error.message : String(error)}`);
+	} catch {
+		throw new Error("Failed to decode OpenAI Codex auth token. Run /login for openai-codex again.");
 	}
 }
 
@@ -208,7 +175,7 @@ function readConfigFile(path: string): ExtensionConfig {
 export function loadConfig(cwd: string, projectTrusted: boolean, agentDir = getAgentDir()): ExtensionConfig {
 	const globalConfig = readConfigFile(join(agentDir, "extensions", "codex-image-gen.json"));
 	if (!projectTrusted) return globalConfig;
-	const projectConfig = readConfigFile(join(cwd, ".pi", "extensions", "codex-image-gen.json"));
+	const projectConfig = readConfigFile(join(cwd, CONFIG_DIR_NAME, "extensions", "codex-image-gen.json"));
 	return { ...globalConfig, ...projectConfig };
 }
 
@@ -221,7 +188,7 @@ export function resolveUnderCwd(cwd: string, path: string, homeDir = homedir()):
 }
 
 function sanitizePathPart(value: string, fallback: string): string {
-	const sanitized = value
+	const sanitized = value.slice(0, 128)
 		.split("")
 		.map((ch) => (/[a-zA-Z0-9_-]/.test(ch) ? ch : "_"))
 		.join("")
@@ -239,7 +206,7 @@ function resolveSaveConfig(params: ToolParams, cwd: string, sessionId: string, c
 		throw new Error(`Invalid save mode: ${mode}. Expected one of ${SAVE_MODES.join(", ")}.`);
 	}
 	if (mode === "project") {
-		return { mode, outputDir: join(cwd, ".pi", "generated-images", safeSessionId) };
+		return { mode, outputDir: join(cwd, CONFIG_DIR_NAME, "generated-images", safeSessionId) };
 	}
 	if (mode === "global") {
 		return { mode, outputDir: join(getAgentDir(), "generated-images", safeSessionId) };
@@ -270,12 +237,13 @@ function imagePath(outputFormat: OutputFormat, outputDir: string, imageCallId: s
 }
 
 export function decodeImageData(base64Data: string, outputFormat: OutputFormat): Buffer {
+	if (base64Data.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4) throw new Error("Codex image exceeded the 32 MiB size limit.");
 	const value = base64Data.trim();
-	if (!value || value.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+	if (!value || value.length % 4 !== 0 || /[^A-Za-z0-9+/=]/.test(value)) {
 		throw new Error("Codex returned invalid base64 image data.");
 	}
 	const bytes = Buffer.from(value, "base64");
-	if (bytes.length === 0 || bytes.toString("base64") !== value) {
+	if (bytes.length === 0 || bytes.length > MAX_IMAGE_BYTES || bytes.toString("base64") !== value) {
 		throw new Error("Codex returned invalid base64 image data.");
 	}
 	const validSignature =
@@ -294,8 +262,8 @@ async function saveImage(
 ): Promise<string> {
 	const filePath = imagePath(outputFormat, outputDir, imageCallId);
 	await withFileMutationQueue(filePath, async () => {
-		await mkdir(outputDir, { recursive: true });
-		await writeFile(filePath, bytes);
+		await mkdir(outputDir, { recursive: true, mode: 0o700 });
+		await writeFile(filePath, bytes, { flag: "wx", mode: 0o600 });
 	});
 	return filePath;
 }
@@ -322,6 +290,29 @@ function mimeFromBytes(bytes: Buffer, path: string): string {
 	throw new Error(`Referenced image is unavailable or unsupported: ${path}`);
 }
 
+async function readInputImage(path: string): Promise<Buffer> {
+	// O_NONBLOCK prevents named pipes from blocking before the regular-file check.
+	const file = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+	try {
+		const info = await file.stat();
+		if (!info.isFile()) throw new Error("Referenced images must be regular files.");
+		if (info.size > MAX_INPUT_IMAGE_BYTES) throw new Error("Referenced image exceeds 20 MiB.");
+		const blocks: Buffer[] = [];
+		let total = 0;
+		while (true) {
+			const block = Buffer.alloc(Math.min(64 * 1024, MAX_INPUT_IMAGE_BYTES + 1 - total));
+			const { bytesRead } = await file.read(block, 0, block.length, null);
+			if (!bytesRead) break;
+			total += bytesRead;
+			if (total > MAX_INPUT_IMAGE_BYTES) throw new Error("Referenced image exceeds 20 MiB.");
+			blocks.push(block.subarray(0, bytesRead));
+		}
+		return Buffer.concat(blocks, total);
+	} finally {
+		await file.close();
+	}
+}
+
 export async function resolveInputImages(
 	params: ToolParams,
 	cwd: string,
@@ -333,19 +324,22 @@ export async function resolveInputImages(
 	}
 	if (paths.length > MAX_EDIT_IMAGES) throw new Error(`referencedImagePaths accepts at most ${MAX_EDIT_IMAGES} paths.`);
 	if (paths.length > 0) {
-		return Promise.all(
-			paths.map(async (path) => {
-				const normalized = path.startsWith("@") ? path.slice(1) : path;
-				const absolutePath = resolveUnderCwd(cwd, normalized);
-				let bytes: Buffer;
-				try {
-					bytes = await readFile(absolutePath);
-				} catch (error) {
-					throw new Error(`Unable to read referenced image at ${absolutePath}: ${error instanceof Error ? error.message : String(error)}`);
-				}
-				return { data: bytes.toString("base64"), mimeType: mimeFromBytes(bytes, absolutePath) };
-			}),
-		);
+		const images: InputImage[] = [];
+		let total = 0;
+		for (const path of paths) {
+			const normalized = path.startsWith("@") ? path.slice(1) : path;
+			const absolutePath = resolveUnderCwd(cwd, normalized);
+			let bytes: Buffer;
+			try {
+				bytes = await readInputImage(absolutePath);
+			} catch (error) {
+				throw new Error(`Unable to read referenced image at ${absolutePath}: ${error instanceof Error ? error.message : String(error)}`);
+			}
+			total += bytes.length;
+			if (total > MAX_TOTAL_INPUT_BYTES) throw new Error("Referenced images exceed 50 MiB in total.");
+			images.push({ data: bytes.toString("base64"), mimeType: mimeFromBytes(bytes, absolutePath) });
+		}
+		return images;
 	}
 	if (params.numLastImagesToInclude !== undefined) {
 		const count = params.numLastImagesToInclude;
@@ -355,6 +349,16 @@ export async function resolveInputImages(
 		const images = selectRecentImages(messages, count);
 		if (images.length !== count) {
 			throw new Error(`Requested the last ${count} conversation images, but only ${images.length} were available.`);
+		}
+		let total = 0;
+		for (const image of images) {
+			if (image.data.length > Math.ceil(MAX_INPUT_IMAGE_BYTES / 3) * 4) throw new Error("Conversation image exceeds 20 MiB.");
+			const format = OUTPUT_FORMATS.find(format => mimeForFormat(format) === image.mimeType);
+			if (!format) throw new Error("Conversation image has an unsupported format.");
+			const bytes = decodeImageData(image.data, format);
+			if (bytes.length > MAX_INPUT_IMAGE_BYTES) throw new Error("Conversation image exceeds 20 MiB.");
+			total += bytes.length;
+			if (total > MAX_TOTAL_INPUT_BYTES) throw new Error("Conversation images exceed 50 MiB in total.");
 		}
 		return images;
 	}
@@ -399,108 +403,6 @@ export function buildRequestBody(
 	};
 }
 
-// --- SSE parsing ---
-
-function parseSseDataLines(chunk: string): string | undefined {
-	const data = chunk
-		.split("\n")
-		.filter((line) => line.startsWith("data:"))
-		.map((line) => line.slice(5).trim())
-		.join("\n")
-		.trim();
-	return data && data !== "[DONE]" ? data : undefined;
-}
-
-async function parseCodexSse(response: Response, signal?: AbortSignal): Promise<ParsedCodexResponse> {
-	if (!response.body) throw new Error("Codex response did not include a stream body.");
-	const reader = response.body.getReader();
-	const decoder = new TextDecoder();
-	let buffer = "";
-	const parsed: ParsedCodexResponse = { text: [] };
-
-	try {
-		while (true) {
-			if (signal?.aborted) throw new Error("Image generation was aborted.");
-			const { done, value } = await reader.read();
-			if (done) break;
-			buffer += decoder.decode(value, { stream: true });
-
-			let separator = buffer.indexOf("\n\n");
-			while (separator !== -1) {
-				const chunk = buffer.slice(0, separator);
-				buffer = buffer.slice(separator + 2);
-				const data = parseSseDataLines(chunk);
-				if (data) handleCodexEvent(JSON.parse(data) as CodexSseEvent, parsed);
-				separator = buffer.indexOf("\n\n");
-			}
-		}
-		const remaining = parseSseDataLines(buffer);
-		if (remaining) handleCodexEvent(JSON.parse(remaining) as CodexSseEvent, parsed);
-	} finally {
-		try {
-			await reader.cancel();
-		} catch {
-			// ignored: stream may already be closed
-		}
-		reader.releaseLock();
-	}
-
-	return parsed;
-}
-
-// --- #11: Typed event handler via discriminated union ---
-
-function handleCodexEvent(event: CodexSseEvent, parsed: ParsedCodexResponse): void {
-	if (!event || typeof event !== "object") return;
-
-	switch (event.type) {
-		case "error": {
-			const e = event as Extract<CodexSseEvent, { type: "error" }>;
-			throw new Error(`Codex error: ${e.message || e.code || JSON.stringify(event)}`);
-		}
-		case "response.failed": {
-			const e = event as Extract<CodexSseEvent, { type: "response.failed" }>;
-			throw new Error(e.response?.error?.message || "Codex response failed.");
-		}
-		case "response.created": {
-			const e = event as Extract<CodexSseEvent, { type: "response.created" }>;
-			if (typeof e.response?.id === "string") {
-				parsed.responseId = e.response.id;
-			}
-			break;
-		}
-		case "response.output_text.delta": {
-			const e = event as Extract<CodexSseEvent, { type: "response.output_text.delta" }>;
-			if (typeof e.delta === "string") {
-				parsed.text.push(e.delta);
-			}
-			break;
-		}
-		case "response.output_item.done": {
-			const e = event as Extract<CodexSseEvent, { type: "response.output_item.done" }>;
-			const item = e.item;
-			if (item?.type === "image_generation_call") {
-				if (typeof item.result !== "string" || item.result.length === 0) {
-					throw new Error("Codex image_generation_call did not contain image data.");
-				}
-				parsed.image = {
-					id: String(item.id || "image_generation"),
-					status: String(item.status || "completed"),
-					result: item.result,
-					revisedPrompt: typeof item.revised_prompt === "string" ? item.revised_prompt : undefined,
-				};
-			}
-			break;
-		}
-		case "response.completed": {
-			const e = event as Extract<CodexSseEvent, { type: "response.completed" }>;
-			if (typeof e.response?.id === "string") parsed.responseId = e.response.id;
-			if (e.response?.usage) parsed.usage = e.response.usage;
-			break;
-		}
-	}
-}
-
 // --- #1: requestImage with retry + backoff + jitter ---
 
 async function requestImage(
@@ -512,41 +414,46 @@ async function requestImage(
 	sessionId: string,
 	inputImages: InputImage[],
 	signal?: AbortSignal,
+	onProgress?: (stage: string) => void,
 ): Promise<ParsedCodexResponse> {
 	const body = JSON.stringify(buildRequestBody(params, model, outputFormat, sessionId, inputImages));
 	const headers: Record<string, string> = {
 		Authorization: `Bearer ${token}`,
 		"chatgpt-account-id": accountId,
 		originator: "pi",
+		"User-Agent": PACKAGE_NAME,
 		"OpenAI-Beta": OPENAI_BETA_HEADER,
 		accept: "text/event-stream",
 		"content-type": "application/json",
 	};
 
-	for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
-		if (signal?.aborted) throw new Error("Image generation was aborted.");
-
-		const response = await fetch(CODEX_RESPONSES_URL, {
-			method: "POST",
-			headers,
-			body,
-			signal,
-		});
-
-		if (!response.ok) {
-			const errorText = await response.text();
-			if (attempt <= MAX_RETRIES && isRetryableStatus(response.status, errorText)) {
-				const delay = retryDelayMs(attempt, response.headers.get("retry-after"));
-				await abortableDelay(delay, signal);
-				continue;
+	return withRequestDeadline(signal, async (signal) => {
+		for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+			signal.throwIfAborted();
+			let response: Response;
+			try {
+				response = await abortable(fetch(CODEX_RESPONSES_URL, {
+					method: "POST", headers, body, signal, redirect: "error",
+				}), signal);
+			} catch {
+				signal.throwIfAborted();
+				throw new Error("Codex connection failed. No automatic retry was made; check connectivity before trying again.");
 			}
-			throw new Error(`Codex image generation request failed (${response.status}): ${errorText}`);
+
+			if (!response.ok) {
+				const failure = await httpFailure(response, signal);
+				if (attempt <= MAX_RETRIES && failure.retry) {
+					const delay = retryDelayMs(attempt, response.headers.get("retry-after"));
+					await abortableDelay(delay, signal);
+					continue;
+				}
+				throw new Error(failure.message);
+			}
+
+			return parseCodexSse(response, signal, [token, accountId], onProgress);
 		}
-
-		return parseCodexSse(response, signal);
-	}
-
-	throw new Error("Codex image generation request failed after all retries.");
+		throw new Error("Codex image generation request failed after all retries.");
+	});
 }
 
 // --- Extension entry point ---
@@ -558,26 +465,40 @@ export default function codexImageGen(pi: ExtensionAPI) {
 		name: "codex_generate_image",
 		label: "Codex Image",
 		description:
-			"Generate or edit an image with the OpenAI Codex ChatGPT backend built-in image_generation tool (gpt-image-2). Accepts up to five local or recent conversation images. Uses the existing openai-codex login; does not require OPENAI_API_KEY.",
-		promptSnippet: "Generate or edit bitmap images via the OpenAI Codex ChatGPT backend gpt-image-2 image_generation tool.",
+			"Generate or edit an image with the OpenAI Codex ChatGPT backend built-in image_generation tool. The backend selects the image model. Accepts up to five local or recent conversation images (20 MiB each, 50 MiB total). Uses the existing openai-codex login; does not require OPENAI_API_KEY. Network deadline: 5 minutes; output image limit: 32 MiB; backend text is limited to 4,000 characters.",
+		promptSnippet: "Generate or edit bitmap images via the OpenAI Codex ChatGPT backend image_generation tool.",
 		promptGuidelines: [
 			"Use codex_generate_image when the user asks to generate or edit a raster image with OpenAI/Codex image generation.",
 			"Do not use codex_generate_image without a clear image-generation request, because it consumes the user's Codex image quota.",
+			"The model parameter selects a Codex routing model, not an image model. Do not pass gpt-image-* IDs.",
+			"Output metadata is backend-reported, not independently verified. Check pixels for dimensions and transparency; do not infer a served model from appearance or a successful request.",
+			"Do not automatically repeat quota, connection, deadline, or incomplete-stream failures. The backend may already have consumed image quota.",
 		],
 		parameters: TOOL_PARAMS,
 		executionMode: "parallel", // #4: safe to run concurrently — no shared state, saves serialized per-path
 		async execute(toolCallId, params: ToolParams, signal, onUpdate, ctx) {
+			if (typeof params.prompt !== "string" || !params.prompt.trim() || params.prompt.length > MAX_PROMPT_CHARS) {
+				throw new Error("Image prompt must contain 1 to 32,000 characters.");
+			}
 			const outputFormat = params.outputFormat || "png";
+			if (!OUTPUT_FORMATS.includes(outputFormat)) throw new Error("Unsupported image output format.");
 			const projectTrusted = typeof ctx.isProjectTrusted === "function" && ctx.isProjectTrusted();
 			const config = loadConfig(ctx.cwd, projectTrusted); // #5: load once, pass to resolveSaveConfig
 			const requestedModel = params.model || config.model || DEFAULT_MODEL;
+			if (typeof requestedModel !== "string" || !requestedModel.trim() || requestedModel.length > 200) {
+				throw new Error("Codex routing model must contain 1 to 200 characters.");
+			}
+			if (requestedModel.startsWith("gpt-image-")) {
+				throw new Error("The model parameter selects a Codex routing model, not an image model. Subscription image-model selection is not verified.");
+			}
 			const model = ctx.modelRegistry.find(PROVIDER, requestedModel)?.id || requestedModel; // #6: removed dead FALLBACK_MODEL
+			const sessionId = ctx.sessionManager.getSessionId();
+			const saveConfig = resolveSaveConfig(params, ctx.cwd, sessionId, config);
 			const token = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER);
 			if (!token) {
 				throw new Error(`Missing ${PROVIDER} credentials. Run /login and select ChatGPT Plus/Pro (Codex).`);
 			}
 			const accountId = extractChatGptAccountId(token);
-			const sessionId = ctx.sessionManager.getSessionId();
 			const messages: unknown[] = [];
 			for (const entry of ctx.sessionManager.getBranch()) {
 				if (entry.type === "message") messages.push(entry.message);
@@ -586,18 +507,24 @@ export default function codexImageGen(pi: ExtensionAPI) {
 			const inputImages = await resolveInputImages(params, ctx.cwd, messages);
 
 			onUpdate?.({
-				content: [{ type: "text", text: `Requesting gpt-image-2 ${inputImages.length > 0 ? "edit" : "generation"} through ${PROVIDER}/${model}...` }],
+				content: [{ type: "text", text: `Requesting image ${inputImages.length > 0 ? "edit" : "generation"} through ${PROVIDER}/${model}...` }],
 				details: { provider: PROVIDER, model, outputFormat, inputImageCount: inputImages.length },
 			});
 
-			const parsed = await requestImage(params, token, accountId, model, outputFormat, sessionId, inputImages, signal);
+			const started = Date.now();
+			const parsed = await requestImage(params, token, accountId, model, outputFormat, sessionId, inputImages, signal, (stage) => {
+				onUpdate?.({
+					content: [{ type: "text", text: `Codex image stage: ${stage}.` }],
+					details: { provider: PROVIDER, model, stage },
+				});
+			});
 			if (!parsed.image) {
 				const text = parsed.text.join("").trim();
 				throw new Error(text ? `Codex did not return an image. Response text: ${text}` : "Codex did not return an image.");
 			}
 
 			const imageBytes = decodeImageData(parsed.image.result, outputFormat);
-			const saveConfig = resolveSaveConfig(params, ctx.cwd, sessionId, config);
+			const reportedImage = parsed.image.reported;
 			let savedPath: string | undefined;
 			let attemptedPath: string | undefined;
 			let saveWarning: string | undefined;
@@ -615,8 +542,11 @@ export default function codexImageGen(pi: ExtensionAPI) {
 			}
 
 			const summary = [
-				`Generated image via ${PROVIDER}/${model} using backend gpt-image-2.`,
+				`Generated image via ${PROVIDER}/${model} using the backend-selected image model.`,
 				`Status: ${parsed.image.status}.`,
+				reportedImage.size ? `Backend-reported size: ${reportedImage.size}.` : undefined,
+				reportedImage.quality ? `Backend-reported quality: ${reportedImage.quality}.` : undefined,
+				reportedImage.background ? `Backend-reported background: ${reportedImage.background}.` : undefined,
 				parsed.image.revisedPrompt ? `Revised prompt: ${parsed.image.revisedPrompt}` : undefined,
 				savedPath ? `Saved image to: ${savedPath}` : "Image was not saved to disk.",
 				saveWarning ? `Warning: ${saveWarning}` : undefined,
@@ -632,7 +562,11 @@ export default function codexImageGen(pi: ExtensionAPI) {
 				details: {
 					provider: PROVIDER,
 					model,
-					backendImageModel: "gpt-image-2",
+					backendImageModel: reportedImage.model ?? "unknown",
+					reportedImage,
+					transport: "codex-responses",
+					generationDurationMs: Date.now() - started,
+					byteCount: imageBytes.length,
 					outputFormat,
 					saveMode: saveConfig.mode,
 					savedPath,

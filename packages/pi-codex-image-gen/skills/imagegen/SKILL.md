@@ -16,7 +16,7 @@ Generates or edits images for the current project (for example website assets, g
 This skill has exactly two top-level modes:
 
 - **Default Pi tool mode (preferred):** Pi `codex_generate_image` tool for new image generation, edits using up to five local or recent conversation images, reference variants, and simple transparent-image requests. Does not require `OPENAI_API_KEY`.
-- **Fallback CLI mode:** `scripts/image_gen.py` CLI. Use when the user explicitly asks for the CLI/API/model path, or after the user explicitly confirms a true model-native transparency fallback with `gpt-image-1.5`. Requires `OPENAI_API_KEY`.
+- **Fallback CLI mode:** `scripts/image_gen.py` CLI. Use when the user explicitly asks for the CLI/API/model path, or after the user explicitly confirms a native transparency API fallback. Requires `OPENAI_API_KEY` and separate API billing.
 
 Within CLI fallback, the CLI exposes three subcommands:
 
@@ -26,11 +26,13 @@ Within CLI fallback, the CLI exposes three subcommands:
 
 Rules:
 - Use the Pi `codex_generate_image` tool by default for new image generation requests.
+- The tool's `model` parameter selects a Codex routing model, not Flare or Sunburst. Do not claim a specific served image model unless the response reports it. Read `details.reportedImage` for backend-reported output settings, then inspect the actual image; prompt requests for quality, dimensions, or transparency are not guarantees.
+- Do not automatically repeat quota, connection, timeout, or incomplete-stream failures. The remote generation may already have consumed quota.
 - Use `referencedImagePaths` for edits when every target has a local path. Use `numLastImagesToInclude` only when a target is available solely in recent conversation history. Never provide both selectors. Masks and advanced CLI-only controls still require confirmed CLI fallback.
 - Do not switch to CLI fallback for ordinary generation quality, size, or output file-path control.
 - If the user explicitly asks for a transparent image/background, stay on Pi `codex_generate_image` first: prompt for a flat removable chroma-key background, then remove it locally with the installed helper at `scripts/remove_chroma_key.py`.
 - Never silently switch from Pi `codex_generate_image` or CLI `gpt-image-2` to CLI `gpt-image-1.5`. Treat this as a model/path downgrade and ask the user before doing it, unless the user has already explicitly requested `gpt-image-1.5`, `scripts/image_gen.py`, or CLI fallback.
-- If a transparent request appears too complex for clean chroma-key removal, asks for true/native transparency, or local removal fails validation, explain that true transparency requires CLI `gpt-image-1.5 --background transparent --output-format png` because `gpt-image-2` does not support `background=transparent`, then ask whether to proceed. Run the CLI fallback only after the user confirms.
+- If a transparent request appears too complex for clean chroma-key removal, asks for true/native transparency, or local removal fails validation, offer CLI `gpt-image-2 --background transparent --output-format png` (native transparency preview). Run the CLI fallback only after the user confirms.
 - The word `batch` by itself does not mean CLI fallback. If the user asks for many assets or says to batch-generate assets without explicitly asking for CLI/API/model controls, stay on the Pi tool path and issue one Pi tool call per requested asset or variant.
 - If the Pi tool fails or is unavailable, tell the user the CLI fallback exists and that it requires `OPENAI_API_KEY`. Proceed only if the user explicitly asks for that fallback.
 - If the user explicitly asks for CLI mode, use the bundled `scripts/image_gen.py` workflow. Do not create one-off SDK runners.
@@ -39,7 +41,7 @@ Rules:
 Pi tool save-path policy:
 - In Pi tool mode, generated images are saved under Pi's agent directory by default: `<pi-agent-dir>/generated-images/<pi-session-id>/<image-call-id>.*`. The default Pi agent directory is `~/.pi/agent`, but it can be overridden with `PI_CODING_AGENT_DIR`; use Pi's configured agent directory, not a hardcoded home path.
 - Do not describe or rely on OS temp as the default Pi tool destination.
-- Do not describe or rely on a destination-path argument (if any) on the Pi `codex_generate_image` tool. If a specific location is needed, generate first and then copy the selected output from `<pi-agent-dir>/generated-images/<pi-session-id>/<image-call-id>.*`.
+- Use the tool's `save` and `saveDir` controls to choose a save directory. Custom mode appends a session directory; it does not accept an exact output filename. If an exact asset path is needed, copy the generated image there and leave the original in place.
 - Save-path precedence in Pi tool mode:
   1. If the user names a destination, copy the selected output there and leave the original in place.
   2. If the image is meant for the current project, copy the final selected image into the workspace before finishing and leave the original in place.
@@ -113,7 +115,7 @@ Assume the user wants a new image unless they clearly ask to change an existing 
    - If the user's prompt is already specific and detailed, normalize it into a clear spec without adding creative requirements.
    - If the user's prompt is generic, add tasteful augmentation only when it materially improves output quality.
 10. Use the Pi `codex_generate_image` tool by default for generation and supported existing-image edits. Ask for CLI fallback confirmation only when the request requires unsupported controls such as masks.
-11. For transparent-output requests, follow the transparent image guidance below: generate with Pi `codex_generate_image` on a flat chroma-key background, copy the selected output into the workspace or `tmp/imagegen/`, run the installed `scripts/remove_chroma_key.py` helper, and validate the alpha result before using it. If this path looks unsuitable or fails, ask before switching to CLI `gpt-image-1.5`.
+11. For transparent-output requests, follow the transparent image guidance below: generate with Pi `codex_generate_image` on a flat chroma-key background, copy the selected output into the workspace or `tmp/imagegen/`, run the installed `scripts/remove_chroma_key.py` helper, and validate the alpha result before using it. If this path looks unsuitable or fails, ask before switching to the API CLI.
 12. Inspect outputs and validate: subject, style, composition, text accuracy, and invariants/avoid items.
 13. Iterate with a single targeted change, then re-check.
 14. For preview-only work, render the image inline; the underlying file may remain at the default `<pi-agent-dir>/generated-images/<pi-session-id>/<image-call-id>.*` path.
@@ -154,12 +156,12 @@ Do not use #00ff00 anywhere in the subject.
 No cast shadow, no contact shadow, no reflection, no watermark, and no text unless explicitly requested.
 ```
 
-Do not automatically use CLI `gpt-image-1.5 --background transparent --output-format png` instead of chroma keying. Ask the user first when the user asks for true/native transparency, when local removal fails validation, or when the requested image is complex: hair, fur, feathers, smoke, glass, liquids, translucent materials, reflective objects, soft shadows, realistic product grounding, or subject colors that conflict with all practical key colors.
+Do not automatically use CLI `gpt-image-2 --background transparent --output-format png` instead of chroma keying. Ask the user first when the user asks for true/native transparency, when local removal fails validation, or when the requested image is complex: hair, fur, feathers, smoke, glass, liquids, translucent materials, reflective objects, soft shadows, realistic product grounding, or subject colors that conflict with all practical key colors.
 
 Use a concise confirmation like:
 
 ```text
-This likely needs true native transparency. The default Pi tool path uses a chroma-key background plus local removal, but true transparency requires the CLI fallback with gpt-image-1.5 because gpt-image-2 does not support background=transparent. It also requires OPENAI_API_KEY. Should I proceed with that CLI fallback?
+This likely needs native transparency. The Pi tool uses chroma-key removal. The API CLI supports native transparency in preview with gpt-image-2. It requires OPENAI_API_KEY and separate API billing. Should I use that fallback?
 ```
 
 ## Prompt augmentation
@@ -279,7 +281,7 @@ Constraints: change only the background; keep the product and its edges unchange
 - If the prompt is generic, add only the extra detail that will materially help.
 - If the prompt is already detailed, normalize it instead of expanding it.
 - For CLI fallback only, see `references/cli.md` and `references/image-api.md` for model, `quality`, `input_fidelity`, masks, output format, and output-path guidance.
-- For transparent images, use the built-in-first chroma-key workflow unless the request is complex enough to need true CLI transparency; ask before switching to CLI `gpt-image-1.5`.
+- For transparent images, use the built-in-first chroma-key workflow unless the request needs native CLI transparency; ask before switching to the API CLI.
 
 More principles shared by both modes: `references/prompting.md`.
 Copy/paste specs shared by both modes: `references/sample-prompts.md`.
@@ -291,14 +293,14 @@ Asset-type templates (website assets, game assets, wireframes, logo) are consoli
 
 The fallback CLI defaults to `gpt-image-2`.
 
-- Use `gpt-image-2` for new CLI/API workflows unless the request needs true model-native transparent output.
-- If a transparent request may need CLI fallback, ask before using `gpt-image-1.5` unless the user already explicitly requested `gpt-image-1.5`, `scripts/image_gen.py`, or CLI fallback. Explain that the built-in chroma-key path is the default, but true transparency requires `gpt-image-1.5` because `gpt-image-2` does not support `background=transparent`.
+- Keep `gpt-image-2` as the CLI default. For explicit 2.5 requests, use `gpt-image-2.5-flare` for fast generation or `gpt-image-2.5-sunburst` for editing precision. Both also accept `xhigh` and `max` quality and their `2026-09-08` snapshots. Both support the flexible size constraints below; sizes above `2560x1440` are experimental. Leave 2.5 `input_fidelity` unset; support for that control is not verified.
+- Native transparency is available in preview with CLI `gpt-image-2 --background transparent --output-format png` (or `webp`). Ask before switching from Pi to this separately billed API path.
 - `gpt-image-2` always uses high fidelity for image inputs; do not set `input_fidelity` with this model.
 - `gpt-image-2` supports `quality` values `low`, `medium`, `high`, and `auto`.
 - Use `quality low` for fast drafts, thumbnails, and quick iterations. Use `medium`, `high`, or `auto` for final assets, dense text, diagrams, identity-sensitive edits, or high-resolution outputs.
 - Square images are typically fastest to generate. Use `1024x1024` for fast square drafts.
 - If the user asks for 4K-style output, use `3840x2160` for landscape or `2160x3840` for portrait.
-- `gpt-image-2` size may be `auto` or `WIDTHxHEIGHT` if all constraints hold: max edge `<= 3840px`, both edges multiples of `16px`, long-to-short ratio `<= 3:1`, total pixels between `655,360` and `8,294,400`.
+- GPT Image 2 and 2.5 API size may be `auto` or `WIDTHxHEIGHT` if all constraints hold: max edge `<= 3840px`, both edges multiples of `16px`, long-to-short ratio `<= 3:1`, total pixels between `655,360` and `8,294,400`.
 
 Popular `gpt-image-2` sizes:
 - `1024x1024` square

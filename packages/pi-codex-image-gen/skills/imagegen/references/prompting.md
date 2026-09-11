@@ -79,7 +79,7 @@ Do not add:
 - Ask for crisp edges, generous padding, and no use of the key color inside the subject.
 - After generation, remove the background locally with `python "scripts/remove_chroma_key.py" --input <source> --out <final.png> --auto-key border --soft-matte --transparent-threshold 12 --opaque-threshold 220 --despill` and validate the alpha result before shipping it.
 - Use soft matte and despill for antialiased edges; hard tolerance-only removal is mainly for flat pixel-art or exact-color fixtures.
-- Use CLI `gpt-image-1.5 --background transparent --output-format png` only after the user explicitly confirms the fallback, or when the user already explicitly requested `gpt-image-1.5`, `scripts/image_gen.py`, or CLI fallback. Ask first for true/native transparency requests, failed chroma-key validation, or complex transparent subjects such as hair, fur, glass, smoke, liquids, translucent materials, reflective objects, or soft shadows.
+- Use CLI `gpt-image-2 --background transparent --output-format png` (preview) only after the user chooses the separately billed API fallback. Offer it for native transparency requests, failed chroma-key validation, or complex subjects such as hair, glass, smoke, or soft shadows.
 
 ## Fallback-only execution controls
 - `quality`, `input_fidelity`, explicit masks, output format, and output paths are fallback-only execution controls.
@@ -87,7 +87,7 @@ Do not add:
 - If the user explicitly chooses CLI fallback, see `references/cli.md` and `references/image-api.md` for those controls.
 - In CLI fallback mode, `gpt-image-2` is the default. It supports `quality=low|medium|high|auto`; use `low` for fast drafts and thumbnails, and move to `medium`, `high`, or `auto` for final assets.
 - `gpt-image-2` always uses high fidelity for image inputs, so do not set `input_fidelity` with that model.
-- If a transparent request needs true CLI transparency, ask before using `gpt-image-1.5` unless the user already explicitly chose it. Explain that Pi-tool chroma-key removal is the default path, but `gpt-image-2` does not support `background=transparent`.
+- For native transparency, offer the GPT Image 2 API preview with PNG or WebP. Ask before switching from Pi's chroma-key path to API billing.
 - If the user asks for 4K-style output with `gpt-image-2`, use `3840x2160` for landscape or `2160x3840` for portrait.
 
 ## Use-case tips

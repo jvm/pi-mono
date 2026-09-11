@@ -2,7 +2,7 @@
 
 Create and edit images without leaving [Pi](https://pi.dev).
 
-`pi-codex-image-gen` turns natural-language requests and reference images into PNG, JPEG, or WebP assets through **gpt-image-2**, using your existing ChatGPT Codex login instead of a separate API key.
+`pi-codex-image-gen` turns natural-language requests and reference images into PNG, JPEG, or WebP assets through **Codex image generation**, using your existing ChatGPT Codex login instead of a separate API key.
 
 ## Features
 
@@ -43,7 +43,29 @@ In a Pi session:
 > Generate a pixel-art sword icon, 32×32, with a blue blade and gold hilt
 ```
 
-The agent will invoke `codex_generate_image` with your prompt, optionally include up to five local or recent conversation images for editing, stream the response from the Codex backend, and save the resulting image to disk. The `model` parameter controls the Codex routing model; image generation is always performed by **gpt-image-2** on the backend.
+The agent will invoke `codex_generate_image` with your prompt, optionally include up to five local or recent conversation images for editing, stream the response from the Codex backend, and save the resulting image to disk. The `model` parameter controls the Codex routing model, not the image model. The backend selects the image model; `backendImageModel` is `"unknown"` unless the response explicitly reports an image model.
+
+The tool reports generation stages and the backend's returned size, quality, background, and format in `details.reportedImage`. These are server-reported values, not guarantees inferred from the prompt. `details.byteCount` records decoded bytes; `details.generationDurationMs` records elapsed generation/save time. Check the actual image before using it, especially for exact dimensions or alpha transparency.
+
+### Subscription reliability and limits
+
+- Requests identify this package with a Pi User-Agent. There is no Codex impersonation, browser-cookie import, or paid API fallback.
+- One five-minute network deadline covers the connection, retries, and stream. Escape cancels network work; the remote generation may still finish.
+- Prompts: 32,000 characters. References: five regular PNG/JPEG/WebP files or conversation images, at most 20 MiB each and 50 MiB combined.
+- Responses: 100 MiB total, with at most one 32 MiB decoded output image. Base64 and format signatures are checked; this is not a full image decoder. Backend text and revised prompts are limited to 4,000 characters; HTTP error bodies are read only up to 16 KiB and are not displayed.
+- Transient HTTP failures have bounded retries. Quota exhaustion, moderation errors, failed/incomplete streams, connection errors, and deadlines are not automatically retried. Avoid immediately repeating an ambiguous failure: the first generation may have consumed quota.
+- Local save settings are checked before generation. Existing files are never overwritten; a save failure still returns the inline image and a warning.
+- Cloudflare challenges are reported as connection failures, not as proof that your subscription or image model is unsupported.
+
+### Images 2.5 and API fallback
+
+The optional `skills/imagegen/scripts/image_gen.py` API CLI accepts `--model gpt-image-2.5-flare` or `--model gpt-image-2.5-sunburst`, including their `2026-09-08` snapshots. Both accept `--quality xhigh` and `--quality max` in addition to the existing quality settings. The CLI default remains `gpt-image-2`. Both 2.5 models support `--size auto` and custom dimensions such as `1536x864`, under the [documented size constraints](skills/imagegen/references/image-api.md#flexible-sizes-gpt-image-2-and-25). Resolutions above `2560x1440` are experimental.
+
+GPT Image 2 now supports native transparency in preview: use `--model gpt-image-2 --background transparent --output-format png` (or `webp`) in confirmed CLI mode. This uses `OPENAI_API_KEY` and separate API billing. The Pi tool still uses chroma-key removal because it has no background parameter.
+
+Public API model selection does not establish support for the same options on the private Codex backend. The extension does not expose Flare/Sunburst selection or claim that your account has received the Images 2.5 rollout.
+
+In subscription tests on September 11, 2026, the direct endpoint accepted Flare, Sunburst, and an invalid model name without reporting a served model. It also returned different size, quality, and background values than requested. The Responses route generated an image successfully. These account-specific results do not justify a guaranteed subscription model selector. See [the investigation and test procedure](CONTRIBUTING.md#subscription-capability-check).
 
 ## Authentication
 
@@ -80,7 +102,7 @@ Project config overrides global config only when project trust is active. If pro
 | --------- | ------ | ---------- | ---------------------------------------- |
 | `save`    | string | `"global"` | Default save mode (see below).           |
 | `saveDir` | string | —          | Directory used when `save=custom`.       |
-| `model`   | string | `"gpt-5.5"`| Codex routing model. Image generation is always handled by gpt-image-2. |
+| `model`   | string | `"gpt-5.5"`| Codex routing model, not the backend image model. |
 
 ### Environment variables
 
@@ -117,7 +139,7 @@ Project config overrides global config only when project trust is active. If pro
 1. Resolves auth via Pi's `openai-codex` provider (ChatGPT session token).
 2. Sends a Codex Responses API request to the routing model (default `gpt-5.5`) with the `image_generation` tool enabled.
 3. For edits, attaches the selected local or conversation images to the request.
-4. The backend invokes **gpt-image-2** to generate or edit the image.
+4. The backend selects an image model to generate or edit the image.
 5. Parses the SSE stream and strictly validates the returned base64 and image format.
 6. Saves the image according to the active save mode; persistence failures produce a warning without discarding a valid inline image.
 7. Returns the image data inline plus metadata (model, format, path, revised prompt, usage).

@@ -1,6 +1,6 @@
 # CLI reference (`scripts/image_gen.py`)
 
-This file is for the fallback CLI mode only. Read it when the user explicitly asks to use `scripts/image_gen.py` / CLI / API / model controls, or after the user explicitly confirms that a transparent-output request should use the `gpt-image-1.5` true-transparency fallback path.
+This file is for the fallback CLI mode only. Read it when the user requests CLI/API controls or confirms a native transparency API fallback.
 
 `generate-batch` is a CLI subcommand in this fallback path. It is not a top-level mode of the skill.
 The word `batch` in a user request is not CLI opt-in by itself.
@@ -73,12 +73,14 @@ python "$IMAGE_GEN" edit \
 
 `gpt-image-2` is the default model for new CLI fallback work.
 
+For explicit Images 2.5 requests, use `--model gpt-image-2.5-flare` or `--model gpt-image-2.5-sunburst`. Their `2026-09-08` snapshots are also supported. Both accept `--quality xhigh` and `--quality max`, and the flexible size constraints below, including `1536x864`. Sizes above `2560x1440` are experimental. Leave 2.5 `--input-fidelity` unset; support is not verified. These options do not apply to the Pi tool.
+
 - Use `--quality low` for fast drafts, thumbnails, and quick iterations.
 - Use `--quality medium`, `--quality high`, or `--quality auto` for final assets, dense text, diagrams, identity-sensitive edits, and high-resolution outputs.
 - Square images are typically fastest. Use `--size 1024x1024` for quick square drafts.
 - If the user asks for 4K-style output, use `--size 3840x2160` for landscape or `--size 2160x3840` for portrait.
 - Do not pass `--input-fidelity` with `gpt-image-2`; this model always uses high fidelity for image inputs.
-- Do not use `--background transparent` with `gpt-image-2`; the default transparent-image workflow uses Pi `codex_generate_image` on a flat chroma-key background plus local removal. Use `gpt-image-1.5` only after the user explicitly confirms the true-transparent CLI fallback, unless they already requested `gpt-image-1.5`, `scripts/image_gen.py`, or CLI fallback.
+- `gpt-image-2` supports `--background transparent` in preview with PNG or WebP. Confirm the separately billed API fallback before switching from Pi's chroma-key path.
 
 Popular `gpt-image-2` sizes:
 - `1024x1024`
@@ -140,7 +142,7 @@ python "$IMAGE_GEN" generate \
   --out output/imagegen/product-cutout.png
 ```
 
-When using this path, explain briefly that Pi `codex_generate_image` plus chroma-key removal is the default transparent-image path, but this request needs true model-native transparency. `gpt-image-2` does not support `background=transparent`, so `gpt-image-1.5` is required for this confirmed fallback.
+The older-model example above remains available when explicitly requested. Prefer `--model gpt-image-2` for native transparency preview. Explain that this API fallback requires an API key and separate billing; Pi still uses chroma-key removal.
 
 ## Quality, input fidelity, and masks (CLI fallback only)
 These are explicit CLI controls. They are not Pi `codex_generate_image` tool arguments.
@@ -229,8 +231,8 @@ Notes:
 - For many requested deliverable assets, provide one prompt/job per distinct asset and use semantic filenames when possible.
 
 ## CLI notes
-- Supported sizes depend on the model. `gpt-image-2` supports flexible constrained sizes; older GPT Image models support `1024x1024`, `1536x1024`, `1024x1536`, or `auto`.
-- True transparent CLI outputs require `output_format` to be `png` or `webp` and are not supported by `gpt-image-2`.
+- Supported sizes depend on the model. GPT Image 2 and 2.5 (including the documented snapshots) support flexible constrained sizes; older GPT Image models support `1024x1024`, `1536x1024`, `1024x1536`, or `auto`.
+- Native transparent CLI outputs require `output_format` to be `png` or `webp`. GPT Image 2 support is in preview.
 - `--prompt-file`, `--output-compression`, `--moderation`, `--max-attempts`, `--fail-fast`, `--force`, and `--no-augment` are supported.
 - This CLI is intended for GPT Image models. Do not assume older non-GPT image-model behavior applies here.
 
