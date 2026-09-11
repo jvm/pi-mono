@@ -49,8 +49,10 @@ the current settings through its versioned public event bus.
 If history changes outside normal append/branch/compaction operations, the package
 starts a new baseline rather than placing an update at an unchecked position.
 It stops rewriting above 20,000 input items, 16 MiB of serialized history or 128
-effort changes in a context window. Pi's normal effort handling then remains in
-use. This can reduce cache reuse; no cache-hit or cost saving is guaranteed.
+effort changes in a context window. The byte budget is checked during JSON
+serialization, including within individual input items. Pi's normal effort
+handling then remains in use. This can reduce cache reuse; no cache-hit or cost
+saving is guaranteed.
 Uninstalling the package leaves normal Pi messages and thinking settings intact.
 
 ## Protocol reference

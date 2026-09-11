@@ -93,6 +93,49 @@ test("actual provider retries resend the same update without another state entry
   } finally { await h.close(); }
 });
 
+test("real Pi request hooks reject an oversized user item before full traversal", async (t) => {
+  let oversized = false;
+  let original;
+  let injected;
+  let laterReads = 0;
+  let checked = 0;
+  const hugeText = "x".repeat(16 * 1024 * 1024);
+  const inject = (pi) => pi.on("before_provider_request", (event) => {
+    if (!oversized) return;
+    original = event.payload;
+    injected = {
+      ...original,
+      input: [{
+        ...user(hugeText),
+        get later() { laterReads++; return "must not traverse after the limit"; },
+      }],
+    };
+    return injected;
+  });
+  const inspect = (pi) => pi.on("before_provider_request", (event, ctx) => {
+    if (!oversized) return;
+    checked++;
+    assert.equal(event.payload, injected, "unsupported history must retain ordinary Pi effort handling");
+    assert.equal(event.payload.reasoning.effort, "high");
+    assert.equal(laterReads, 0);
+    assert.equal(ctx.sessionManager.getBranch().filter((entry) => entry.customType === STATE_TYPE).length, 1);
+    // Do not serialize or send the oversized fixture through the mock transport.
+    return original;
+  });
+  t.mock.method(globalThis, "fetch", async () => textResponse());
+  const h = await codexHarness([inject, reasoning, inspect]);
+  try {
+    await h.session.prompt("first");
+    oversized = true;
+    h.session.setThinkingLevel("high");
+    await h.session.prompt("bounded fixture");
+    assert.equal(checked, 1);
+    assert.equal(laterReads, 0);
+    assert.equal(h.session.messages.at(-1).stopReason, "stop");
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
 test("tool-only continuations and retry recovery never produce adjacent updates", () => {
   let input = [user("first")];
   let result = rewriteReasoning(body(input), model, []);

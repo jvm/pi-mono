@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Model } from "@earendil-works/pi-ai";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { boundedStringify } from "./bounded-json.js";
 
 export const STATE_TYPE = "pi-openai-reasoning:v1";
 const MAX_ITEMS = 20_000;
@@ -145,8 +146,12 @@ function fingerprintPrefixes(input: unknown[], hasCheckpoint: boolean): string[]
   try {
     for (const [index, item] of input.entries()) {
       // Compaction's normal hook may run before or after this extension.
-      const text = JSON.stringify(hasCheckpoint && index === 0 && isCheckpoint(item) ? { type: "checkpoint" } : item);
-      if (text === undefined || (bytes += Buffer.byteLength(text)) > MAX_BYTES) return;
+      const text = boundedStringify(
+        hasCheckpoint && index === 0 && isCheckpoint(item) ? { type: "checkpoint" } : item,
+        MAX_BYTES - bytes,
+      );
+      if (text === undefined) return;
+      bytes += Buffer.byteLength(text);
       hash.update(text).update("\n");
       prefixes.push(hash.copy().digest("hex"));
     }

@@ -18,6 +18,10 @@ or credentials. Fingerprints are not encryption: treat session metadata as
 private. Imported state is validated before use, and only the active branch is
 read. No project settings are read. No prompt or provider data is logged.
 
+Fingerprint serialization stops at the remaining history byte budget, including
+for individual strings. Unsupported JSON containers use normal Pi handling
+instead. This bounds the extension's fingerprint work, not Pi's own request size.
+
 The compaction event bus shares request data with installed cooperating local
 extensions. Those extensions have the same trust level as Pi itself. Temporary
 compaction transforms do not commit reasoning state.
