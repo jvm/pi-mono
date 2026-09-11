@@ -25,7 +25,7 @@ jobs:
       - name: Fetch original prompt from Codex
         run: |
           curl -fsSL -o /tmp/codex-prompt.md \
-            "https://raw.githubusercontent.com/openai/codex/main/codex-rs/tui/prompt_for_init_command.md"
+            "https://raw.githubusercontent.com/openai/codex/main/codex-rs/tui/assets/prompt_for_init_command.md"
           if [ ! -s /tmp/codex-prompt.md ]; then
             echo "::error::Failed to fetch original prompt from Codex repo"
             exit 1
@@ -83,7 +83,7 @@ jobs:
             --body-file - <<BODY
           ## Upstream Change Detected
 
-          The original prompt in the [OpenAI Codex repository](https://github.com/openai/codex/blob/main/codex-rs/tui/prompt_for_init_command.md) has changed.
+          The original prompt in the [OpenAI Codex repository](https://github.com/openai/codex/blob/main/codex-rs/tui/assets/prompt_for_init_command.md) has changed.
 
           ### Action Required
 
@@ -91,7 +91,7 @@ jobs:
 
           ### References
 
-          - Source: https://github.com/openai/codex/blob/main/codex-rs/tui/prompt_for_init_command.md
+          - Source: https://github.com/openai/codex/blob/main/codex-rs/tui/assets/prompt_for_init_command.md
           - Local file: packages/pi-agentsmd/prompts/init.md
           - New upstream SHA-256: \`${ACTUAL_SHA256}\`
           - THIRD-PARTY-NOTICES: packages/pi-agentsmd/THIRD-PARTY-NOTICES
