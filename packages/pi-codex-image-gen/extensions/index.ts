@@ -3,7 +3,7 @@
  *
  * Registers `codex_generate_image`, a tool that uses Pi's existing
  * openai-codex ChatGPT/Codex auth to call the Codex Responses backend with the
- * native `image_generation` tool. The backend maps that tool to gpt-image-2.
+ * native `image_generation` tool. The backend selects the image model.
  */
 
 import { readFileSync } from "node:fs";
@@ -558,8 +558,8 @@ export default function codexImageGen(pi: ExtensionAPI) {
 		name: "codex_generate_image",
 		label: "Codex Image",
 		description:
-			"Generate or edit an image with the OpenAI Codex ChatGPT backend built-in image_generation tool (gpt-image-2). Accepts up to five local or recent conversation images. Uses the existing openai-codex login; does not require OPENAI_API_KEY.",
-		promptSnippet: "Generate or edit bitmap images via the OpenAI Codex ChatGPT backend gpt-image-2 image_generation tool.",
+			"Generate or edit an image with the OpenAI Codex ChatGPT backend built-in image_generation tool. The backend selects the image model. Accepts up to five local or recent conversation images. Uses the existing openai-codex login; does not require OPENAI_API_KEY.",
+		promptSnippet: "Generate or edit bitmap images via the OpenAI Codex ChatGPT backend image_generation tool.",
 		promptGuidelines: [
 			"Use codex_generate_image when the user asks to generate or edit a raster image with OpenAI/Codex image generation.",
 			"Do not use codex_generate_image without a clear image-generation request, because it consumes the user's Codex image quota.",
@@ -586,7 +586,7 @@ export default function codexImageGen(pi: ExtensionAPI) {
 			const inputImages = await resolveInputImages(params, ctx.cwd, messages);
 
 			onUpdate?.({
-				content: [{ type: "text", text: `Requesting gpt-image-2 ${inputImages.length > 0 ? "edit" : "generation"} through ${PROVIDER}/${model}...` }],
+				content: [{ type: "text", text: `Requesting image ${inputImages.length > 0 ? "edit" : "generation"} through ${PROVIDER}/${model}...` }],
 				details: { provider: PROVIDER, model, outputFormat, inputImageCount: inputImages.length },
 			});
 
@@ -615,7 +615,7 @@ export default function codexImageGen(pi: ExtensionAPI) {
 			}
 
 			const summary = [
-				`Generated image via ${PROVIDER}/${model} using backend gpt-image-2.`,
+				`Generated image via ${PROVIDER}/${model} using the backend-selected image model.`,
 				`Status: ${parsed.image.status}.`,
 				parsed.image.revisedPrompt ? `Revised prompt: ${parsed.image.revisedPrompt}` : undefined,
 				savedPath ? `Saved image to: ${savedPath}` : "Image was not saved to disk.",
@@ -632,7 +632,7 @@ export default function codexImageGen(pi: ExtensionAPI) {
 				details: {
 					provider: PROVIDER,
 					model,
-					backendImageModel: "gpt-image-2",
+					backendImageModel: "unknown",
 					outputFormat,
 					saveMode: saveConfig.mode,
 					savedPath,

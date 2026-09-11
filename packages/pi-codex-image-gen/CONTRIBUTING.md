@@ -33,9 +33,16 @@ pi -e /path/to/pi-mono/packages/pi-codex-image-gen
 To validate the Python CLI fallback without an API key:
 
 ```bash
-python3 skills/imagegen/scripts/image_gen.py generate --prompt "Test" --out /tmp/test.png --dry-run
-python3 skills/imagegen/scripts/remove_chroma_key.py --help
+uv run --no-project python3 skills/imagegen/scripts/image_gen.py generate --prompt "Test" --model gpt-image-2.5-flare --quality max --dry-run
+uv run --no-project python3 skills/imagegen/scripts/image_gen.py generate --prompt "Test" --background transparent --output-format png --dry-run
+uv run --no-project python3 skills/imagegen/scripts/remove_chroma_key.py --help
 ```
+
+`npm test` requires Python 3 on PATH. CLI regression tests use only its standard library and make dry-run requests. Extension tests mock the backend; neither test path consumes image quota.
+
+The vendored CLI changes for Images 2.5 are limited to documented quality settings and GPT Image 2 transparency preview. They do not change API endpoints, authentication, or defaults.
+
+Optional live smoke test (requires explicit approval to use image quota): load this checkout with `pi -e`, generate one PNG, and edit it using `referencedImagePaths`. Verify inline display and saved bytes. Confirm that progress and the final summary do not claim a specific image model, and that result details contain `backendImageModel: "unknown"`. A successful image does not prove which backend model ran. Never include credentials or raw image payloads in test reports.
 
 ## Pull request checklist
 

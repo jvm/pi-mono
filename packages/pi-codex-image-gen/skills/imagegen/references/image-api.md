@@ -1,21 +1,27 @@
 # Image API quick reference
 
-This file is for the fallback CLI mode only. Use it when the user explicitly asks to use `scripts/image_gen.py` / CLI / API / model controls, or after the user explicitly confirms that a transparent-output request should use the `gpt-image-1.5` true-transparency fallback path.
+This file is for the fallback CLI mode only. Use it when the user explicitly requests CLI/API controls or confirms a native transparency API fallback.
 
 These parameters describe the Image API and bundled CLI fallback surface. Do not assume they are normal arguments on the Pi `codex_generate_image` tool.
 
 ## Scope
-- This fallback CLI is intended for GPT Image models (`gpt-image-2`, `gpt-image-1.5`, `gpt-image-1`, and `gpt-image-1-mini`).
+- This fallback CLI supports GPT Image models, including `gpt-image-2.5-flare` and `gpt-image-2.5-sunburst`.
 - The Pi `codex_generate_image` tool and the fallback CLI do not expose the same controls.
 
 ## Model summary
 
 | Model | Quality | Input fidelity | Resolutions | Recommended use |
 | --- | --- | --- | --- | --- |
+| `gpt-image-2.5-flare` | `low`, `medium`, `high`, `xhigh`, `max`, `auto` | Leave unset; not verified | Use `auto` or standard sizes; extended rules not verified | Optional fast generation |
+| `gpt-image-2.5-sunburst` | `low`, `medium`, `high`, `xhigh`, `max`, `auto` | Leave unset; not verified | Use `auto` or standard sizes; extended rules not verified | Optional precision editing |
 | `gpt-image-2` | `low`, `medium`, `high`, `auto` | Always high fidelity for image inputs; do not set `input_fidelity` | `auto` or flexible sizes that satisfy the constraints below | Default for new CLI/API workflows: high-quality generation and editing, text-heavy images, photorealism, compositing, identity-sensitive edits, and workflows where fewer retries matter |
 | `gpt-image-1.5` | `low`, `medium`, `high`, `auto` | `low`, `high` | `1024x1024`, `1024x1536`, `1536x1024`, `auto` | True transparent-background fallback and backward-compatible workflows |
 | `gpt-image-1` | `low`, `medium`, `high`, `auto` | `low`, `high` | `1024x1024`, `1024x1536`, `1536x1024`, `auto` | Legacy compatibility |
 | `gpt-image-1-mini` | `low`, `medium`, `high`, `auto` | `low`, `high` | `1024x1024`, `1024x1536`, `1536x1024`, `auto` | Cost-sensitive draft batches and lower-stakes previews |
+
+The CLI also recognizes the `2026-09-08` snapshots of both 2.5 models for extended quality settings. Defaults remain unchanged.
+
+Sources: [Flare](https://developers.openai.com/api/docs/models/gpt-image-2.5-flare), [Sunburst](https://developers.openai.com/api/docs/models/gpt-image-2.5-sunburst), and [image tool options](https://developers.openai.com/api/docs/guides/tools-image-generation).
 
 ## gpt-image-2 sizes
 
@@ -50,7 +56,7 @@ Square images are typically fastest to generate. For 4K-style output, use `3840x
 - `model`: image model
 - `n`: number of images (1-10)
 - `size`: `auto` by default for `gpt-image-2`; flexible `WIDTHxHEIGHT` sizes are allowed only for `gpt-image-2`; older GPT Image models use `1024x1024`, `1536x1024`, `1024x1536`, or `auto`
-- `quality`: `low`, `medium`, `high`, or `auto`
+- `quality`: `low`, `medium`, `high`, or `auto`; the documented 2.5 models also accept `xhigh` and `max`
 - `background`: output transparency behavior (`transparent`, `opaque`, or `auto`) for generated output; this is not the same thing as the prompt's visual scene/backdrop
 - `output_format`: `png` (default), `jpeg`, `webp`
 - `output_compression`: 0-100 (jpeg/webp only)
@@ -68,9 +74,9 @@ Model-specific note for `input_fidelity`:
 
 ## Transparent backgrounds
 
-`gpt-image-2` does not currently support the Image API `background=transparent` parameter. The skill's default transparent-image path is Pi `codex_generate_image` with a flat chroma-key background, followed by local alpha extraction with `python "scripts/remove_chroma_key.py"`.
+`gpt-image-2` supports `background=transparent` in preview with PNG or WebP. The Pi tool has no background parameter, so its default path remains chroma-key generation followed by local alpha extraction.
 
-Use CLI `gpt-image-1.5` with `background=transparent` and a transparent-capable output format such as `png` or `webp` only after the user explicitly confirms that fallback, unless they already requested `gpt-image-1.5`, `scripts/image_gen.py`, or CLI fallback. If the user asks for true/native transparency, the subject is too complex for clean chroma-key removal, or local background removal fails validation, explain the tradeoff and ask before switching.
+Use CLI `gpt-image-2 --background transparent --output-format png` (or `webp`) only after the user chooses the API path. Explain that it requires an API key and separate billing. Do not silently switch to an older model if preview transparency fails.
 
 ## Output
 - `data[]` list with `b64_json` per image

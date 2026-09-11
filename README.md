@@ -30,7 +30,7 @@ Each package installs independently. Pick the capability you need, then follow i
 | Need | Package | What it adds |
 | --- | --- | --- |
 | Search the web, docs, and real code | [pi-web-kit](./packages/pi-web-kit) | Context-efficient web search, page fetch, library docs, and code search tools. |
-| Generate or edit images | [pi-codex-image-gen](./packages/pi-codex-image-gen) | Conversational image generation and editing through `gpt-image-2` and ChatGPT Codex auth. |
+| Generate or edit images | [pi-codex-image-gen](./packages/pi-codex-image-gen) | Conversational image generation and editing through ChatGPT Codex auth, with optional Images 2.5 API controls. |
 
 ### Safety and continuity
 

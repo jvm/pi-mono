@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Fallback CLI for explicit image generation or editing with GPT Image models.
 
-Used only when the user explicitly opts into CLI fallback mode, or when explicit
-transparent output requires the `gpt-image-1.5` fallback path.
+Used only when the user explicitly opts into CLI fallback mode, including
+confirmed native transparency requests with separate API billing.
 
 Defaults to gpt-image-2 and a structured prompt augmentation workflow.
 """
@@ -154,9 +154,19 @@ def _validate_size(size: str, model: str) -> None:
         )
 
 
-def _validate_quality(quality: str) -> None:
-    if quality not in ALLOWED_QUALITIES:
-        _die("quality must be one of low, medium, high, or auto.")
+def _is_gpt_image_2_5(model: str) -> bool:
+    return model in {
+        "gpt-image-2.5-flare",
+        "gpt-image-2.5-flare-2026-09-08",
+        "gpt-image-2.5-sunburst",
+        "gpt-image-2.5-sunburst-2026-09-08",
+    }
+
+
+def _validate_quality(quality: str, model: str) -> None:
+    allowed = ALLOWED_QUALITIES | {"xhigh", "max"} if _is_gpt_image_2_5(model) else ALLOWED_QUALITIES
+    if quality not in allowed:
+        _die(f"quality for {model} must be one of {', '.join(sorted(allowed))}.")
 
 
 def _validate_background(background: Optional[str]) -> None:
@@ -189,11 +199,6 @@ def _validate_model_specific_options(
 ) -> None:
     if model != GPT_IMAGE_2_MODEL:
         return
-    if background == "transparent":
-        _die(
-            "transparent backgrounds are not supported in gpt-image-2, the latest model. "
-            "Use --model gpt-image-1.5 --background transparent --output-format png instead."
-        )
     if input_fidelity is not None:
         _die(
             "input_fidelity is not supported in gpt-image-2 because image inputs always use high fidelity for this model."
@@ -210,7 +215,7 @@ def _validate_generate_payload(payload: Dict[str, Any]) -> None:
     quality = str(payload.get("quality", DEFAULT_QUALITY))
     background = payload.get("background")
     _validate_size(size, model)
-    _validate_quality(quality)
+    _validate_quality(quality, model)
     _validate_background(background)
     _validate_model_specific_options(model=model, background=background)
     oc = payload.get("output_compression")
@@ -978,7 +983,7 @@ def main() -> int:
 
     _validate_model(args.model)
     _validate_size(args.size, args.model)
-    _validate_quality(args.quality)
+    _validate_quality(args.quality, args.model)
     _validate_background(args.background)
     _validate_model_specific_options(
         model=args.model,

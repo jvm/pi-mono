@@ -140,6 +140,26 @@ test("tool edit request includes local image content", async (t) => {
   assert.equal(requestBody.input[0].content[1].type, "input_image");
 });
 
+test("tool leaves image model selection to Codex and does not claim a model ID", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "imagegen-model-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  let body;
+  globalThis.fetch = async (_url, init) => {
+    body = JSON.parse(init.body);
+    return sseResponse();
+  };
+  const tool = createTool();
+  const updates = [];
+  const result = await tool.execute("call", { prompt: "test", save: "none" }, undefined,
+    (update) => updates.push(update), context(cwd));
+  assert.equal(body.model, "gpt-5.5");
+  assert.deepEqual(body.tools, [{ type: "image_generation", output_format: "png" }]);
+  assert.equal(result.details.backendImageModel, "unknown");
+  assert.doesNotMatch(JSON.stringify([tool.description, tool.promptSnippet, updates, result]), /gpt-image-/);
+});
+
 test("retry loop honors Retry-After and remains bounded", async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), "imagegen-retry-"));
   t.after(() => rm(cwd, { recursive: true, force: true }));

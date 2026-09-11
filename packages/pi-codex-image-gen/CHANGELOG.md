@@ -6,12 +6,18 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Support Flare and Sunburst Images 2.5 API model IDs and their September 8 snapshots with `xhigh` and `max` CLI quality settings. Keep existing defaults.
+
 ### Changed
 
+- Describe the Codex image model as backend-selected. Return `backendImageModel: "unknown"` instead of an unverified `gpt-image-2` label.
 - Share install telemetry mechanics through `@mocito/install-telemetry` while preserving Pi-specific settings and state paths.
 
 ### Fixed
 
+- Allow GPT Image 2 native transparency preview with PNG/WebP in the API CLI, and remove outdated older-model fallback requirements from skill guidance.
 - Let `enableInstallTelemetry: false` override an enabled `PI_TELEMETRY` environment flag.
 
 ## [0.1.12] - 2026-07-17

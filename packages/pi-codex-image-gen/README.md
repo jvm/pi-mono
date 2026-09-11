@@ -2,7 +2,7 @@
 
 Create and edit images without leaving [Pi](https://pi.dev).
 
-`pi-codex-image-gen` turns natural-language requests and reference images into PNG, JPEG, or WebP assets through **gpt-image-2**, using your existing ChatGPT Codex login instead of a separate API key.
+`pi-codex-image-gen` turns natural-language requests and reference images into PNG, JPEG, or WebP assets through **Codex image generation**, using your existing ChatGPT Codex login instead of a separate API key.
 
 ## Features
 
@@ -43,7 +43,15 @@ In a Pi session:
 > Generate a pixel-art sword icon, 32×32, with a blue blade and gold hilt
 ```
 
-The agent will invoke `codex_generate_image` with your prompt, optionally include up to five local or recent conversation images for editing, stream the response from the Codex backend, and save the resulting image to disk. The `model` parameter controls the Codex routing model; image generation is always performed by **gpt-image-2** on the backend.
+The agent will invoke `codex_generate_image` with your prompt, optionally include up to five local or recent conversation images for editing, stream the response from the Codex backend, and save the resulting image to disk. The `model` parameter controls the Codex routing model, not the image model. The backend selects the image model; result metadata reports `backendImageModel: "unknown"` rather than an unverified model ID.
+
+### Images 2.5 and API fallback
+
+The optional `skills/imagegen/scripts/image_gen.py` API CLI accepts `--model gpt-image-2.5-flare` or `--model gpt-image-2.5-sunburst`, including their `2026-09-08` snapshots. Both accept `--quality xhigh` and `--quality max` in addition to the existing quality settings. The CLI default remains `gpt-image-2`. For 2.5, use `--size auto` or the existing standard sizes; extended resolution rules are not yet verified.
+
+GPT Image 2 now supports native transparency in preview: use `--model gpt-image-2 --background transparent --output-format png` (or `webp`) in confirmed CLI mode. This uses `OPENAI_API_KEY` and separate API billing. The Pi tool still uses chroma-key removal because it has no background parameter.
+
+Public API model selection does not establish support for the same options on the private Codex backend. The extension does not expose Flare/Sunburst selection or claim that your account has received the Images 2.5 rollout.
 
 ## Authentication
 
@@ -80,7 +88,7 @@ Project config overrides global config only when project trust is active. If pro
 | --------- | ------ | ---------- | ---------------------------------------- |
 | `save`    | string | `"global"` | Default save mode (see below).           |
 | `saveDir` | string | —          | Directory used when `save=custom`.       |
-| `model`   | string | `"gpt-5.5"`| Codex routing model. Image generation is always handled by gpt-image-2. |
+| `model`   | string | `"gpt-5.5"`| Codex routing model, not the backend image model. |
 
 ### Environment variables
 
@@ -117,7 +125,7 @@ Project config overrides global config only when project trust is active. If pro
 1. Resolves auth via Pi's `openai-codex` provider (ChatGPT session token).
 2. Sends a Codex Responses API request to the routing model (default `gpt-5.5`) with the `image_generation` tool enabled.
 3. For edits, attaches the selected local or conversation images to the request.
-4. The backend invokes **gpt-image-2** to generate or edit the image.
+4. The backend selects an image model to generate or edit the image.
 5. Parses the SSE stream and strictly validates the returned base64 and image format.
 6. Saves the image according to the active save mode; persistence failures produce a warning without discarding a valid inline image.
 7. Returns the image data inline plus metadata (model, format, path, revised prompt, usage).
