@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Support GPT-6 Astra Fast mode on the Codex subscription backend.
+
 ### Changed
 
 - Move the Fast mode shortcut from `Ctrl+Shift+F` to `Ctrl+Shift+R` to avoid Pi's transcript search shortcut.

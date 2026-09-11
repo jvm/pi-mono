@@ -51,6 +51,9 @@ function makeContext(model, hasUI = true, mode = hasUI ? "tui" : "print") {
 }
 
 test("recognizes only the Codex models with an advertised Fast tier", () => {
+  assert.equal(supportsFastMode({ provider: "openai-codex", id: "gpt-6-astra" }), true);
+  assert.equal(supportsFastMode({ provider: "openai", id: "gpt-6-astra" }), false);
+  assert.equal(supportsFastMode({ provider: "openai-codex", id: "gpt-6-astra-pro" }), false);
   assert.equal(supportsFastMode({ provider: "openai-codex", id: "gpt-5.4" }), true);
   assert.equal(supportsFastMode({ provider: "openai-codex", id: "gpt-5.6-sol" }), true);
   assert.equal(supportsFastMode({ provider: "openai-codex", id: "gpt-5.4-mini" }), false);
@@ -166,6 +169,33 @@ test("does not enable Fast for unsupported models", async () => {
   assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast n/a" });
   assert.equal(context.notifications.at(-1).type, "warning");
   assert.equal(await pi.handlers.get("before_provider_request")[0]({ payload: {} }, context), undefined);
+});
+
+test("Astra toggles preserve request fields and survive model switches without widening support", async () => {
+  const pi = makePi();
+  piFast(pi);
+  const context = makeContext({ provider: "openai-codex", id: "gpt-6-astra" });
+  const request = pi.handlers.get("before_provider_request")[0];
+  const payload = { input: [], reasoning: { effort: "max" }, service_tier: "default" };
+  await pi.handlers.get("session_start")[0]({}, context);
+  assert.equal(await request({ payload }, context), undefined);
+  await pi.commands.get("fast").handler("on", context);
+  assert.deepEqual(await request({ payload }, context), { ...payload, service_tier: "priority" });
+  assert.equal(payload.service_tier, "default");
+  for (const provider of ["openai", "anthropic"]) {
+    context.model = { provider, id: "gpt-6-astra" };
+    await pi.handlers.get("model_select")[0]({}, context);
+    assert.equal(context.statuses.at(-1).value, "Fast n/a");
+    assert.equal(await request({ payload }, context), undefined);
+  }
+  context.model = { provider: "openai-codex", id: "gpt-6-astra" };
+  await pi.handlers.get("model_select")[0]({}, context);
+  assert.equal(context.statuses.at(-1).value, "Fast on");
+  await pi.commands.get("fast").handler("off", context);
+  assert.equal(await request({ payload }, context), undefined);
+  for (const malformed of [undefined, null, [], "payload"]) {
+    assert.equal(applyFastMode(malformed, context.model), malformed);
+  }
 });
 
 test.after(async () => {
