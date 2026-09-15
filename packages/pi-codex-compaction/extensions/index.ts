@@ -84,6 +84,16 @@ export default function piCodexCompaction(pi: ExtensionAPI): void {
   };
   pi.on("session_before_compact", onBeforeCompact);
 
+  pi.on("session_compact", (event, ctx) => {
+    if (ctx.mode !== "tui" || !ctx.hasUI || !event.fromExtension) return;
+    if (!findActiveRemoteCompaction([event.compactionEntry])) return;
+    try {
+      ctx.ui.notify("[compaction (codex)] Checkpoint saved.", "info");
+    } catch {
+      // Display failures must not affect a saved checkpoint or continuation.
+    }
+  });
+
   pi.on("before_provider_headers", (event, ctx) => {
     if (!supportsRemoteCompaction(ctx.model)) return;
     const existing = event.headers["x-codex-beta-features"];

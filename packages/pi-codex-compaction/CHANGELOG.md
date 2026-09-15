@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-09-15
+
+### Added
+
+- Show `[compaction (codex)] Checkpoint saved.` in the TUI after a Codex checkpoint is saved, to distinguish it from standard Pi compaction.
+
 ## [0.1.3] - 2026-09-11
 
 ### Fixed
