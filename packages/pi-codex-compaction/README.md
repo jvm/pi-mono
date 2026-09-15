@@ -35,6 +35,12 @@ pi -e /path/to/pi-mono/packages/pi-codex-compaction
 
 ## Behavior
 
+After a Codex checkpoint is saved, the TUI shows
+`[compaction (codex)] Checkpoint saved.` Pi's built-in `[compaction]` heading
+remains unchanged. The notice is not added to model context or stored in the
+session, and is not replayed on reload. Standard Pi compaction does not show it.
+Print, JSON, and RPC modes receive no extra notification.
+
 When Pi starts compaction on a supported Codex model, the extension sends a streamed Responses request whose `input` contains only discardable history, any compatible prior checkpoint, and a `compaction_trigger` item. The normal request envelope is retained because Codex's compaction path is parity-tested against ordinary Responses requests; this includes the effective system prompt, active tool definitions, reasoning level, prompt-cache fields, and routing fields. The request uses the `remote_compaction_v2` beta feature, and the returned opaque checkpoint and bounded provider usage are stored in the Pi compaction entry. Later requests rehydrate the raw checkpoint only when the model, endpoint, account, and authentication mode match; other providers/models receive the bounded textual fallback instead.
 
 Compaction uses the model active when Pi triggers it. If a session switches from a larger to a smaller model, the remote request is bounded against the new model's context window and tool outputs are reduced before sending. A previous opaque checkpoint is treated as incompatible after a model, endpoint, account, or authentication-mode switch; Pi's readable previous summary is sent instead. If the full request still cannot fit, the extension leaves compaction to Pi's normal implementation.
@@ -113,6 +119,9 @@ API. Async tools and mid-turn steering require upstream Pi support.
 
 For a small live test, load this package and select `openai-codex/gpt-6-astra`.
 Send two short messages, run `/compact`, then ask about the first message.
+Confirm `[compaction (codex)] Checkpoint saved.` appears. Then run
+`/compact Focus on recent work` and confirm the standard-compaction warning
+appears without a Codex success notice.
 Repeat with `/fast on` and `pi-codex-tools` loaded. Check that compaction succeeds,
 the continuation retains context, and session usage includes compaction tokens.
 Use only a temporary file if you test `apply_patch`. Do not generate images.

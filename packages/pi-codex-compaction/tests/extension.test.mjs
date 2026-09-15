@@ -767,6 +767,52 @@ test("does not reuse a checkpoint across account, auth-mode, or model changes", 
   assert.equal(await pi.handlers.get("before_provider_request")({ payload }, unknownAuthMode), undefined);
 });
 
+test("announces only saved Codex compaction in the TUI through the lifecycle hooks", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => new Response(
+    `data: ${JSON.stringify({
+      type: "response.completed",
+      response: { status: "completed", output: [{ type: "compaction", encrypted_content: "private-checkpoint" }] },
+    })}\n\n`,
+  ));
+  const pi = makePi();
+  const notices = [];
+  const ctx = makeContext({
+    hasUI: true,
+    ui: { notify(message, level) { notices.push({ message, level }); } },
+  });
+  const result = await pi.handlers.get("session_before_compact")({
+    preparation: preparation(), signal: new AbortController().signal,
+  }, ctx);
+  assert.ok(result?.compaction);
+  assert.deepEqual(notices, [], "do not announce success before Pi saves the result");
+  const event = {
+    fromExtension: true,
+    compactionEntry: { ...result.compaction, type: "compaction" },
+  };
+  for (const reason of ["manual", "threshold", "overflow"]) {
+    await pi.handlers.get("session_compact")({ ...event, reason }, ctx);
+  }
+  assert.deepEqual(notices, Array.from({ length: 3 }, () => ({
+    message: "[compaction (codex)] Checkpoint saved.", level: "info",
+  })));
+  notices.length = 0;
+  for (const mode of ["print", "json", "rpc"]) {
+    await pi.handlers.get("session_compact")(event, { ...ctx, mode });
+  }
+  await pi.handlers.get("session_compact")(event, { ...ctx, hasUI: false });
+  await pi.handlers.get("session_compact")({ ...event, fromExtension: false }, ctx);
+  for (const details of [undefined, {}, { kind: "another-extension" }]) {
+    await pi.handlers.get("session_compact")({
+      ...event, compactionEntry: { ...event.compactionEntry, details },
+    }, ctx);
+  }
+  assert.deepEqual(notices, []);
+  assert.deepEqual(pi.diagnostics, [], "success adds no extra session entries");
+  assert.doesNotThrow(() => pi.handlers.get("session_compact")(event, {
+    ...ctx, ui: { notify() { throw new Error("UI unavailable"); } },
+  }));
+});
+
 test("the compaction hook reports safe context-limit diagnostics instead of a silent skip", async (t) => {
   t.mock.method(globalThis, "fetch", async () => { throw new Error("must not send"); });
   const pi = makePi();
