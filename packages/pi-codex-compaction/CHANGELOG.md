@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-09-17
+
+### Fixed
+
+- Persist the Codex compaction confirmation as a rendered, non-model session entry so Pi's post-compaction chat rebuild does not erase it.
+
 ## [0.1.4] - 2026-09-15
 
 ### Added

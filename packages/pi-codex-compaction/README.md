@@ -37,8 +37,9 @@ pi -e /path/to/pi-mono/packages/pi-codex-compaction
 
 After a Codex checkpoint is saved, the TUI shows
 `[compaction (codex)] Checkpoint saved.` Pi's built-in `[compaction]` heading
-remains unchanged. The notice is not added to model context or stored in the
-session, and is not replayed on reload. Standard Pi compaction does not show it.
+remains unchanged. The notice is stored as a TUI-only custom session entry, so it
+survives the compaction chat rebuild and reload. It is not added to model context.
+Standard Pi compaction does not create a Codex success notice.
 Print, JSON, and RPC modes receive no extra notification.
 
 When Pi starts compaction on a supported Codex model, the extension sends a streamed Responses request whose `input` contains only discardable history, any compatible prior checkpoint, and a `compaction_trigger` item. The normal request envelope is retained because Codex's compaction path is parity-tested against ordinary Responses requests; this includes the effective system prompt, active tool definitions, reasoning level, prompt-cache fields, and routing fields. The request uses the `remote_compaction_v2` beta feature, and the returned opaque checkpoint and bounded provider usage are stored in the Pi compaction entry. Later requests rehydrate the raw checkpoint only when the model, endpoint, account, and authentication mode match; other providers/models receive the bounded textual fallback instead.
@@ -111,6 +112,11 @@ Costs follow Pi's catalog estimates. They are not a ChatGPT subscription bill.
 
 ### Reference and smoke test
 
+The automated display smoke tests exercise Pi's actual compaction-end handler
+and chat renderer for manual, threshold, and overflow compaction. They check
+redraw, reload, standard compaction, and exclusion from subsequent model requests.
+Only provider responses and terminal I/O are replaced with local fixtures.
+
 Behavior was checked against `openai/codex` commit
 `654b0a77d0d2f81aa21f61caf7af4be88fe550bb` (2026-09-11), notably
 `core/src/compact_remote_v2{,_attempt}.rs`. No Codex code was copied.
@@ -119,9 +125,10 @@ API. Async tools and mid-turn steering require upstream Pi support.
 
 For a small live test, load this package and select `openai-codex/gpt-6-astra`.
 Send two short messages, run `/compact`, then ask about the first message.
-Confirm `[compaction (codex)] Checkpoint saved.` appears. Then run
+Confirm `[compaction (codex)] Checkpoint saved.` remains visible after the
+compaction finishes and after `/reload`. Then run
 `/compact Focus on recent work` and confirm the standard-compaction warning
-appears without a Codex success notice.
+appears without a new Codex success notice.
 Repeat with `/fast on` and `pi-codex-tools` loaded. Check that compaction succeeds,
 the continuation retains context, and session usage includes compaction tokens.
 Use only a temporary file if you test `apply_patch`. Do not generate images.
