@@ -3,6 +3,7 @@ import type {
   ExtensionHandler,
   SessionBeforeCompactEvent,
 } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { BETA_FEATURE, getCodexAccountFingerprint } from "../src/codex-wire.js";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import {
@@ -26,8 +27,14 @@ const FALLBACK_MESSAGES: Record<CompactionFallback["reason"], string> = {
   "remote-failed": "the remote request failed",
 };
 
+const COMPACTION_SAVED_ENTRY = "pi-codex-compaction:saved:v1";
+
 export default function piCodexCompaction(pi: ExtensionAPI): void {
   reportInstallTelemetry();
+
+  pi.registerEntryRenderer(COMPACTION_SAVED_ENTRY, (_entry, _options, theme) =>
+    new Text(theme.fg("dim", "[compaction (codex)] Checkpoint saved."), 1, 0),
+  );
 
   const onBeforeCompact: ExtensionHandler<SessionBeforeCompactEvent, { compaction?: NonNullable<Awaited<ReturnType<typeof createRemoteCompaction>>> }> = async (event, ctx) => {
     if (!supportsRemoteCompaction(ctx.model)) return undefined;
@@ -88,7 +95,9 @@ export default function piCodexCompaction(pi: ExtensionAPI): void {
     if (ctx.mode !== "tui" || !ctx.hasUI || !event.fromExtension) return;
     if (!findActiveRemoteCompaction([event.compactionEntry])) return;
     try {
-      ctx.ui.notify("[compaction (codex)] Checkpoint saved.", "info");
+      // Pi rebuilds chat after session_compact, removing transient notifications.
+      // A rendered custom entry survives that rebuild without entering LLM context.
+      pi.appendEntry(COMPACTION_SAVED_ENTRY, { version: 1 });
     } catch {
       // Display failures must not affect a saved checkpoint or continuation.
     }

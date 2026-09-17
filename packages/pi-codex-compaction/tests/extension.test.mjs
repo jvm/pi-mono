@@ -67,10 +67,15 @@ function preparation(overrides = {}) {
 
 function makePi() {
   const handlers = new Map();
+  const renderers = new Map();
   const diagnostics = [];
   const pi = {
     handlers,
     diagnostics,
+    renderers,
+    registerEntryRenderer(customType, renderer) {
+      renderers.set(customType, renderer);
+    },
     appendEntry(customType, data) {
       diagnostics.push({ customType, data });
     },
@@ -767,7 +772,7 @@ test("does not reuse a checkpoint across account, auth-mode, or model changes", 
   assert.equal(await pi.handlers.get("before_provider_request")({ payload }, unknownAuthMode), undefined);
 });
 
-test("announces only saved Codex compaction in the TUI through the lifecycle hooks", async (t) => {
+test("persists only saved Codex confirmations in the TUI through the lifecycle hooks", async (t) => {
   t.mock.method(globalThis, "fetch", async () => new Response(
     `data: ${JSON.stringify({
       type: "response.completed",
@@ -785,6 +790,7 @@ test("announces only saved Codex compaction in the TUI through the lifecycle hoo
   }, ctx);
   assert.ok(result?.compaction);
   assert.deepEqual(notices, [], "do not announce success before Pi saves the result");
+  assert.deepEqual(pi.diagnostics, []);
   const event = {
     fromExtension: true,
     compactionEntry: { ...result.compaction, type: "compaction" },
@@ -792,10 +798,16 @@ test("announces only saved Codex compaction in the TUI through the lifecycle hoo
   for (const reason of ["manual", "threshold", "overflow"]) {
     await pi.handlers.get("session_compact")({ ...event, reason }, ctx);
   }
-  assert.deepEqual(notices, Array.from({ length: 3 }, () => ({
-    message: "[compaction (codex)] Checkpoint saved.", level: "info",
+  assert.deepEqual(pi.diagnostics, Array.from({ length: 3 }, () => ({
+    customType: "pi-codex-compaction:saved:v1", data: { version: 1 },
   })));
-  notices.length = 0;
+  const renderer = pi.renderers.get("pi-codex-compaction:saved:v1");
+  for (const expanded of [false, true]) {
+    const component = renderer(pi.diagnostics[0], { expanded }, { fg: (_color, text) => text });
+    assert.match(component.render(80).join("\n"), /\[compaction \(codex\)\] Checkpoint saved\./);
+    assert.ok(component.render(20).every((line) => line.length <= 20));
+  }
+  pi.diagnostics.length = 0;
   for (const mode of ["print", "json", "rpc"]) {
     await pi.handlers.get("session_compact")(event, { ...ctx, mode });
   }
@@ -807,10 +819,9 @@ test("announces only saved Codex compaction in the TUI through the lifecycle hoo
     }, ctx);
   }
   assert.deepEqual(notices, []);
-  assert.deepEqual(pi.diagnostics, [], "success adds no extra session entries");
-  assert.doesNotThrow(() => pi.handlers.get("session_compact")(event, {
-    ...ctx, ui: { notify() { throw new Error("UI unavailable"); } },
-  }));
+  assert.deepEqual(pi.diagnostics, [], "other modes and compactors create no success entries");
+  pi.appendEntry = () => { throw new Error("storage unavailable"); };
+  assert.doesNotThrow(() => pi.handlers.get("session_compact")(event, ctx));
 });
 
 test("the compaction hook reports safe context-limit diagnostics instead of a silent skip", async (t) => {
