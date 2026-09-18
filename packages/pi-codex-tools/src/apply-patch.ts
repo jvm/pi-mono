@@ -1,89 +1,13 @@
 // Adapted from OpenAI Codex apply-patch grammar/parser behavior; see NOTICE.
-import { constants, open as openCb, fstat as fstatCb, read as readCb, write as writeCb, close as closeCb, mkdir as mkdirCb, unlink as unlinkCb } from "node:fs";
-import type { Stats } from "node:fs";
-import { lstat, realpath } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { constants } from "node:fs";
+import { lstat, readlink, realpath, open, mkdir, unlink, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve, parse, join, sep } from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
-import { getOpenAtBindings } from "./native.js";
 
 export const MAX_PATCH_BYTES = 1_048_576;
 export const MAX_PATCH_HUNKS = 1_000;
 export const MAX_TARGET_FILE_BYTES = 64 * 1024 * 1024;
 
-const O_NOFOLLOW = constants.O_NOFOLLOW ?? 0;
-const SECURE_FD_DIRECTORY = process.platform === "linux" ? "/proc/self/fd" : undefined;
-const OPENAT_BINDINGS = getOpenAtBindings();
-const BASE_SECURE_FILESYSTEM_SUPPORTED =
-  (process.platform === "linux" && SECURE_FD_DIRECTORY !== undefined && O_NOFOLLOW !== 0) ||
-  (process.platform === "darwin" && OPENAT_BINDINGS !== null && O_NOFOLLOW !== 0);
-let secureFilesystemSupportedOverride: boolean | undefined;
-
-/** Whether apply_patch can safely execute against this platform's filesystem. */
-export function secureFilesystemSupported(): boolean {
-  return secureFilesystemSupportedOverride ?? BASE_SECURE_FILESYSTEM_SUPPORTED;
-}
-
-/** @internal Force the support flag so the activation path can be tested on any host platform. */
-export function setSecureFilesystemSupportedForTest(value: boolean | undefined): void {
-  secureFilesystemSupportedOverride = value;
-}
-
-const openFd = (path: string, flags: number, mode: number): Promise<number> =>
-  new Promise((resolveP, rejectP) => openCb(path, flags, mode, (error, fd) => (error ? rejectP(error) : resolveP(fd))));
-const fstatFd = (fd: number): Promise<Stats> =>
-  new Promise((resolveP, rejectP) => fstatCb(fd, (error, stats) => (error ? rejectP(error) : resolveP(stats))));
-const readFd = (fd: number, buffer: Buffer, offset: number, length: number, position: number | null): Promise<number> =>
-  new Promise((resolveP, rejectP) => readCb(fd, buffer, offset, length, position, (error, bytesRead) => (error ? rejectP(error) : resolveP(bytesRead))));
-const writeFd = (fd: number, buffer: Buffer, offset: number, length: number, position: number | null): Promise<number> =>
-  new Promise((resolveP, rejectP) => writeCb(fd, buffer, offset, length, position, (error, written) => (error ? rejectP(error) : resolveP(written))));
-const closeFd = (fd: number): Promise<void> =>
-  new Promise((resolveP, rejectP) => closeCb(fd, (error) => (error ? rejectP(error) : resolveP())));
-const mkdirPath = (path: string, mode: number): Promise<void> =>
-  new Promise((resolveP, rejectP) => mkdirCb(path, mode, (error) => (error ? rejectP(error) : resolveP())));
-const unlinkPath = (path: string): Promise<void> =>
-  new Promise((resolveP, rejectP) => unlinkCb(path, (error) => (error ? rejectP(error) : resolveP())));
-
-// Open `child` relative to a trusted open directory descriptor, never following the final component.
-async function openChildRelative(parentFd: number, child: string, flags: number, mode: number): Promise<number> {
-  if (OPENAT_BINDINGS) return OPENAT_BINDINGS.openat(parentFd, child, flags, mode);
-  return openFd(join(SECURE_FD_DIRECTORY as string, String(parentFd), child), flags, mode);
-}
-
-async function mkdirChildRelative(parentFd: number, child: string, mode: number): Promise<void> {
-  if (OPENAT_BINDINGS) {
-    OPENAT_BINDINGS.mkdirat(parentFd, child, mode);
-    return;
-  }
-  await mkdirPath(join(SECURE_FD_DIRECTORY as string, String(parentFd), child), mode);
-}
-
-async function unlinkChildRelative(parentFd: number, child: string): Promise<void> {
-  if (OPENAT_BINDINGS) {
-    OPENAT_BINDINGS.unlinkat(parentFd, child);
-    return;
-  }
-  await unlinkPath(join(SECURE_FD_DIRECTORY as string, String(parentFd), child));
-}
-
-// No-follow stat of `child` relative to a trusted descriptor, without opening it
-// (so unreadable files can still be inspected for symlink/directory rejection).
-async function lstatChildRelative(parentFd: number, child: string): Promise<{ isFile: boolean; isDirectory: boolean; isSymbolicLink: boolean }> {
-  if (OPENAT_BINDINGS) return OPENAT_BINDINGS.lstatAt(parentFd, child);
-  const stats = await lstat(join(SECURE_FD_DIRECTORY as string, String(parentFd), child));
-  return { isFile: stats.isFile(), isDirectory: stats.isDirectory(), isSymbolicLink: stats.isSymbolicLink() };
-}
-
-async function writeAllFd(fd: number, data: string): Promise<void> {
-  const buffer = Buffer.from(data, "utf8");
-  let written = 0;
-  while (written < buffer.length) {
-    written += await writeFd(fd, buffer, written, buffer.length - written, written);
-  }
-}
-const SECURE_DIRECTORY_FLAGS = constants.O_RDONLY | O_NOFOLLOW | (constants.O_DIRECTORY ?? 0) | (constants.O_NONBLOCK ?? 0);
-const SECURE_READ_FLAGS = constants.O_RDONLY | O_NOFOLLOW | (constants.O_NONBLOCK ?? 0);
-const SECURE_UPDATE_FLAGS = constants.O_WRONLY | O_NOFOLLOW | constants.O_TRUNC | (constants.O_NONBLOCK ?? 0);
-const SECURE_CREATE_FLAGS = SECURE_UPDATE_FLAGS | constants.O_CREAT;
 const FILE_READ_CHUNK_BYTES = 64 * 1024;
 
 export const APPLY_PATCH_GRAMMAR = `start: begin_patch hunk+ end_patch
@@ -292,14 +216,12 @@ type PlannedOperation =
   | { kind: "delete"; path: string; displayPath: string }
   | { kind: "update"; path: string; displayPath: string; moveTo?: string; moveDisplayPath?: string; chunkGroups: UpdateChunk[][]; content: string };
 
-type SafePath = { absolute: string; exists: boolean; isDirectory: boolean; isFile: boolean };
-type VirtualFile = Omit<SafePath, "absolute"> & { content?: string };
+type VirtualFile = { exists: boolean; isDirectory: boolean; isFile: boolean; isSymbolicLink?: boolean; content?: string };
 
 export async function applyPatch(input: string, options: ApplyPatchOptions): Promise<ApplyPatchResult> {
-  requireSecureFilesystem();
   const hunks = parseApplyPatch(input);
+  throwIfAborted(options.signal);
   const cwd = await realpath(resolve(options.cwd));
-  const root = sep;
   const lockPaths = hunks.flatMap((hunk) => {
     const paths = [resolvePatchPath(hunk.path, cwd)];
     if (hunk.kind === "update" && hunk.moveTo) paths.push(resolvePatchPath(hunk.moveTo, cwd));
@@ -307,71 +229,61 @@ export async function applyPatch(input: string, options: ApplyPatchOptions): Pro
   });
 
   return withMutationLocks(lockPaths, async () => {
-    const rootFd = await openSecureRoot(root, options.signal);
-    try {
-      const operations = await planOperations(hunks, cwd, root, rootFd, options.signal);
+    const operations = await planOperations(hunks, cwd, options.signal);
+    throwIfAborted(options.signal);
+    // Preflight catches parse/match errors before writes; I/O failures can still leave a partial patch.
+    for (const operation of operations) {
       throwIfAborted(options.signal);
-      // ponytail: preflight catches parse/match errors before writes; cross-process failures can still leave a partial multi-file patch.
-      for (const operation of operations) {
+      if (operation.kind === "add") {
+        await writeTargetFile(operation.path, operation.content, options.signal);
+      } else if (operation.kind === "delete") {
+        await unlink(operation.path);
+      } else if (operation.moveTo) {
+        await writeTargetFile(operation.moveTo, operation.content, options.signal);
         throwIfAborted(options.signal);
-        if (operation.kind === "add") {
-          await writeSecureFile(rootFd, root, operation.path, operation.content, true, options.signal);
-        } else if (operation.kind === "delete") {
-          await removeSecureFile(rootFd, root, operation.path, options.signal);
-        } else if (operation.moveTo) {
-          await writeSecureFile(rootFd, root, operation.moveTo, operation.content, true, options.signal);
-          await removeSecureFile(rootFd, root, operation.path, options.signal);
-        } else {
-          await writeSecureFile(rootFd, root, operation.path, operation.content, false, options.signal);
-        }
+        await unlink(operation.path);
+      } else {
+        await writeTargetFile(operation.path, operation.content, options.signal);
       }
-
-      return {
-        changes: operations.map((operation) => ({
-          kind: operation.kind === "add" ? "added" : operation.kind === "delete" ? "deleted" : "updated",
-          path: operation.displayPath,
-          ...(operation.kind === "update" && operation.moveDisplayPath ? { moveTo: operation.moveDisplayPath } : {}),
-        })),
-      };
-    } finally {
-      await closeFd(rootFd);
     }
+
+    return {
+      changes: operations.map((operation) => ({
+        kind: operation.kind === "add" ? "added" : operation.kind === "delete" ? "deleted" : "updated",
+        path: operation.displayPath,
+        ...(operation.kind === "update" && operation.moveDisplayPath ? { moveTo: operation.moveDisplayPath } : {}),
+      })),
+    };
   });
 }
 
 async function planOperations(
   hunks: ApplyPatchHunk[],
   cwd: string,
-  root: string,
-  rootFd: number,
   signal?: AbortSignal,
 ): Promise<PlannedOperation[]> {
   const operations: PlannedOperation[] = [];
   const virtualFiles = new Map<string, VirtualFile>();
 
-  const getVirtualFile = async (rawPath: string): Promise<{ absolute: string; file: VirtualFile }> => {
-    const absolute = resolvePatchPath(rawPath, cwd);
+  const getVirtualFile = async (rawPath: string, followFinal = true): Promise<{ absolute: string; file: VirtualFile }> => {
+    const absolute = await canonicalPath(resolvePatchPath(rawPath, cwd), followFinal, virtualFiles, signal);
     const existing = virtualFiles.get(absolute);
-    if (existing) return { absolute, file: existing };
-    const safe = await safePath(rawPath, cwd, signal);
-    const file: VirtualFile = {
-      exists: safe.exists,
-      isDirectory: safe.isDirectory,
-      isFile: safe.isFile,
-    };
+    if (existing && !existing.isSymbolicLink) return { absolute, file: existing };
+    const file = await inspectPath(absolute);
     virtualFiles.set(absolute, file);
     return { absolute, file };
   };
 
   const getVirtualContent = async (absolute: string, file: VirtualFile): Promise<string> => {
     if (!file.exists || !file.isFile) throw new Error(`Cannot read non-file '${absolute}'.`);
-    if (file.content === undefined) file.content = await readSecureFile(rootFd, root, absolute, signal);
+    if (file.content === undefined) file.content = await readTargetFile(absolute, signal);
     return file.content;
   };
 
   for (const hunk of hunks) {
     throwIfAborted(signal);
-    const source = await getVirtualFile(hunk.path);
+    const source = await getVirtualFile(hunk.path, hunk.kind !== "delete");
+    const sourceDisplay = displayPath(cwd, resolvePatchPath(hunk.path, cwd), hunk.path);
 
     if (hunk.kind === "add") {
       if (source.file.isDirectory || (source.file.exists && !source.file.isFile)) {
@@ -384,7 +296,7 @@ async function planOperations(
       operations.push({
         kind: "add",
         path: source.absolute,
-        displayPath: displayPath(cwd, source.absolute, hunk.path),
+        displayPath: sourceDisplay,
         content: hunk.content,
       });
       continue;
@@ -392,9 +304,10 @@ async function planOperations(
 
     if (hunk.kind === "delete") {
       if (!source.file.exists) throw new Error(`Cannot delete missing file '${hunk.path}'.`);
-      if (source.file.isDirectory || !source.file.isFile) throw new Error(`Cannot delete non-file '${hunk.path}'.`);
-      operations.push({ kind: "delete", path: source.absolute, displayPath: displayPath(cwd, source.absolute, hunk.path) });
+      if (!source.file.isSymbolicLink && (source.file.isDirectory || !source.file.isFile)) throw new Error(`Cannot delete non-file '${hunk.path}'.`);
+      operations.push({ kind: "delete", path: source.absolute, displayPath: sourceDisplay });
       source.file.exists = false;
+      source.file.isSymbolicLink = false;
       source.file.content = undefined;
       continue;
     }
@@ -402,12 +315,10 @@ async function planOperations(
     if (!source.file.exists) throw new Error(`Cannot update missing file '${hunk.path}'.`);
     if (source.file.isDirectory || !source.file.isFile) throw new Error(`Cannot update non-file '${hunk.path}'.`);
     const original = await getVirtualContent(source.absolute, source.file);
-    const moveTo = hunk.moveTo ? resolvePatchPath(hunk.moveTo, cwd) : undefined;
-    if (moveTo === source.absolute) throw new Error(`Cannot move '${hunk.path}' onto itself.`);
-
     let destination: { absolute: string; file: VirtualFile } | undefined;
-    if (moveTo) {
+    if (hunk.moveTo) {
       destination = await getVirtualFile(hunk.moveTo!);
+      if (destination.absolute === source.absolute) throw new Error(`Cannot move '${hunk.path}' onto itself.`);
       if (destination.file.isDirectory || (destination.file.exists && !destination.file.isFile)) {
         throw new Error(`Cannot move file over non-file '${hunk.moveTo}'.`);
       }
@@ -415,17 +326,21 @@ async function planOperations(
 
     const content = applyUpdateContent(original, hunk.chunks, hunk.path);
     if (destination) {
+      // A move copies the referent's content, then unlinks the source entry.
+      // Moving a symlink must not delete its referent.
+      const sourceEntry = await getVirtualFile(hunk.path, false);
       operations.push({
         kind: "update",
-        path: source.absolute,
-        displayPath: displayPath(cwd, source.absolute, hunk.path),
-        moveTo: moveTo!,
-        moveDisplayPath: displayPath(cwd, moveTo!, hunk.moveTo!),
+        path: sourceEntry.absolute,
+        displayPath: sourceDisplay,
+        moveTo: destination.absolute,
+        moveDisplayPath: displayPath(cwd, resolvePatchPath(hunk.moveTo!, cwd), hunk.moveTo!),
         chunkGroups: [[...hunk.chunks]],
         content,
       });
-      source.file.exists = false;
-      source.file.content = undefined;
+      sourceEntry.file.exists = false;
+      sourceEntry.file.isSymbolicLink = false;
+      sourceEntry.file.content = undefined;
       destination.file.exists = true;
       destination.file.isDirectory = false;
       destination.file.isFile = true;
@@ -441,7 +356,7 @@ async function planOperations(
       operations.push({
         kind: "update",
         path: source.absolute,
-        displayPath: displayPath(cwd, source.absolute, hunk.path),
+        displayPath: sourceDisplay,
         chunkGroups: [[...hunk.chunks]],
         content,
       });
@@ -456,131 +371,58 @@ function resolvePatchPath(rawPath: string, cwd: string): string {
   return isAbsolute(rawPath) ? resolve(rawPath) : resolve(cwd, rawPath);
 }
 
-async function safePath(rawPath: string, cwd: string, signal?: AbortSignal): Promise<SafePath> {
-  throwIfAborted(signal);
-  const absolute = resolvePatchPath(rawPath, cwd);
-
-  let current = absolute;
-  let target: Omit<SafePath, "absolute"> = { exists: false, isDirectory: false, isFile: false };
-  while (true) {
-    throwIfAborted(signal);
-    try {
-      const stats = await lstat(current);
-      if (stats.isSymbolicLink()) {
-        throw new Error(`Symlink paths are not allowed in apply_patch: ${rawPath}`);
-      }
-      if (current !== absolute && !stats.isDirectory()) {
-        throw new Error(`Parent path is not a directory: ${rawPath}`);
-      }
-      if (current === absolute) {
-        target = { exists: true, isDirectory: stats.isDirectory(), isFile: stats.isFile() };
-      }
-    } catch (error) {
-      if (!isMissingPathError(error)) throw error;
-    }
-    const parent = dirname(current);
-    if (parent === current) return { absolute, ...target };
-    current = parent;
-  }
-}
-
-function requireSecureFilesystem(): void {
-  if (!secureFilesystemSupported()) {
-    throw new Error("apply_patch requires a POSIX filesystem with descriptor-based no-follow support.");
-  }
-}
-
-async function openSecureRoot(root: string, signal?: AbortSignal): Promise<number> {
-  requireSecureFilesystem();
-  let current = await openFd(sep, SECURE_DIRECTORY_FLAGS, 0);
-  try {
-    for (const component of root.split(sep).filter(Boolean)) {
-      throwIfAborted(signal);
-      const next = await openSecureDirectoryChild(current, component);
-      await closeFd(current);
-      current = next;
-    }
-    return current;
-  } catch (error) {
-    await closeFd(current).catch(() => undefined);
-    throw error;
-  }
-}
-
-async function openSecureDirectoryChild(parentFd: number, component: string): Promise<number> {
-  const fd = await openChildRelative(parentFd, component, SECURE_DIRECTORY_FLAGS, 0);
-  try {
-    if (!(await fstatFd(fd)).isDirectory()) throw new Error(`Secure path component is not a directory: ${component}`);
-    return fd;
-  } catch (error) {
-    await closeFd(fd).catch(() => undefined);
-    throw error;
-  }
-}
-
-type SecureParent = { handle: number; owned: boolean };
-
-async function openSecureParentDirectory(rootFd: number, root: string, absolute: string, createParents: boolean, signal?: AbortSignal): Promise<SecureParent> {
-  const parentPath = dirname(absolute);
-  const relativeParent = relative(root, parentPath);
-  const components = relativeParent ? relativeParent.split(sep) : [];
-  if (components.some((component) => !component || component === "." || component === "..")) {
-    throw new Error(`Patch path cannot be traversed securely: ${absolute}`);
-  }
-
-  let current = rootFd;
-  let owned = false;
-  try {
-    for (const component of components) {
-      throwIfAborted(signal);
-      let next: number;
-      try {
-        next = await openSecureDirectoryChild(current, component);
-      } catch (error) {
-        if (!createParents || !isNoEntryError(error)) throw error;
-        try {
-          await mkdirChildRelative(current, component, 0o777);
-        } catch (mkdirError) {
-          if (!isAlreadyExistsError(mkdirError)) throw mkdirError;
-        }
-        next = await openSecureDirectoryChild(current, component);
-      }
-      if (owned) await closeFd(current);
-      current = next;
-      owned = true;
-    }
-    return { handle: current, owned };
-  } catch (error) {
-    if (owned) await closeFd(current).catch(() => undefined);
-    throw error;
-  }
-}
-
-async function withSecureFile<T>(
-  rootFd: number,
-  root: string,
+// Resolve aliases for preflight identity, including dangling links and missing
+// descendants. This is not a filesystem sandbox; I/O uses normal Node semantics.
+async function canonicalPath(
   absolute: string,
-  flags: number,
-  createParents: boolean,
-  callback: (fd: number, size: number) => Promise<T>,
+  followFinal = true,
+  virtualFiles = new Map<string, VirtualFile>(),
   signal?: AbortSignal,
-): Promise<T> {
-  const parent = await openSecureParentDirectory(rootFd, root, absolute, createParents, signal);
-  let fd: number | undefined;
+): Promise<string> {
+  let links = 0;
+  let current = parse(absolute).root;
+  let pending = relative(current, absolute).split(sep).filter(Boolean);
+  while (pending.length > 0) {
+    throwIfAborted(signal);
+    const component = pending.shift()!;
+    if (component === ".") continue;
+    if (component === "..") {
+      current = dirname(current);
+      continue;
+    }
+    current = join(current, component);
+    const file = virtualFiles.get(current) ?? await inspectPath(current);
+    if (file.isSymbolicLink && (followFinal || pending.length > 0)) {
+      if (++links > 40) throw new Error(`Too many symbolic links in patch path: ${absolute}`);
+      const target = await readlink(current);
+      const root = parse(target).root;
+      current = root || dirname(current);
+      // Do not normalize '..' in a link's stored target before following any
+      // earlier links: the OS applies it to the resolved directory.
+      pending = [...target.slice(root.length).split(sep).filter(Boolean), ...pending];
+    } else if (pending.length > 0 && file.exists && !file.isDirectory) {
+      throw new Error(`Parent path is not a directory: ${absolute}`);
+    }
+  }
+  return current;
+}
+
+async function inspectPath(absolute: string): Promise<VirtualFile> {
   try {
-    fd = await openChildRelative(parent.handle, basename(absolute), flags, 0o666);
-    const stats = await fstatFd(fd);
-    if (!stats.isFile()) throw new Error(`Patch target is not a regular file: ${absolute}`);
-    return await callback(fd, stats.size);
-  } finally {
-    if (fd !== undefined) await closeFd(fd).catch(() => undefined);
-    if (parent.owned) await closeFd(parent.handle).catch(() => undefined);
+    const stats = await lstat(absolute);
+    return { exists: true, isDirectory: stats.isDirectory(), isFile: stats.isFile(), isSymbolicLink: stats.isSymbolicLink() };
+  } catch (error) {
+    if (!isMissingPathError(error)) throw error;
+    return { exists: false, isDirectory: false, isFile: false };
   }
 }
 
-async function readSecureFile(rootFd: number, root: string, absolute: string, signal?: AbortSignal): Promise<string> {
-  return withSecureFile(rootFd, root, absolute, SECURE_READ_FLAGS, false, async (fd, size) => {
-    if (size > MAX_TARGET_FILE_BYTES) {
+async function readTargetFile(absolute: string, signal?: AbortSignal): Promise<string> {
+  const file = await open(absolute, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+  try {
+    const stats = await file.stat();
+    if (!stats.isFile()) throw new Error(`Patch target is not a regular file: ${absolute}`);
+    if (stats.size > MAX_TARGET_FILE_BYTES) {
       throw new Error(`Patch target exceeds the ${MAX_TARGET_FILE_BYTES}-byte limit: ${absolute}`);
     }
 
@@ -589,7 +431,7 @@ async function readSecureFile(rootFd: number, root: string, absolute: string, si
     while (true) {
       throwIfAborted(signal);
       const buffer = Buffer.alloc(Math.min(FILE_READ_CHUNK_BYTES, MAX_TARGET_FILE_BYTES + 1 - total));
-      const bytesRead = await readFd(fd, buffer, 0, buffer.length, null);
+      const { bytesRead } = await file.read(buffer, 0, buffer.length, null);
       if (bytesRead === 0) break;
       total += bytesRead;
       chunks.push(buffer.subarray(0, bytesRead));
@@ -598,29 +440,18 @@ async function readSecureFile(rootFd: number, root: string, absolute: string, si
       }
     }
     return Buffer.concat(chunks, total).toString("utf8");
-  }, signal);
-}
-
-async function writeSecureFile(rootFd: number, root: string, absolute: string, content: string, createParents: boolean, signal?: AbortSignal): Promise<void> {
-  const flags = createParents ? SECURE_CREATE_FLAGS : SECURE_UPDATE_FLAGS;
-  await withSecureFile(rootFd, root, absolute, flags, createParents, async (fd) => {
-    await writeAllFd(fd, content);
-  }, signal);
-}
-
-async function removeSecureFile(rootFd: number, root: string, absolute: string, signal?: AbortSignal): Promise<void> {
-  const parent = await openSecureParentDirectory(rootFd, root, absolute, false, signal);
-  try {
-    throwIfAborted(signal);
-    // No-follow stat without opening the target, so unreadable (mode-000) files can still be deleted;
-    // unlink only requires write permission on the parent directory, never on the file itself.
-    const stats = await lstatChildRelative(parent.handle, basename(absolute));
-    if (stats.isSymbolicLink) throw new Error(`Symlink paths are not allowed in apply_patch: ${absolute}`);
-    if (stats.isDirectory) throw new Error(`Cannot delete directory '${absolute}'.`);
-    await unlinkChildRelative(parent.handle, basename(absolute));
   } finally {
-    if (parent.owned) await closeFd(parent.handle).catch(() => undefined);
+    await file.close();
   }
+}
+
+async function writeTargetFile(absolute: string, content: string, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
+  await mkdir(dirname(absolute), { recursive: true });
+  throwIfAborted(signal);
+  // Match Pi write: follow symlinks and retain the mutation lock until I/O settles.
+  await writeFile(absolute, content, "utf8");
+  throwIfAborted(signal);
 }
 
 function applyUpdateContent(original: string, chunks: UpdateChunk[], displayPath: string): string {
@@ -713,7 +544,9 @@ function normalizePunctuation(value: string): string {
 }
 
 async function withMutationLocks<T>(paths: string[], callback: () => Promise<T>): Promise<T> {
-  const uniquePaths = [...new Set(paths)].sort();
+  // Pi also canonicalizes queue keys. Deduplicate aliases before nesting queues,
+  // or two names for one file would attempt to acquire the same lock twice.
+  const uniquePaths = [...new Set(await Promise.all(paths.map((path) => canonicalPath(path))))].sort();
   const acquire = (index: number): Promise<T> =>
     index === uniquePaths.length ? callback() : withFileMutationQueue(uniquePaths[index], () => acquire(index + 1));
   return acquire(0);
@@ -726,14 +559,6 @@ function displayPath(root: string, absolute: string, fallback: string): string {
 
 function isMissingPathError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR");
-}
-
-function isNoEntryError(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
-}
-
-function isAlreadyExistsError(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "EEXIST";
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

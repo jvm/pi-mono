@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
-import test, { afterEach } from "node:test";
+import test from "node:test";
 
 process.env.CI = "1";
 
 const { default: piCodexTools } = await import("../extensions/index.ts");
 const { supportsOpenAIGrammarTools } = await import("../src/model-support.ts");
-const { setSecureFilesystemSupportedForTest } = await import("../src/apply-patch.ts");
-
-afterEach(() => setSecureFilesystemSupportedForTest(undefined));
 
 function makePi(initialActive = ["read", "write", "edit", "bash"]) {
   const handlers = new Map();
@@ -64,7 +61,6 @@ test("requires both a Responses API and the advertised grammar capability", () =
 });
 
 test("replaces edit and write while preserving unrelated active tools", async () => {
-  setSecureFilesystemSupportedForTest(true);
   const pi = makePi();
   piCodexTools(pi);
   const context = { model: codexModel };
@@ -93,7 +89,6 @@ test("rejects apply_patch execution for unsupported models", async () => {
 });
 
 test("restores only file tools that were active before replacement", async () => {
-  setSecureFilesystemSupportedForTest(true);
   const pi = makePi(["read", "edit", "bash"]);
   piCodexTools(pi);
   const context = { model: codexModel };
@@ -105,14 +100,17 @@ test("restores only file tools that were active before replacement", async () =>
   assert.deepEqual(pi.getActiveTools(), ["read", "bash", "edit"]);
 });
 
-test("keeps edit and write on platforms where apply_patch cannot run", async () => {
-  setSecureFilesystemSupportedForTest(false);
+test("activates GPT-6 Astra based on capability, without a native filesystem binding", async () => {
   const pi = makePi();
   piCodexTools(pi);
 
-  await pi.handlers.get("session_start")[0]({}, { model: codexModel });
-  assert.deepEqual(pi.getActiveTools(), ["read", "write", "edit", "bash"]);
-  assert.equal(pi.getActiveTools().includes("apply_patch"), false);
+  for (const api of ["openai-responses", "openai-codex-responses"]) {
+    const model = { ...codexModel, id: "gpt-6-astra", api };
+    await pi.handlers.get("session_start")[0]({}, { model });
+    assert.deepEqual(pi.getActiveTools(), ["read", "bash", "apply_patch"]);
+    await pi.handlers.get("model_select")[0]({}, { model: { ...model, compat: {} } });
+    assert.deepEqual(pi.getActiveTools(), ["read", "bash", "edit", "write"]);
+  }
 });
 
 test("exposes apply_patch as a raw grammar tool", () => {

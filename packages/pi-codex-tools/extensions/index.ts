@@ -2,7 +2,7 @@ import { Container, Text } from "@earendil-works/pi-tui";
 import type { Component } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
-import { applyPatch, APPLY_PATCH_GRAMMAR, MAX_PATCH_BYTES, secureFilesystemSupported } from "../src/apply-patch.js";
+import { applyPatch, APPLY_PATCH_GRAMMAR, MAX_PATCH_BYTES } from "../src/apply-patch.js";
 import { createFreeformInputSchema, createOpenAILarkSampling, type OpenAIGrammarSampling } from "../src/grammar.js";
 import { supportsOpenAIGrammarTools } from "../src/model-support.js";
 import { formatApplyPatchCallText, formatApplyPatchResultText } from "../src/patch-preview.js";
@@ -45,6 +45,7 @@ export default function piCodexTools(pi: ExtensionAPI): void {
       "Use apply_patch for file changes when it is available.",
       "Send the patch body directly; do not wrap it in JSON or add a shell heredoc.",
       `Patch paths may be relative to the current working directory or absolute, and patches are limited to ${MAX_PATCH_BYTES} bytes.`,
+      "apply_patch follows symlinks for file writes; deleting a symlink removes the link, not its target.",
     ],
     parameters: APPLY_PATCH_PARAMETERS,
     constrainedSampling: createOpenAILarkSampling(APPLY_PATCH_GRAMMAR),
@@ -108,7 +109,7 @@ export default function piCodexTools(pi: ExtensionAPI): void {
     if (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function") return;
 
     const active = new Set(pi.getActiveTools());
-    if (supportsOpenAIGrammarTools(ctx.model) && secureFilesystemSupported()) {
+    if (supportsOpenAIGrammarTools(ctx.model)) {
       if (replacedToolsWasActive === undefined) {
         replacedToolsWasActive = {
           edit: active.has(EDIT),

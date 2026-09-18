@@ -1,16 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, chmod, readFile, rm, symlink, truncate, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, chmod, lstat, readFile, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 process.env.CI = "1";
 
-const { applyPatch, MAX_TARGET_FILE_BYTES, parseApplyPatch, secureFilesystemSupported } = await import("../src/apply-patch.ts");
+const { applyPatch, MAX_TARGET_FILE_BYTES, parseApplyPatch } = await import("../src/apply-patch.ts");
 
 const patch = (body) => `*** Begin Patch\n${body}\n*** End Patch`;
-const supportsSecureFilesystem = secureFilesystemSupported();
-const applyTest = (name, fn) => test(name, { skip: !supportsSecureFilesystem }, fn);
+const applyTest = (name, fn) => test(name, { timeout: 10_000 }, fn);
 
 test("parses Codex add, delete, update, and move hunks", () => {
   assert.deepEqual(
@@ -36,11 +35,6 @@ test("parses Codex add, delete, update, and move hunks", () => {
       },
     ],
   );
-});
-
-test("fails closed on unsupported filesystems", { skip: supportsSecureFilesystem }, async () => {
-  await assert.rejects(applyPatch(patch(`*** Add File: blocked.txt
-+blocked`), { cwd: process.cwd() }), /POSIX filesystem/);
 });
 
 applyTest("applies a multi-file patch after preflighting all hunks", async () => {
@@ -257,18 +251,18 @@ applyTest("uses Codex's lenient line matching and preserves CRLF endings", async
   }
 });
 
-applyTest("rejects symlink path escapes", async () => {
+applyTest("writes through symlinked parents outside cwd", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
   const outside = await mkdtemp(join(tmpdir(), "pi-codex-tools-outside-"));
   try {
     await writeFile(join(outside, "victim.txt"), "safe\n");
     await symlink(outside, join(cwd, "link"));
-    await assert.rejects(
-      applyPatch(patch(`*** Add File: link/victim.txt
-+overwritten`), { cwd }),
-      /Symlink paths are not allowed|Patch path escapes/,
-    );
-    assert.equal(await readFile(join(outside, "victim.txt"), "utf8"), "safe\n");
+    await applyPatch(patch(`*** Add File: link/victim.txt
++overwritten
+*** Add File: link/nested/new.txt
++created`), { cwd });
+    assert.equal(await readFile(join(outside, "victim.txt"), "utf8"), "overwritten\n");
+    assert.equal(await readFile(join(outside, "nested/new.txt"), "utf8"), "created\n");
   } finally {
     await rm(cwd, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });
@@ -333,6 +327,169 @@ applyTest("does not partially apply a patch when preflight fails", async () => {
       /missing file/,
     );
     await assert.rejects(readFile(join(cwd, "created.txt")));
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+applyTest("updates and overwrites file symlinks without replacing the link", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
+  try {
+    await writeFile(join(cwd, "target"), "old\n");
+    await symlink("target", join(cwd, "link"));
+    await applyPatch(patch(`*** Update File: link
+@@
+-old
++updated`), { cwd });
+    assert.equal(await readFile(join(cwd, "target"), "utf8"), "updated\n");
+    await applyPatch(patch(`*** Add File: link
++overwritten`), { cwd });
+    assert.equal(await readFile(join(cwd, "target"), "utf8"), "overwritten\n");
+    assert.ok((await lstat(join(cwd, "link"))).isSymbolicLink());
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+applyTest("preflights aliases as one file without acquiring the same queue twice", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
+  try {
+    await writeFile(join(cwd, "target"), "old\n");
+    await symlink("target", join(cwd, "link"));
+    await applyPatch(patch(`*** Update File: link
+@@
+-old
++first
+*** Update File: target
+@@
+-first
++second`), { cwd });
+    assert.equal(await readFile(join(cwd, "target"), "utf8"), "second\n");
+    await assert.rejects(applyPatch(patch(`*** Update File: link
+*** Move to: target
+@@
+-second
++bad`), { cwd }), /onto itself/);
+    assert.equal(await readFile(join(cwd, "target"), "utf8"), "second\n");
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+applyTest("creates through dangling relative symlinks and shares virtual content with their targets", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
+  try {
+    await symlink("target", join(cwd, "link"));
+    await applyPatch(patch(`*** Add File: link
++first
+*** Update File: target
+@@
+-first
++second`), { cwd });
+    assert.equal(await readFile(join(cwd, "target"), "utf8"), "second\n");
+    assert.ok((await lstat(join(cwd, "link"))).isSymbolicLink());
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+applyTest("deletes links rather than referents, including dangling links", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
+  try {
+    await writeFile(join(cwd, "target"), "old\n");
+    await symlink("target", join(cwd, "link"));
+    await symlink("missing", join(cwd, "dangling"));
+    await applyPatch(patch(`*** Delete File: link
+*** Delete File: dangling
+*** Update File: target
+@@
+-old
++retained
+*** Add File: link
++new regular file`), { cwd });
+    assert.equal(await readFile(join(cwd, "target"), "utf8"), "retained\n");
+    assert.equal(await readFile(join(cwd, "link"), "utf8"), "new regular file\n");
+    assert.equal((await lstat(join(cwd, "link"))).isSymbolicLink(), false);
+    await assert.rejects(lstat(join(cwd, "dangling")), { code: "ENOENT" });
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+applyTest("moves from and into symlinks without deleting the source referent", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
+  try {
+    await writeFile(join(cwd, "source-target"), "old\n");
+    await writeFile(join(cwd, "dest-target"), "other\n");
+    await symlink("source-target", join(cwd, "source"));
+    await symlink("dest-target", join(cwd, "dest"));
+    await applyPatch(patch(`*** Update File: source
+*** Move to: dest
+@@
+-old
++moved`), { cwd });
+    assert.equal(await readFile(join(cwd, "source-target"), "utf8"), "old\n");
+    assert.equal(await readFile(join(cwd, "dest-target"), "utf8"), "moved\n");
+    assert.ok((await lstat(join(cwd, "dest"))).isSymbolicLink());
+    await assert.rejects(lstat(join(cwd, "source")), { code: "ENOENT" });
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+applyTest("rejects symlink loops and directory targets before any writes", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
+  try {
+    await symlink("loop", join(cwd, "loop"));
+    await mkdir(join(cwd, "directory"));
+    await symlink("directory", join(cwd, "dir-link"));
+    for (const path of ["loop", "dir-link"]) {
+      await assert.rejects(applyPatch(patch(`*** Add File: untouched
++not written
+*** Add File: ${path}
++bad`), { cwd }), /Too many symbolic links|non-file/);
+      await assert.rejects(lstat(join(cwd, "untouched")), { code: "ENOENT" });
+    }
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(applyPatch(patch(`*** Add File: untouched
++not written`), { cwd, signal: controller.signal }), /aborted/);
+    await assert.rejects(lstat(join(cwd, "untouched")), { code: "ENOENT" });
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+applyTest("resolves dot-dot in stored symlink targets after following earlier links", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
+  try {
+    await mkdir(join(cwd, "real", "child"), { recursive: true });
+    await symlink(join(cwd, "real", "child"), join(cwd, "directory-link"));
+    await symlink("directory-link/../target", join(cwd, "file-link"));
+    await applyPatch(patch(`*** Add File: file-link
++correct target`), { cwd });
+    assert.equal(await readFile(join(cwd, "real", "target"), "utf8"), "correct target\n");
+    assert.equal(await readFile(join(cwd, "file-link"), "utf8"), "correct target\n");
+    await assert.rejects(lstat(join(cwd, "target")), { code: "ENOENT" });
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+applyTest("serializes concurrent patches through different aliases", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
+  try {
+    await writeFile(join(cwd, "target"), "original\n");
+    await symlink("target", join(cwd, "link"));
+    await Promise.all([
+      applyPatch(patch(`*** Update File: link
+@@
++first`), { cwd }),
+      applyPatch(patch(`*** Update File: target
+@@
++second`), { cwd }),
+    ]);
+    assert.deepEqual((await readFile(join(cwd, "target"), "utf8")).trim().split("\n").sort(), ["first", "original", "second"]);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

@@ -6,7 +6,8 @@ Give grammar-capable OpenAI/Codex models the Codex `apply_patch` tool in Pi with
 
 - **Raw `apply_patch`** — sends Codex's Lark grammar as an OpenAI custom tool, so patches are not JSON-wrapped.
 - **Capability-based activation** — requires `openai-codex-responses` or `openai-responses` plus `model.compat.supportsOpenAIGrammarTools === true`; model names alone are never enough.
-- **Safe local mutation** — patches are limited to 1 MiB, target files to 64 MiB, accept relative or absolute paths like Pi's native file tools, reject symlink paths, use descriptor-anchored no-follow operations on Linux and macOS, fail closed elsewhere, preflight all hunks, and serialize writes with Pi's mutation queue.
+- **Pi-style filesystem access** — accepts relative or absolute paths and follows symlinked files and directories, including macOS `/tmp`. Uses Node filesystem APIs without a native binding or platform gate.
+- **Validated patches** — limits patches to 1 MiB and target-file reads to 64 MiB, preflights all hunks, and serializes writes with Pi's mutation queue.
 - **Model switching** — supported models replace Pi's `edit` and `write` tools with `apply_patch`; other active tools are preserved. Switching back restores only the file tools that were active before the switch.
 - **Sequential patch calls** — the extension marks patch execution sequential while leaving provider-side parallel tool calls enabled.
 - **Streaming progress** — while a patch is generated, the TUI shows a live, color-coded glimpse of the content being written (new-file content, or `+`/`-` lines for updates) plus a running `+added -removed` tally and a per-file roster for multi-file patches. It reuses Pi's shared diff rendering and mirrors the built-in `write`/`edit` previews; patch execution is unchanged.
@@ -25,7 +26,7 @@ pi -e /path/to/pi-mono/packages/pi-codex-tools
 
 ## Scope decisions
 
-The current Codex source does not define separate `read_file` or `write_file` tools: file inspection is normally done through shell commands and file mutation through `apply_patch`. This package keeps Pi's bounded `read` and `bash` tools, and uses `apply_patch` in place of Pi's `edit` and `write` tools for supported models. Because Pi does not provide Codex's OS-level filesystem sandbox, `apply_patch` performs its own TOCTOU-safe, no-follow directory walk: on Linux it re-opens each component relative to a trusted fd via `/proc/self/fd`, and on macOS via a tiny bundled `openat`/`mkdirat`/`unlinkat` N-API binding (prebuilt for Apple silicon and Intel). It fails closed on platforms without that support, in which case the native `edit`/`write` tools stay active. `apply_patch` also requires a Pi model runtime that advertises `compat.supportsOpenAIGrammarTools`; older runtimes leave the tool inactive.
+The current Codex source does not define separate `read_file` or `write_file` tools: file inspection is normally done through shell commands and file mutation through `apply_patch`. This package keeps Pi's bounded `read` and `bash` tools, and uses `apply_patch` in place of Pi's `edit` and `write` tools for supported models. Filesystem access uses the local user's permissions, like native Pi tools; it is not a sandbox. `apply_patch` requires a Pi model runtime that advertises `compat.supportsOpenAIGrammarTools`; older runtimes leave the tool inactive.
 
 | Codex surface | Decision |
 | --- | --- |
@@ -40,10 +41,30 @@ These choices are based on the Codex tool specifications in `codex-rs/core/src/t
 
 ## Compatibility notes
 
+### GPT-6 Astra
+
+Pi 0.85.1's model catalog advertises grammar-tool support for `gpt-6-astra` on both `openai-responses` and `openai-codex-responses`. The extension uses that capability directly, with no model-name allowlist or JSON wrapper. Tests cover the pinned Pi transports, streamed raw calls, execution, and result replay using mocked HTTP responses; they do not certify live account access.
+
+The [GPT-6 guide](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6-astra) also describes async tool calls, mid-turn steering, and reasoning updates. Those belong to the provider/session runtime and are not enabled by this extension. Patch execution remains sequential; provider-side parallel tool calling remains enabled.
+
 With an updated `pi-codex-compaction` installed, the package supplies its owned
 grammar metadata through Pi's public event bus. This keeps raw `apply_patch`
 calls and results intact in direct Codex compaction requests, including Astra.
 No private Pi registry is patched.
+
+### Filesystem behavior
+
+- Add and update follow file symlinks and preserve the links. Add can create the target of a dangling symlink.
+- Symlinked parents work for add, update, delete, and move, including paths outside the current directory.
+- Delete removes the named entry. Deleting a symlink leaves its target unchanged.
+- Move writes the updated content to the destination, then removes the source entry. A symlink destination is followed; a symlink source is removed without deleting its target.
+- Preflight shares virtual content across symlink aliases and rejects moves onto the same resolved target.
+- Symlink loops are rejected.
+- Patches operate on regular text files, not directories, devices, sockets, or pipes.
+
+Like native Pi tools, normal path-based I/O does not protect against another process replacing a path during execution. Preflight is not a transaction; an I/O failure can leave earlier files changed. See [SECURITY.md](./SECURITY.md).
+
+### Text format
 
 `apply_patch` is line-oriented rather than byte-oriented:
 
@@ -54,7 +75,7 @@ No private Pi registry is patched.
 
 These behaviors intentionally match Codex `apply_patch`.
 
-The provider contract is runtime-specific: use Pi 0.83.0 or newer for OpenAI grammar-tool support. For a manual smoke test, start Pi with this extension and a model that advertises `supportsOpenAIGrammarTools`, then verify that a file change appears as an `apply_patch` call and not as `edit`, `write`, or `bash`.
+The provider contract is runtime-specific: use Pi 0.83.0 or newer for OpenAI grammar-tool support. For a manual smoke test, start Pi with this extension and a model that advertises `supportsOpenAIGrammarTools`, then ask it to create and update a disposable file through a symlinked directory (on macOS, `/tmp` is suitable). Verify that changes appear as raw `apply_patch` calls, the referent changes, and the symlink remains. Switch to an unsupported model and verify that the original file tools return.
 
 ## Development
 
