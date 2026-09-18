@@ -6,6 +6,18 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-18
+
+### Changed
+
+- Follow symlinked files and parents with Pi-style filesystem access. Delete removes a symlink itself; move preserves its source referent.
+- Replace the platform-gated no-follow implementation with Node filesystem APIs and remove the macOS native binding and its dependencies.
+- Share preflight content and deduplicate mutation locks across symlink aliases while retaining patch limits and sequential execution.
+
+### Added
+
+- GPT-6 Astra integration coverage for grammar serialization, streamed raw patch execution through symlinked paths, and custom-tool result replay on both Pi Responses transports.
+
 ## [0.2.4] - 2026-09-11
 
 ### Fixed
