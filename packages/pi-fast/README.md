@@ -17,6 +17,8 @@ Use provider fast modes in Pi when you need lower latency, while keeping the pai
 The current OpenAI Codex catalog advertises Fast support for:
 
 - `gpt-6-astra`
+- `gpt-6-sol`
+- `gpt-6-luna`
 - `gpt-5.4`
 - `gpt-5.5`
 - `gpt-5.6-luna`
@@ -25,8 +27,10 @@ The current OpenAI Codex catalog advertises Fast support for:
 
 The support list follows the upstream Codex model catalog and may need an update when that catalog changes. Models without an advertised Fast tier are left untouched.
 
-Checked against `openai/codex` commit
-`654b0a77d0d2f81aa21f61caf7af4be88fe550bb` (2026-09-11).
+Checked against the [OpenAI Codex model catalog](https://github.com/openai/codex/blob/8edfca892d46624a114a1e9a7095a8ed4e334232/codex-rs/models-manager/models.json)
+(2026-09-22). All three GPT-6 models advertise `priority` (Fast) processing.
+The upstream Codex client defaults Sol and Luna to that tier; `pi-fast`
+still requires the session toggle or global opt-in.
 This package uses the Codex subscription backend, not the public OpenAI API.
 Fast mode consumes more subscription usage. Public API dollar prices and Pi's
 token-cost estimates are not your ChatGPT credit bill. Consult
@@ -100,6 +104,7 @@ npm test -w packages/pi-fast
 npm run -w packages/pi-fast pack:dry-run
 ```
 
-Smoke test (Pi 0.85.1 or later): select `openai-codex/gpt-6-astra`, enable
-`/fast on`, and send a short prompt. Check `Fast on`. Switch to a different
-provider and check `Fast n/a`. Switch back, run `/fast off`, and check `Fast off`.
+Smoke test (Pi 0.85.1 or later): for each of `openai-codex/gpt-6-astra`,
+`openai-codex/gpt-6-sol`, and `openai-codex/gpt-6-luna`, enable `/fast on`
+and send a short prompt. Check `Fast on`. Switch to a different provider and
+check `Fast n/a`. Switch back, run `/fast off`, and check `Fast off`.

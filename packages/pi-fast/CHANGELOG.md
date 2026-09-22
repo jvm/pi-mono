@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-22
+
+### Fixed
+
+- Recognize GPT-6 Sol and Luna Fast support on the Codex subscription backend, including cooperating compaction requests. Keep GPT-6 Astra support.
+
 ## [0.1.2] - 2026-09-11
 
 ### Added

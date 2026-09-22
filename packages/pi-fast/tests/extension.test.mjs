@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { codexHarness, requestBody, textResponse } from "../../../tests/codex-harness.mjs";
 
 process.env.CI = "1";
 const agentDir = await mkdtemp(join(tmpdir(), "pi-fast-extension-test-"));
@@ -16,6 +18,7 @@ function makePi() {
   const commands = new Map();
   const shortcuts = new Map();
   return {
+    events: new EventEmitter(),
     handlers,
     commands,
     shortcuts,
@@ -171,32 +174,77 @@ test("does not enable Fast for unsupported models", async () => {
   assert.equal(await pi.handlers.get("before_provider_request")[0]({ payload: {} }, context), undefined);
 });
 
-test("Astra toggles preserve request fields and survive model switches without widening support", async () => {
-  const pi = makePi();
-  piFast(pi);
-  const context = makeContext({ provider: "openai-codex", id: "gpt-6-astra" });
-  const request = pi.handlers.get("before_provider_request")[0];
-  const payload = { input: [], reasoning: { effort: "max" }, service_tier: "default" };
-  await pi.handlers.get("session_start")[0]({}, context);
-  assert.equal(await request({ payload }, context), undefined);
-  await pi.commands.get("fast").handler("on", context);
-  assert.deepEqual(await request({ payload }, context), { ...payload, service_tier: "priority" });
-  assert.equal(payload.service_tier, "default");
-  for (const provider of ["openai", "anthropic"]) {
-    context.model = { provider, id: "gpt-6-astra" };
-    await pi.handlers.get("model_select")[0]({}, context);
-    assert.equal(context.statuses.at(-1).value, "Fast n/a");
+for (const id of ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
+  test(`${id} sends the Fast tier through the real Pi provider pipeline`, async (t) => {
+    const requests = [];
+    t.mock.method(globalThis, "fetch", async (_url, init) => {
+      requests.push(requestBody(init));
+      return textResponse();
+    });
+    const h = await codexHarness([piFast]);
+    try {
+      await h.session.setModel({ ...h.model, id });
+      await h.session.prompt("/fast on");
+      await h.session.prompt("Reply OK", { expandPromptTemplates: false });
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].model, id);
+      assert.equal(requests[0].service_tier, "priority");
+      assert.equal(h.session.messages.at(-1).stopReason, "stop");
+
+      await h.session.prompt("/fast off");
+      await h.session.prompt("Reply OK again", { expandPromptTemplates: false });
+      assert.equal(requests.length, 2);
+      assert.equal(requests[1].service_tier, undefined);
+      assert.deepEqual(h.errors, []);
+    } finally {
+      await h.close();
+    }
+  });
+
+  test(`${id} toggles preserve request fields and survive model switches without widening support`, async () => {
+    const pi = makePi();
+    piFast(pi);
+    const context = makeContext({ provider: "openai-codex", id });
+    const request = pi.handlers.get("before_provider_request")[0];
+    const payload = { input: [], reasoning: { effort: "max" }, service_tier: "default" };
+    const compact = () => {
+      const event = { payload, ctx: context };
+      pi.events.emit("pi-codex-compaction:request:v1", event);
+      return event.payload;
+    };
+    await pi.handlers.get("session_start")[0]({}, context);
+    assert.equal(context.statuses.at(-1).value, "Fast off");
     assert.equal(await request({ payload }, context), undefined);
-  }
-  context.model = { provider: "openai-codex", id: "gpt-6-astra" };
-  await pi.handlers.get("model_select")[0]({}, context);
-  assert.equal(context.statuses.at(-1).value, "Fast on");
-  await pi.commands.get("fast").handler("off", context);
-  assert.equal(await request({ payload }, context), undefined);
-  for (const malformed of [undefined, null, [], "payload"]) {
-    assert.equal(applyFastMode(malformed, context.model), malformed);
-  }
-});
+    assert.equal(compact(), payload);
+    await pi.commands.get("fast").handler("on", context);
+    assert.equal(context.statuses.at(-1).value, "Fast on");
+    assert.deepEqual(await request({ payload }, context), { ...payload, service_tier: "priority" });
+    assert.deepEqual(compact(), { ...payload, service_tier: "priority" });
+    assert.equal(payload.service_tier, "default");
+    for (const model of [
+      { provider: "openai", id },
+      { provider: "anthropic", id },
+      { provider: "openai-codex", id: `${id}-pro` },
+      { provider: "openai-codex", id: "gpt-6-unknown" },
+    ]) {
+      context.model = model;
+      await pi.handlers.get("model_select")[0]({}, context);
+      assert.equal(context.statuses.at(-1).value, "Fast n/a");
+      assert.equal(await request({ payload }, context), undefined);
+      assert.equal(compact(), payload);
+    }
+    context.model = { provider: "openai-codex", id };
+    await pi.handlers.get("model_select")[0]({}, context);
+    assert.equal(context.statuses.at(-1).value, "Fast on");
+    await pi.commands.get("fast").handler("off", context);
+    assert.equal(context.statuses.at(-1).value, "Fast off");
+    assert.equal(await request({ payload }, context), undefined);
+    assert.equal(compact(), payload);
+    for (const malformed of [undefined, null, [], "payload"]) {
+      assert.equal(applyFastMode(malformed, context.model), malformed);
+    }
+  });
+}
 
 test.after(async () => {
   await rm(agentDir, { recursive: true, force: true });

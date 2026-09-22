@@ -1,6 +1,6 @@
 {
   "name": "pi-fast",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Toggle provider fast modes in Pi on demand.",
   "type": "module",
   "license": "MIT",
