@@ -13,6 +13,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 ### Fixed
 
 - Let `enableInstallTelemetry: false` override an enabled `PI_TELEMETRY` environment flag.
+- Support `/skillful` in [Pi Web](https://github.com/agegr/pi-web) through its RPC custom-component bridge and keep the active Global/Project scope visible with its plain theme. Other compatible RPC clients may also work, but have not been tested.
+- Keep description previews at two lines so the menu does not resize while navigating, with a bounded, scrollable view opened by the configurable `descriptionKey` (`Space` by default) while Pi's Confirm action retains its existing on/off behavior.
 
 ## [0.4.0] - 2026-07-28
 
