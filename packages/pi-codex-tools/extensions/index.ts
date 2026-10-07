@@ -19,10 +19,9 @@ function readPatchArg(args: unknown): string {
 }
 
 const APPLY_PATCH = "apply_patch";
-const EDIT = "edit";
-const WRITE = "write";
-const REPLACED_TOOLS = [EDIT, WRITE] as const;
-type ReplacedTool = (typeof REPLACED_TOOLS)[number];
+const FILE_TOOLS = ["edit", "write"] as const;
+type FileTool = (typeof FILE_TOOLS)[number];
+const APPLY_PATCH_DESCRIPTION = "Apply a Codex patch to files. This is a FREEFORM tool: send the patch text directly, never as JSON.";
 
 const APPLY_PATCH_PARAMETERS = createFreeformInputSchema(
   "patch",
@@ -38,8 +37,9 @@ export default function piCodexTools(pi: ExtensionAPI): void {
 
   registerGrammarTool({
     name: APPLY_PATCH,
+    exposure: "model-only",
     label: APPLY_PATCH,
-    description: "Apply a Codex patch to files. This is a FREEFORM tool: send the patch text directly, never as JSON.",
+    description: APPLY_PATCH_DESCRIPTION,
     promptSnippet: "Apply Codex-format file patches without JSON wrapping",
     promptGuidelines: [
       "Use apply_patch for file changes when it is available.",
@@ -50,6 +50,26 @@ export default function piCodexTools(pi: ExtensionAPI): void {
     parameters: APPLY_PATCH_PARAMETERS,
     constrainedSampling: createOpenAILarkSampling(APPLY_PATCH_GRAMMAR),
     executionMode: "sequential",
+    prepareLoadout(loadout) {
+      const tools = pi.getAllTools();
+      // Hide declarations, not implementations or activation. Registering native
+      // replacements would outrank approval tools registered by later extensions.
+      const hiddenDeclarations = FILE_TOOLS.filter((name) =>
+        loadout.declared.some((tool) => tool.name === name)
+        && tools.some((tool) => tool.name === name && tool.sourceInfo?.path === `builtin:${name}`),
+      );
+      if (hiddenDeclarations.length === 0) return;
+      return {
+        hiddenDeclarations,
+        // Codemode's "on" mode does not list direct tools in its own description.
+        // Keep the hidden tools discoverable without overriding codemode's hook.
+        descriptions: loadout.declared.some((tool) => tool.name === "codemode") ? {
+          [APPLY_PATCH]: `${APPLY_PATCH_DESCRIPTION}\n\nNative ${hiddenDeclarations.join(" and ")} remain callable through codemode. Use ${
+            hiddenDeclarations.map((name) => `describeTool("${name}")`).join(" and ")
+          } for their schemas and usage guidance.`,
+        } : undefined,
+      };
+    },
     renderCall(args, theme, context) {
       const component =
         context.lastComponent instanceof ApplyPatchCallComponent ? context.lastComponent : new ApplyPatchCallComponent();
@@ -89,7 +109,7 @@ export default function piCodexTools(pi: ExtensionAPI): void {
     },
   });
 
-  let replacedToolsWasActive: Record<ReplacedTool, boolean> | undefined;
+  let legacyReplacedTools: Set<FileTool> | undefined;
 
   pi.events?.on("pi-codex-compaction:tools:v1", (value) => {
     const data = value as {
@@ -109,23 +129,25 @@ export default function piCodexTools(pi: ExtensionAPI): void {
     if (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function") return;
 
     const active = new Set(pi.getActiveTools());
+    const tools = typeof pi.getAllTools === "function" ? pi.getAllTools() : [];
+    // Exposure metadata and prepareLoadout arrived together. Do not infer runtime
+    // support or this extension's ownership from an overridable apply_patch tool.
+    const supportsLoadout = tools.some((tool) => tool.exposure !== undefined);
     if (supportsOpenAIGrammarTools(ctx.model)) {
-      if (replacedToolsWasActive === undefined) {
-        replacedToolsWasActive = {
-          edit: active.has(EDIT),
-          write: active.has(WRITE),
-        };
+      if (!supportsLoadout) {
+        // Older runtimes cannot hide declarations independently of activation.
+        // Re-hide later activations on every supported-model switch, retaining
+        // them for restoration when leaving the supported models.
+        legacyReplacedTools ??= new Set();
+        for (const name of FILE_TOOLS) {
+          if (active.delete(name)) legacyReplacedTools.add(name);
+        }
       }
-      for (const tool of REPLACED_TOOLS) active.delete(tool);
       active.add(APPLY_PATCH);
     } else {
       active.delete(APPLY_PATCH);
-      if (replacedToolsWasActive) {
-        for (const tool of REPLACED_TOOLS) {
-          if (replacedToolsWasActive[tool]) active.add(tool);
-        }
-      }
-      replacedToolsWasActive = undefined;
+      for (const name of legacyReplacedTools ?? []) active.add(name);
+      legacyReplacedTools = undefined;
     }
     pi.setActiveTools([...active]);
   }

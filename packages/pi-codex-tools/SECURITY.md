@@ -19,6 +19,19 @@ Report privately through [GitHub Security Advisories](https://github.com/jvm/pi-
 
 Pi extensions execute with the same permissions as the local user running Pi. Review installed extensions and only install packages from sources you trust.
 
+On modern Pi, this package hides selected native `edit` and `write` declarations
+with the public loadout hook. It does not replace their implementations or alter
+their activation or exposure. Approval wrappers remain effective even when
+registered by a later-loaded extension during or after session startup. Nested
+calls use Pi's normal tool validation and `tool_call`/`tool_result` hooks.
+
+Hiding a declaration is presentation, not an execution or permission boundary:
+active tools remain executable. Tools excluded from the active selection are
+not introduced into codemode by this package. Older Pi runtimes without exposure
+metadata retain the legacy tool-selection policy without nested-editing
+overrides. Tool selections are not an OS-level sandbox; `apply_patch` itself can
+modify files when enabled.
+
 `apply_patch` does not access the network or credential APIs. Like Pi's native `edit` and `write` tools, it accepts relative or absolute paths, follows symlinks for reads/writes, and can modify files outside the current working directory with the local user's permissions. It can read credential-containing files when a patch targets them. Deleting a symlink removes the link, not its referent; moving a symlink source copies its referent's updated content and removes the source link.
 
 The tool uses Node filesystem APIs without a platform-specific native binding. This deliberately replaces the previous no-follow policy with Pi-style filesystem access. Path canonicalization is used for preflight identity and queue keys, not as a security boundary. There is no workspace confinement or protection against another process swapping path components between resolution and I/O. Use an OS-level sandbox or restricted user account when filesystem isolation is required.

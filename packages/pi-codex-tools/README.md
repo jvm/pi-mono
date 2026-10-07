@@ -5,10 +5,11 @@ Give grammar-capable OpenAI/Codex models the Codex `apply_patch` tool in Pi with
 ## What it adds
 
 - **Raw `apply_patch`** — sends Codex's Lark grammar as an OpenAI custom tool, so patches are not JSON-wrapped.
+- **Model-only exposure** — `apply_patch` is available directly to the model, never through codemode or other nested tool calls. Requires Pi 0.99.1 or newer.
 - **Capability-based activation** — requires `openai-codex-responses` or `openai-responses` plus `model.compat.supportsOpenAIGrammarTools === true`; model names alone are never enough.
 - **Pi-style filesystem access** — accepts relative or absolute paths and follows symlinked files and directories, including macOS `/tmp`. Uses Node filesystem APIs without a native binding or platform gate.
 - **Validated patches** — limits patches to 1 MiB and target-file reads to 64 MiB, preflights all hunks, and serializes writes with Pi's mutation queue.
-- **Model switching** — supported models replace Pi's `edit` and `write` tools with `apply_patch`; other active tools are preserved. Switching back restores only the file tools that were active before the switch.
+- **Native editing through codemode** — supported models see `apply_patch` instead of native `edit` and `write` declarations. Selected native tools remain active and callable through codemode, without replacing their implementations. Model switches and reloads preserve tool selection and approval wrappers. Keep your usual `defaultTools` selection; no separate exposure extension is needed.
 - **Sequential patch calls** — the extension marks patch execution sequential while leaving provider-side parallel tool calls enabled.
 - **Streaming progress** — while a patch is generated, the TUI shows a live, color-coded glimpse of the content being written (new-file content, or `+`/`-` lines for updates) plus a running `+added -removed` tally and a per-file roster for multi-file patches. It reuses Pi's shared diff rendering and mirrors the built-in `write`/`edit` previews; patch execution is unchanged.
 
@@ -26,7 +27,7 @@ pi -e /path/to/pi-mono/packages/pi-codex-tools
 
 ## Scope decisions
 
-The current Codex source does not define separate `read_file` or `write_file` tools: file inspection is normally done through shell commands and file mutation through `apply_patch`. This package keeps Pi's bounded `read` and `bash` tools, and uses `apply_patch` in place of Pi's `edit` and `write` tools for supported models. Filesystem access uses the local user's permissions, like native Pi tools; it is not a sandbox. `apply_patch` requires a Pi model runtime that advertises `compat.supportsOpenAIGrammarTools`; older runtimes leave the tool inactive.
+The current Codex source does not define separate `read_file` or `write_file` tools: file inspection is normally done through shell commands and file mutation through `apply_patch`. This package keeps Pi's bounded `read` and `bash` tools, and presents `apply_patch` in place of native `edit` and `write` declarations for supported models. Filesystem access uses the local user's permissions, like native Pi tools; it is not a sandbox. `apply_patch` requires a Pi model runtime that advertises `compat.supportsOpenAIGrammarTools`; older runtimes leave the tool inactive.
 
 | Codex surface | Decision |
 | --- | --- |
@@ -40,6 +41,37 @@ The current Codex source does not define separate `read_file` or `write_file` to
 These choices are based on the Codex tool specifications in `codex-rs/core/src/tools`, the model profiles in `codex-rs/models-manager/models.json`, and the Code Mode protocol. They intentionally keep this package focused on the one tool with a distinct transport and model-facing contract.
 
 ## Compatibility notes
+
+While this package's `apply_patch` is active on Pi 0.99.1 or newer, its public
+`prepareLoadout` hook hides selected native `edit` and `write` declarations from
+model requests. The tools keep their original implementations and `direct`
+exposure, and remain in `pi.getActiveTools()`. Activate `codemode` to call them
+from scripts; `describeTool("edit")` and `describeTool("write")` provide their
+schemas. The `apply_patch` description points to these helpers when codemode is
+active, including in codemode's `on` mode where direct tools are not listed
+inline.
+
+Explicitly activating a native file tool makes it callable but does not reveal
+its declaration while `apply_patch` is active. Deactivating it removes nested
+access too. Switching to an unsupported model stops hiding native declarations;
+other loadout hooks, such as codemode's `only` mode, still apply. Reloads preserve
+the active selection without a package-owned snapshot.
+
+Tools omitted from `defaultTools` or an explicit `--tools` selection are not
+introduced into codemode. Other extensions' file-tool implementations, including
+approval wrappers registered during or after `session_start`, are not replaced
+or hidden by this package. If another extension replaces `apply_patch`, this
+package's loadout hook does not apply to that replacement.
+
+Older Pi runtimes without exposure metadata retain the legacy behavior:
+supported models replace active file tools with `apply_patch`, without
+registering codemode overrides. They do not offer this package's nested native
+editing route; upgrade Pi for that capability. The fallback restores its saved
+file-tool selection when leaving supported models. Older Pi cannot distinguish
+an explicit deactivation of an already-hidden tool from leaving it unchanged.
+To disable such a tool, switch to an unsupported model before changing the
+selection, or upgrade Pi to preserve explicit deactivation while `apply_patch`
+is active.
 
 ### GPT-6 Astra
 
@@ -75,7 +107,17 @@ Like native Pi tools, normal path-based I/O does not protect against another pro
 
 These behaviors intentionally match Codex `apply_patch`.
 
-The provider contract is runtime-specific: use Pi 0.83.0 or newer for OpenAI grammar-tool support. For a manual smoke test, start Pi with this extension and a model that advertises `supportsOpenAIGrammarTools`, then ask it to create and update a disposable file through a symlinked directory (on macOS, `/tmp` is suitable). Verify that changes appear as raw `apply_patch` calls, the referent changes, and the symlink remains. Switch to an unsupported model and verify that the original file tools return.
+The provider contract is runtime-specific: use Pi 0.99.1 or newer for model-only tool exposure and the loadout hook; development and integration tests use Pi 1.0.x.
+
+For a manual smoke test:
+
+1. Start Pi with this extension, the normal file tools, `codemode`, and a model that advertises `supportsOpenAIGrammarTools`.
+2. Ask it to create and update a disposable file through a symlinked directory (on macOS, `/tmp` is suitable). Verify raw `apply_patch` calls, changed referent content, and an intact symlink.
+3. Verify that `describeTool("edit")` and `describeTool("write")` work inside codemode and that scripts can edit a disposable file. `apply_patch` must not be callable inside codemode.
+4. Run `/reload` and repeat the nested-editing check.
+5. Switch to an unsupported model and verify that the selected native file tools remain usable. With codemode in `on` mode, their direct declarations return.
+
+Automated contract tests cover provider declarations, codemode's `on` and `only` modes, reloads, exclusions, and approval wrappers registered in either extension load order.
 
 ## Development
 
