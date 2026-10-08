@@ -16,8 +16,8 @@ Stop destructive shell commands before they damage your system.
 
 ## Requirements
 
-- Node.js 20.6 or newer
-- Pi 0.80 or newer
+- Node.js 22.19.0 or newer
+- Pi, supplied by the host; contract-tested against Pi 1.1.0
 - A separately installed `dcg` executable; dcg 0.6.8 or newer is recommended
 
 Install dcg using its [upstream installation instructions](https://github.com/Dicklesworthstone/destructive_command_guard#installation), review its release-verification guidance, and confirm that the binary is visible in the same environment as Pi:
@@ -50,23 +50,29 @@ pi -e /path/to/pi-mono/packages/pi-dcg
 
 By default, the extension checks both Pi shell events available to extensions:
 
-- agent calls to Pi's built-in `bash` tool;
+- agent calls to Pi's built-in `bash` tool, including nested calls through codemode (`on` and `only`) or `ctx.executeTool()`;
 - user `!command` and `!!command` invocations.
 
 Pi's separate RPC control-channel `{"type":"bash"}` command does not emit either event in current Pi releases and cannot be intercepted by `pi-dcg`; see [Limitations](#limitations).
 
 For every non-empty command, the extension starts dcg directly without a shell, sends a Claude-compatible `PreToolUse` payload on stdin, and waits for dcg's decision before Pi executes the command.
 
-Pi allows `tool_call` handlers to rewrite tool arguments in sequence. `pi-dcg` checks mutations made by earlier handlers, then seals both the approved `command` value and its input reference. If a later handler attempts to replace either one, Pi blocks the tool call rather than executing a command dcg did not check.
+Pi allows `tool_call` handlers to rewrite tool arguments in sequence. `pi-dcg` checks **in-place** mutations made by earlier handlers, then seals both the approved `command` value and its input reference. If a later handler attempts to replace either one, Pi blocks the tool call. Pi 1.1.0 has a separate argument-identity limitation when an earlier handler replaces the entire input object; see [Limitations](#limitations).
+
+DCG does not replace the bash executor, activate excluded tools, or bypass another extension's approval hooks.
 
 | dcg response | Pi behavior |
 | --- | --- |
 | Empty stdout / explicit `allow` | Execute the command |
 | `permissionDecision: "deny"` | Block and show bounded rule/remediation details |
 | `permissionDecision: "ask"` | Ask for confirmation when UI is available; otherwise block |
-| Bridge failure | Allow by default, visibly marking dcg unavailable; configurable to block |
+| Bridge failure | Allow by default, warning when UI is available; configurable to block |
 
 Hard denials are never converted into one-click approvals. When dcg provides an allow-once code, `pi-dcg` shows the exact `dcg allow-once ...` command only in a user-facing UI notification. It is deliberately excluded from the model-visible blocked tool result so an agent cannot redeem the exception itself.
+
+DCG confirmation dialogs run one at a time per extension instance, so parallel bash calls cannot replace each other's DCG prompt. Policy checks and allowed commands remain concurrent. Turn cancellation dismisses the active confirmation and blocks queued confirmations; runtime shutdown, including reload or session replacement, also cancels pending checks and confirmations. Cancellation blocks even with `PI_DCG_ON_ERROR=allow`, and a late dialog response cannot approve a cancelled call.
+
+RPC extension UI can confirm `ask` decisions. Print/JSON sessions without UI block them. RPC **agent tool calls** are distinct from the excluded RPC control-channel `bash` command.
 
 Run `/dcg` to probe the binary and show the active bridge configuration.
 
@@ -139,6 +145,11 @@ This extension intercepts Pi events, not operating-system process execution. It 
 - commands that dcg itself intentionally allows after a parse, size, or deadline fallback.
 
 `user_bash` handlers are first-result-wins in Pi. An earlier extension that fully handles `!` commands can prevent later handlers, including `pi-dcg`, from seeing them.
+
+Two Pi 1.1.0 composition limits remain:
+
+- If an earlier `tool_call` handler assigns a new object to `event.input`, Pi can execute the original arguments while DCG checks the replacement. Integrations must mutate argument fields in place, not replace the input object. DCG cannot repair this host contract after the replacement has occurred.
+- The confirmation queue covers this DCG instance, not other extensions' dialogs. Concurrent dialogs from another extension can still displace a prompt in Pi's shared editor slot. Cross-extension dialog scheduling requires host-level coordination.
 
 Use a container, VM, sandbox, restricted credentials, backups, and review controls when a hard security boundary is required.
 

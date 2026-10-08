@@ -91,7 +91,9 @@ test("guards agent bash in Pi's cwd and ignores non-bash tools", async () => {
   const handler = pi.handlers.get("tool_call")[0];
   assert.equal(await handler({ type: "tool_call", toolCallId: "read-1", toolName: "read", input: { path: "x" } }, context), undefined);
   assert.equal(await handler(bashEvent(), context), undefined);
-  assert.deepEqual(client.checks[0], { command: "git status", cwd: "/work/project", signal: undefined });
+  assert.equal(client.checks[0].command, "git status");
+  assert.equal(client.checks[0].cwd, "/work/project");
+  assert.equal(client.checks[0].signal.aborted, false);
 });
 
 test("checks earlier command mutations and blocks later unchecked mutations", async () => {
@@ -262,6 +264,37 @@ test("a cancelled check blocks even in fail-open mode", async () => {
   piDcg(pi, { client: makeClient({ error }), config: makeConfig({ onError: "allow" }) });
 
   const result = await pi.handlers.get("tool_call")[0](bashEvent(), makeContext());
+  assert.equal(result.block, true);
+  assert.match(result.reason, /cancelled/);
+});
+
+test("already aborted calls do not start a policy process", async () => {
+  const pi = makePi();
+  const client = makeClient();
+  const context = makeContext();
+  context.signal = AbortSignal.abort();
+  piDcg(pi, { client, config: makeConfig() });
+  const result = await pi.handlers.get("tool_call")[0](bashEvent(), context);
+  assert.equal(result.block, true);
+  assert.equal(client.checks.length, 0);
+});
+
+test("confirmation captures the signal even when the live context signal changes", async () => {
+  const pi = makePi();
+  const controller = new AbortController();
+  const context = makeContext({ hasUI: true });
+  context.signal = controller.signal;
+  context.ui.confirm = async (_title, _message, { signal }) => {
+    assert.equal(signal.aborted, false);
+    controller.abort();
+    context.signal = undefined; // Pi's getter can change when the turn ends.
+    return true;
+  };
+  piDcg(pi, {
+    client: makeClient({ decision: { decision: "ask", hook: { permissionDecision: "ask" } } }),
+    config: makeConfig(),
+  });
+  const result = await pi.handlers.get("tool_call")[0](bashEvent(), context);
   assert.equal(result.block, true);
   assert.match(result.reason, /cancelled/);
 });

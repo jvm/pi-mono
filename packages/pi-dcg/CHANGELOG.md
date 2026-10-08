@@ -14,6 +14,16 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 ### Fixed
 
 - Let `enableInstallTelemetry: false` override an enabled `PI_TELEMETRY` environment flag.
+- Cancel active and queued confirmations on turn abort or runtime shutdown, reject late approvals, and preserve cancellation blocking in both bridge-error modes.
+- Serialize DCG confirmation dialogs so parallel bash calls cannot displace each other's prompt.
+
+### Added
+
+- Real Pi 1.1.0 session contracts for direct, codemode, and custom nested bash calls, with mocked provider/process/shell boundaries, native TUI selector checks, approval composition, reload, and user `!`/`!!` coverage.
+
+### Security
+
+- Document the remaining Pi 1.1.0 input-object replacement and cross-extension dialog scheduling limitations; DCG does not replace the host executor or claim those upstream gaps are fixed.
 
 ## [0.1.0] - 2026-07-17
 
