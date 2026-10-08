@@ -209,6 +209,11 @@ export default function piGoal(pi: ExtensionAPI) {
     // A real run supersedes any idle activation. Never leave a timer behind
     // that could restart the session after cancellation or recovery.
     scheduler.clear();
+  });
+
+  pi.on("agent_settled", () => {
+    // agent_start also fires for queued work inside the same high-level run.
+    // Keep a compaction failure latched until that entire run has settled.
     automaticCompactionFailed = false;
   });
 

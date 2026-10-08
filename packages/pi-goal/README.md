@@ -74,6 +74,8 @@ Earlier messages remain in append-only session history.
 Cancellation, terminal assistant errors, and failed/cancelled automatic
 compaction suppress goal continuation for that run. Cancellation and ordinary
 errors leave the stored goal active; they do not silently pause or clear it.
+The compaction-failure stop survives queued steering/follow-up work and resets
+only when the whole run reaches the notification-only `agent_settled` event.
 Explicit new input can start work again. Use `/goal pause` to keep it paused.
 Pending steering, follow-up, and user messages take priority and are not consumed
 or duplicated by the goal extension.

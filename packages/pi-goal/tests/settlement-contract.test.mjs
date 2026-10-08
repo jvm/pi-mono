@@ -123,6 +123,56 @@ test("failed compaction after a completed response does not launch another goal 
   assert.equal(contexts(h).length, 0);
 });
 
+for (const delivery of ["steer", "followUp"]) {
+  for (const recovery of ["failure", "cancel"]) {
+    test(`queued ${delivery} does not clear the ${recovery} compaction stop before settlement`, { timeout: 10_000 }, async (t) => {
+      let failures = 0;
+      const compact = (pi) => {
+        pi.on("session_before_compact", () => {
+          pi.sendUserMessage("Priority work during failed compaction", { deliverAs: delivery });
+          if (recovery === "cancel") return { cancel: true };
+        });
+        pi.on("session_compact_failed", () => { failures++; });
+      };
+      const h = await harness(t, { budget: 100, before: [compact] });
+      h.session.settingsManager.setCompactionEnabled(true);
+      let requests = responses(t, h, [
+        () => errorResponse("context_length_exceeded: prompt is too long"),
+        ...recovery === "failure" ? [() => errorResponse("Invalid compaction fixture request")] : [],
+        // Pi repairs the failed attempt back to user input. Steering enters
+        // immediately; a follow-up waits behind Pi's natural response to it.
+        ...delivery === "followUp" ? [() => textResponse("Pi's response to retained input.")] : [],
+        () => textResponse("Queued work completed."),
+      ]);
+      await h.session.prompt("Fail compaction, then deliver queued work.");
+      await assertSettled(t, h, requests, (recovery === "failure" ? 3 : 2) + (delivery === "followUp" ? 1 : 0));
+      assert.equal(failures, 1);
+      assert.equal(h.events.filter((event) => event.type === "agent_start").length, 2, "Pi starts a second low-level loop for queued work");
+      assert.equal(h.events.filter((event) => event.type === "agent_settled").length, 1, "both loops belong to one settled run");
+      assert.match(JSON.stringify(requests.at(-1).input), /Priority work during failed compaction/);
+      assert.equal(h.session.messages.filter((message) => message.role === "user" && JSON.stringify(message.content).includes("Priority work during failed compaction")).length, 1);
+      assert.equal(h.session.messages.findLast((message) => message.role === "assistant").stopReason, "stop");
+      assert.equal(state(h).status, "active");
+      assert.equal(contexts(h).length, 0, "successful queued work must not unblock more goal work in this run");
+
+      // Settlement clears the per-run stop; either new input or explicit resume
+      // can activate the unchanged goal without retaining a permanent failure.
+      h.session.settingsManager.setCompactionEnabled(false);
+      await h.session.prompt(`/goal budget ${state(h).tokensUsed + 22}`);
+      requests = responses(t, h, [() => textResponse(), () => textResponse()]);
+      if (delivery === "steer") await h.session.prompt("Start a new explicit run.");
+      else {
+        await h.session.prompt("/goal resume");
+        t.mock.timers.tick(1);
+        await checkpoint();
+      }
+      await assertSettled(t, h, requests, 2);
+      assert.equal(contextCount(requests[1]), 1);
+      assert.equal(state(h).status, "budget_limited");
+    });
+  }
+}
+
 test("turn-end context edits are committed before the goal boundary and history stays intact", { timeout: 10_000 }, async (t) => {
   let target;
   const repair = (pi) => {
@@ -333,7 +383,10 @@ async function assertSettled(t, h, requests, count) {
   t.mock.timers.tick(1);
   await checkpoint();
   await h.session.waitForIdle();
-  assert.equal(requests.length, count, JSON.stringify(h.events.filter((event) => ["turn_end", "compaction_start", "compaction_end"].includes(event.type))));
+  const lifecycle = h.events
+    .filter((event) => ["agent_start", "agent_settled", "turn_end", "compaction_start", "compaction_end"].includes(event.type))
+    .map((event) => ({ type: event.type, stopReason: event.message?.stopReason, reason: event.reason, aborted: event.aborted, error: event.errorMessage }));
+  assert.equal(requests.length, count, JSON.stringify(lifecycle));
   assert.deepEqual(h.errors, []);
 }
 

@@ -58,7 +58,7 @@ test("extension registers command, tools, renderers, and lifecycle handlers", ()
   assert.ok(pi.tools.has("update_goal"));
   assert.ok(pi.renderers.has("pi-goal-summary"));
   assert.ok(pi.renderers.has("pi-goal-event"));
-  for (const event of ["session_start", "session_before_tree", "session_tree", "session_compact_failed", "agent_start", "message_end", "turn_end", "agent_end", "agent_before_settle", "cache_warming_decision", "context", "session_shutdown"]) {
+  for (const event of ["session_start", "session_before_tree", "session_tree", "session_compact_failed", "agent_start", "agent_settled", "message_end", "turn_end", "agent_end", "agent_before_settle", "cache_warming_decision", "context", "session_shutdown"]) {
     assert.ok(pi.handlers.has(event), `missing ${event}`);
   }
 });
