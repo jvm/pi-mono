@@ -311,6 +311,7 @@ for (const status of statuses) {
       () => textResponse(),
     ]);
     await h.session.prompt("Finalize the original fixture branch.");
+    assertExposure(h, requests[0]);
     assert.equal(goalState(h).status, status);
     const terminalLeaf = h.sessionManager.getLeafId();
     await h.session.reload();
