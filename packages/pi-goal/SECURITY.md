@@ -25,7 +25,7 @@ The maintainer will acknowledge reports as soon as practical and coordinate disc
 
 The package does not require API keys and does not read provider credentials. Its model tools can only inspect the current goal, create a new explicitly requested goal when none exists, or mark the current goal `complete`/`blocked`.
 
-On supported Pi runtimes (Pi 1.0.2 or newer), `update_goal` uses Pi's
+On supported Pi runtimes (Pi 1.1.0 or newer), `update_goal` uses Pi's
 `model-only` exposure. Codemode discovery and nested dispatch through
 `ctx.executeTool()` cannot reach it. A direct update must be the only tool call
 in its assistant turn, after the model has inspected verification results.
@@ -40,3 +40,16 @@ exposure is not a sandbox against installed extensions.
 On startup, `@mocito/install-telemetry` sends a best-effort install/update telemetry ping to the configured telemetry endpoint once per package version unless Pi telemetry is disabled, offline mode is enabled, or Pi runs in CI. The ping includes only the package name, version, and parsed platform/runtime/architecture from its User-Agent; it does not include prompts, goal objectives, file paths, session data, config values, or API keys. Telemetry writes a local deduplication marker under Pi's agent extensions directory.
 
 Goal objectives are treated as untrusted user-provided task data when continuation context is built. They are JSON-encoded before being embedded in the hidden context message to reduce prompt-injection risk from delimiter-breaking text.
+
+Budget accounting reads finalized usage from the raw current branch, including
+context-omitted entries. Its metadata contains only token totals, entry IDs,
+timestamps, and aggregate scan diagnostics—not prompts, tool arguments, raw
+responses, credentials, or encrypted compaction checkpoints. A session-scoped
+idle poll reads the branch leaf ID and scans changed history without making
+network requests.
+
+Budgets are best-effort token accounting, not a hard spending or authorization
+boundary. Unreported usage cannot be counted, active requests can overrun, and
+other extensions can override idle warming decisions. Pause and terminal goal
+states stop goal continuation but do not exclude later branch usage; clear or
+replace a retained goal before unrelated work.

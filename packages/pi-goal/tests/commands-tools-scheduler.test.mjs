@@ -177,6 +177,25 @@ test("update_goal accounts current branch usage before terminal transition", asy
   assert.equal(status.meta.verification.checkedRequirements[0], "network");
 });
 
+test("completion budget report includes finalized tool and summary usage", async () => {
+  const pi = makePi();
+  let goal = null;
+  registerGoalTools(pi, {
+    getGoal: () => goal, setGoal: (next) => { goal = next; }, afterGoalChanged() {}, clearContinuation() {},
+  });
+  await pi.tools.get("create_goal").execute("create", { objective: "fixture", token_budget: 1000 }, undefined, undefined, makeCtx());
+  const at = new Date().toISOString();
+  const branch = [
+    { type: "message", id: "assistant", timestamp: at, message: { role: "assistant", usage: { totalTokens: 22 } } },
+    { type: "message", id: "tool", timestamp: at, message: { role: "toolResult", usage: { totalTokens: 500 } } },
+    { type: "compaction", id: "summary", timestamp: at, usage: { totalTokens: 10 } },
+  ];
+  const result = await pi.tools.get("update_goal").execute("finish", { status: "complete" }, undefined, undefined, makeCtx(branch));
+  assert.equal(result.details.goal.tokensUsed, 532);
+  assert.equal(result.details.goal.remainingTokens, 468);
+  assert.equal(result.details.report, "Completion budget report: used 532/1000 tokens; remaining 468.");
+});
+
 test("update_goal rejects mixed verification and terminal tool calls in one turn", async () => {
   const pi = makePi();
   let goal = null;

@@ -10,11 +10,14 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 - Update the shared Pi development and contract-test baseline to 1.1.0; require Node.js >=22.19.0 to match the host runtime. Pi remains a host-supplied peer dependency.
 - Share install telemetry mechanics through `@mocito/install-telemetry` while preserving Pi-specific settings and state paths.
+- Require Pi 1.1.0 for usage-accounting lifecycle and cache-warming hooks. Stop idle cache warming for retained token-budgeted or usage-limited goals without changing no-goal sessions.
 
 ### Fixed
 
 - Keep `update_goal` model-only on supported Pi runtimes (Pi 1.0.2 or newer), preventing codemode and other nested tool calls from completing or blocking a goal before the model inspects verification results. Preserve direct final-turn updates and script access to `get_goal` and `create_goal`.
 - Let `enableInstallTelemetry: false` override an enabled `PI_TELEMETRY` environment flag.
+- Count finalized tool, standalone, compaction, and branch-summary usage in goal budgets, including already-aggregated nested calls and context-omitted billed attempts. Preserve schema-v1 ledgers and backfill previously missed entries once within the branch-local goal lifetime.
+- Enforce saved usage before continuation and settlement, after compaction/navigation, on goal queries, and through a session-scoped idle usage check. Budget notices no longer request an extra model turn.
 
 ## [0.1.11] - 2026-07-17
 

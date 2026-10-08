@@ -11,6 +11,7 @@ import { validateObjective, validateTokenBudget } from "./validation.js";
 
 export interface ToolRuntime {
   getGoal(): GoalState | null;
+  refreshUsage?(ctx: ExtensionContext): void;
   setGoal(goal: GoalState | null): void;
   afterGoalChanged(ctx: ExtensionContext, event?: string): void;
   clearContinuation(): void;
@@ -39,7 +40,8 @@ export function registerGoalTools(pi: ExtensionAPI, runtime: ToolRuntime): void 
     promptSnippet: "Inspect the active persistent goal and token/time budget.",
     promptGuidelines: ["Use get_goal when you need current pi-goal objective, status, usage, or remaining budget."],
     parameters: Type.Object({}, { additionalProperties: false }),
-    async execute() {
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      runtime.refreshUsage?.(ctx);
       const goal = runtime.getGoal();
       const payload = goal ? goalToSummary(goal) : null;
       return { content: [{ type: "text", text: payload ? JSON.stringify({ goal: payload }, null, 2) : "No goal is set." }], details: { goal: payload } };
