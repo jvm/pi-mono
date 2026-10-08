@@ -40,7 +40,7 @@ Do not create `CLAUDE.md`; only Claude Code owns that file. Do not publish tests
 ### Identity and manifest
 
 - Prefer unscoped `pi-*`; scoped names only when unavailable (`@mocito/pi-goal`).
-- Use purpose-specific names, ESM, author `Jose Mocito`, Node `>=20.6.0`, and MIT unless third-party obligations require another license.
+- Use purpose-specific names, ESM, author `Jose Mocito`, Node `>=22.19.0`, and MIT unless third-party obligations require another license.
 - Extension packages expose root `index.ts`, re-export `./extensions/index.js`, and set `pi.extensions` to `./index.ts`.
 - Required scripts: `check`, `typecheck`, `test`, `pack:dry-run`.
 - Required keywords: `pi-package`; extension packages also use `pi-extension` and `pi`.

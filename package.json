@@ -25,6 +25,6 @@
   },
   "homepage": "https://github.com/jvm/pi-mono#readme",
   "engines": {
-    "node": ">=20.6.0"
+    "node": ">=22.19.0"
   }
 }

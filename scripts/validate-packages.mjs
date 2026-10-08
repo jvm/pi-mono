@@ -44,7 +44,7 @@ for (const slug of slugs) {
   if (!(manifest.name?.startsWith("pi-") || manifest.name === "@mocito/pi-goal")) errors.push(`${slug}: invalid package name`);
   if (manifest.type !== "module") errors.push(`${slug}: type must be module`);
   if (manifest.author !== "Jose Mocito") errors.push(`${slug}: author must be Jose Mocito`);
-  if (manifest.engines?.node !== ">=20.6.0") errors.push(`${slug}: engines.node must be >=20.6.0`);
+  if (manifest.engines?.node !== ">=22.19.0") errors.push(`${slug}: engines.node must be >=22.19.0`);
   if (manifest.publishConfig?.access !== "public") errors.push(`${slug}: publishConfig.access must be public`);
   if (manifest.repository?.directory !== `packages/${slug}`) errors.push(`${slug}: repository.directory mismatch`);
   if (!manifest.homepage?.includes(`/packages/${slug}#readme`)) errors.push(`${slug}: homepage mismatch`);

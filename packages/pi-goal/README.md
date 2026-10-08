@@ -19,7 +19,7 @@ pi install npm:@mocito/pi-goal
 ```
 
 Requires Pi 1.0.2 or newer for the model-only terminal-update safeguard.
-Development and session-contract tests use Pi 1.0.2. Older runtimes are not
+Development and session-contract tests use Pi 1.1.0. Older runtimes than 1.0.2 are not
 supported; there is no legacy fallback for nested terminal updates.
 
 For local development:

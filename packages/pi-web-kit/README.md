@@ -257,7 +257,7 @@ Report security issues privately. See [SECURITY.md](SECURITY.md).
 
 Requirements:
 
-- Node.js >= 20.6.0
+- Node.js >= 22.19.0
 - npm
 
 Common commands:

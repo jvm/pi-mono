@@ -6,6 +6,21 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Add `codex_generate_image_artifact` for codemode and other nested workflows, returning structured original-file metadata instead of base64 image payloads.
+- Add branch-local artifact recovery, recent-artifact edits, and `/image-artifacts`; keep completed private temporary originals through script failures and reload.
+
+### Fixed
+
+- Make inline-delivery `codex_generate_image` model-only so nested calls cannot consume image quota while discarding attachments (#158).
+- Preserve recoverable artifacts when persistent saves fail, report post-generation storage failures without retries, and support explicit codemode display through Pi's image reader.
+- Anchor recovery before generation so cancelled commits that finish after tree navigation or session replacement remain recoverable only from the originating branch and its forks.
+
+### Changed
+
+- Update the shared Pi development and contract-test baseline to 1.1.0; require Node.js >=22.19.0 to match the host runtime. Pi remains a host-supplied peer dependency.
+
 ## [0.1.15] - 2026-10-02
 
 ### Changed

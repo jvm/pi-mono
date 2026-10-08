@@ -10,6 +10,7 @@ Create and edit images without leaving [Pi](https://pi.dev).
 - **Edit from references** — transform up to five local or recent conversation images.
 - **Save where work happens** — return images inline or organize them by project, session, or custom directory.
 - **Separate image login** — keep Pi chat on `openai` OAuth while the extension handles image authentication.
+- **Scripted workflows without image payloads** — generate recoverable originals through codemode and load images only for explicit display.
 
 ## Install
 
@@ -54,8 +55,93 @@ The tool reports generation stages and the backend's returned size, quality, bac
 - Prompts: 32,000 characters. References: five regular PNG/JPEG/WebP files or conversation images, at most 20 MiB each and 50 MiB combined.
 - Responses: 100 MiB total, with at most one 32 MiB decoded output image. Base64 and format signatures are checked; this is not a full image decoder. Backend text and revised prompts are limited to 4,000 characters; HTTP error bodies are read only up to 16 KiB and are not displayed.
 - Transient HTTP failures have bounded retries. Quota exhaustion, moderation errors, failed/incomplete streams, connection errors, and deadlines are not automatically retried. Avoid immediately repeating an ambiguous failure: the first generation may have consumed quota.
-- Local save settings are checked before generation. Existing files are never overwritten; a save failure still returns the inline image and a warning.
+- Local save settings are checked before generation. Existing files are never overwritten; a persistent save failure still returns the direct inline image or scripted original artifact and a bounded warning.
 - Cloudflare challenges are reported as connection failures, not as proof that your subscription or image model is unsupported.
+
+### Direct and codemode tools
+
+Use Pi 1.1.0 or newer and Node.js >=22.19.0.
+
+| Tool | Reachability | Delivery |
+| --- | --- | --- |
+| `codex_generate_image` | Model-only; available directly with codemode off, `on`, or `only`. Nested calls are blocked. | Summary and inline image, plus an optional persistent save. |
+| `codex_generate_image_artifact` | Codemode and other nested callers. Not declared directly by default, but explicit activation is supported. | Structured metadata and an original file path; no image payload. |
+
+Pi's `codemode` exposure is not a strict codemode-only restriction. Other tools
+can call the artifact tool through `ctx.executeTool()`. If explicitly activated
+directly, it still returns paths and metadata rather than an image attachment.
+Both tools use the same generation/editing parameters, image login, backend,
+validation, and quota safeguards.
+
+```js
+const result = await tools.codex_generate_image_artifact({
+  prompt: "A red fox in watercolor",
+  save: "none"
+});
+text(result); // summary, artifact: {path, mimeType, byteCount}, savedPath?, saveWarning?
+```
+
+For explicit display:
+
+```js
+const preview = await tools.read({ path: result.artifact.path });
+if (preview?.type === "image") image(preview);
+else text(preview); // Pi can omit images it cannot decode or bound.
+text(result.summary);
+```
+
+`read` can resize or omit an image that cannot be decoded within Pi's display
+limits. Check that its result is an image block before calling `image()` when
+handling untrusted outputs. The original file is unchanged. Do not print image
+bytes using `text()`, `console`, or `return`, or store them in codemode's store.
+Large originals (up to 32 MiB) are transported as paths, not base64 through
+codemode's 16,777,216-character output budget. Pi's `image()` also saves a
+temporary display copy.
+
+For chained edits, use `referencedImagePaths: [result.artifact.path]`.
+`numLastImagesToInclude` also reads artifact records from the current session
+branch, including generations that were never displayed. The normal 20 MiB
+per-reference and 50 MiB aggregate limits still apply: a 32 MiB output is
+recoverable but cannot be used as an edit input without first reducing its size.
+Each edit is a new generation request and can consume quota.
+
+#### Artifact storage and recovery
+
+The artifact tool reserves a new private `pi-codex-image-*` directory under the
+OS temporary directory before generating. Original files have user-only
+permissions (directory `0700`, file `0600`) and are never overwritten.
+`save: "none"` means **no persistent user copy** for this tool; it does not
+disable temporary original storage. The direct tool's `none` mode still does
+not write the image to disk.
+
+Completed originals are not automatically deleted by this extension, including
+on script failure/timeout, reload, shutdown, or branch changes. They remain
+until user or OS temporary-file cleanup; there is no guaranteed retention
+period across OS cleanup or reboot. Copy needed assets to persistent storage.
+Only incomplete reservations owned by the current call are cleaned up.
+
+Before generation, a branch-local `codex-image-artifact-reservation` entry
+anchors recovery to the originating branch. On completion, a private, bounded
+JSON manifest beside the reserved original records path, MIME type, byte count,
+and call ID. Normal same-branch completions also append a
+`codex-image-artifact` session entry, without image bytes or prompts. Late
+completions after cancellation do not append records to unrelated branches or
+replacement sessions; the original branch's reservation reads the manifest.
+Run `/image-artifacts` to list the last 20 recorded original paths on the
+current branch without generation or network work. Records survive reload,
+resume, and session forks that preserve the entries; abandoned branches are
+not included. Listing reads validated recovery manifests, not image bytes, and
+does not verify that an original still exists. A missing
+original fails recent-image editing before generation; do not regenerate it
+automatically.
+
+If temporary storage is known to be unavailable, the artifact call fails before
+generation. If writing the original fails after generation, a successful
+requested persistent save becomes the recovery artifact, with a warning. If
+neither file can be saved, the call fails explicitly: **quota may already have
+been consumed and there is no recoverable artifact**. No generation retry is
+made. A failure to persist session recovery metadata is reported with the
+recoverable file path rather than hiding the completed file.
 
 ### Images 2.5 and API fallback
 
@@ -77,7 +163,7 @@ The extension owns an image-capable ChatGPT OAuth flow, registered as **Codex Im
 
 Complete the browser login with your ChatGPT account. You can also run `/login` and select **Codex Images (ChatGPT subscription)**. The browser redirects to `http://localhost:1455/auth/callback`. If the callback cannot reach Pi, paste the **full redirect URL** into Pi's login prompt, not into chat. Login expires after ten minutes.
 
-Use Pi 0.85.1 or later. Pi stores the `codex-images` credential in its agent auth store (normally `~/.pi/agent/auth.json`). `/logout codex-images` removes that credential without changing your chat login. No credential files are created by the extension itself.
+Use Pi 1.1.0 or later. Pi stores the `codex-images` credential in its agent auth store (normally `~/.pi/agent/auth.json`). `/logout codex-images` removes that credential without changing your chat login. No credential files are created by the extension itself.
 
 The package implements the Codex-compatible OAuth protocol itself. It neither imports Pi's `openai-codex` OAuth helpers nor requires the Codex app or its credential store. It still depends on OpenAI continuing to accept that public OAuth client and private image endpoint; this is not a new OAuth application registered with OpenAI.
 
@@ -125,12 +211,14 @@ Project config overrides global config only when project trust is active. If pro
 
 | Mode      | Behavior                                                         |
 | --------- | ---------------------------------------------------------------- |
-| `none`    | Image is returned inline but not written to disk.                |
+| `none`    | Direct tool: inline image, no disk save. Artifact tool: private temporary original, no persistent copy. |
 | `project` | Saves to `<project>/.pi/generated-images/<session-id>/`.         |
 | `global`  | Saves to `~/.pi/agent/generated-images/<session-id>/`.           |
 | `custom`  | Saves to a user-specified directory (requires `saveDir` or env). `~` and `~/...` expand to the current user's home directory. |
 
 ## Tool parameters
+
+Both generation entry points accept these parameters.
 
 | Parameter      | Type   | Required | Description                                                        |
 | -------------- | ------ | -------- | ------------------------------------------------------------------ |
@@ -149,8 +237,9 @@ Project config overrides global config only when project trust is active. If pro
 3. For edits, attaches the selected local or conversation images to the request.
 4. The backend selects an image model to generate or edit the image.
 5. Parses the SSE stream and strictly validates the returned base64 and image format.
-6. Saves the image according to the active save mode; persistence failures produce a warning without discarding a valid inline image.
-7. Returns the image data inline plus metadata (model, format, path, revised prompt, usage).
+6. For the artifact tool, commits the reserved temporary original and records its branch-local recovery metadata.
+7. Saves a persistent copy according to the active save mode; failures produce a bounded warning without discarding a usable inline image or artifact.
+8. Returns the direct inline image or structured artifact metadata. Codemode displays an image only through an explicit `read` and `image()` operation.
 
 ## Troubleshooting
 

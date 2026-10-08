@@ -8,6 +8,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Changed
 
+- Update the shared Pi development and contract-test baseline to 1.1.0; require Node.js >=22.19.0 to match the host runtime. Pi remains a host-supplied peer dependency.
 - Share install telemetry mechanics through `@mocito/install-telemetry` while preserving Pi-specific settings and state paths.
 
 ### Fixed

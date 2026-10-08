@@ -1,7 +1,7 @@
 /**
  * Project-local Codex image generation extension.
  *
- * Registers `codex_generate_image`, a tool that uses package-owned
+ * Registers inline and artifact image tools that use package-owned
  * ChatGPT image OAuth or legacy Pi auth to call the Codex Responses backend with the
  * native `image_generation` tool. The backend selects the image model.
  */
@@ -12,11 +12,12 @@ import { mkdir, open, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext, getAgentDir, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext, type ExtensionToolContext, type AgentToolUpdateCallback, type AgentToolResult, getAgentDir, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import { extractImageAccountId, imageAuthProvider, IMAGE_AUTH_PROVIDER } from "../src/image-oauth.js";
 import { abortable, httpFailure, MAX_IMAGE_BYTES, parseCodexSse, withRequestDeadline, type ParsedCodexResponse } from "../src/codex-response.js";
+import { ARTIFACT_ENTRY, RESERVATION_ENTRY, artifactRecord, artifactReservation, readArtifactManifest, branchArtifacts, reserveArtifact, type ImageArtifact } from "../src/artifacts.js";
 
 const PACKAGE_NAME = "pi-codex-image-gen";
 const LEGACY_PROVIDER = "openai-codex";
@@ -116,6 +117,17 @@ const TOOL_PARAMS = Type.Object({
 });
 
 type ToolParams = Static<typeof TOOL_PARAMS>;
+
+const ARTIFACT_OUTPUT = Type.Object({
+	summary: Type.String(),
+	artifact: Type.Object({
+		path: Type.String(),
+		mimeType: StringEnum(["image/png", "image/jpeg", "image/webp"]),
+		byteCount: Type.Integer({ minimum: 1, maximum: MAX_IMAGE_BYTES }),
+	}),
+	savedPath: Type.Optional(Type.String()),
+	saveWarning: Type.Optional(Type.String()),
+});
 
 // --- Config types ---
 
@@ -271,15 +283,19 @@ async function saveImage(
 	return filePath;
 }
 
-export function selectRecentImages(messages: unknown[], count: number): InputImage[] {
-	const images: InputImage[] = [];
+type RecentImage = InputImage | { path: string; mimeType: string };
+
+export function selectRecentImages(messages: unknown[], count: number): RecentImage[] {
+	const images: RecentImage[] = [];
 	for (let index = messages.length - 1; index >= 0 && images.length < count; index--) {
 		const message = messages[index] as { content?: unknown };
 		if (!Array.isArray(message?.content)) continue;
 		for (let contentIndex = message.content.length - 1; contentIndex >= 0 && images.length < count; contentIndex--) {
-			const block = message.content[contentIndex] as { type?: unknown; data?: unknown; mimeType?: unknown };
+			const block = message.content[contentIndex] as { type?: unknown; data?: unknown; mimeType?: unknown; path?: unknown };
 			if (block?.type === "image" && typeof block.data === "string" && typeof block.mimeType === "string") {
 				images.push({ data: block.data, mimeType: block.mimeType });
+			} else if (block?.type === "image_artifact" && typeof block.path === "string" && typeof block.mimeType === "string") {
+				images.push({ path: block.path, mimeType: block.mimeType });
 			}
 		}
 	}
@@ -349,12 +365,16 @@ export async function resolveInputImages(
 		if (!Number.isInteger(count) || count < 1 || count > MAX_EDIT_IMAGES) {
 			throw new Error(`numLastImagesToInclude must be between 1 and ${MAX_EDIT_IMAGES}.`);
 		}
-		const images = selectRecentImages(messages, count);
-		if (images.length !== count) {
-			throw new Error(`Requested the last ${count} conversation images, but only ${images.length} were available.`);
+		const recent = selectRecentImages(messages, count);
+		if (recent.length !== count) {
+			throw new Error(`Requested the last ${count} conversation images, but only ${recent.length} were available.`);
 		}
+		const images: InputImage[] = [];
 		let total = 0;
-		for (const image of images) {
+		for (const selected of recent) {
+			const image = "path" in selected
+				? { data: (await readInputImage(selected.path)).toString("base64"), mimeType: selected.mimeType }
+				: selected;
 			if (image.data.length > Math.ceil(MAX_INPUT_IMAGE_BYTES / 3) * 4) throw new Error("Conversation image exceeds 20 MiB.");
 			const format = OUTPUT_FORMATS.find(format => mimeForFormat(format) === image.mimeType);
 			if (!format) throw new Error("Conversation image has an unsupported format.");
@@ -362,6 +382,7 @@ export async function resolveInputImages(
 			if (bytes.length > MAX_INPUT_IMAGE_BYTES) throw new Error("Conversation image exceeds 20 MiB.");
 			total += bytes.length;
 			if (total > MAX_TOTAL_INPUT_BYTES) throw new Error("Conversation images exceed 50 MiB in total.");
+			images.push(image);
 		}
 		return images;
 	}
@@ -464,22 +485,44 @@ export default function codexImageGen(pi: ExtensionAPI) {
 	reportInstallTelemetry();
 	pi.registerProvider(imageAuthProvider);
 
-	pi.registerTool({
-		name: "codex_generate_image",
-		label: "Codex Image",
-		description:
-			"Generate or edit an image with the OpenAI Codex ChatGPT backend built-in image_generation tool. The backend selects the image model. Accepts up to five local or recent conversation images (20 MiB each, 50 MiB total). Requires /login codex-images or existing legacy Pi OAuth credentials; works with openai OAuth chat and does not require the Codex app or an API key. Network deadline: 5 minutes; output image limit: 32 MiB; backend text is limited to 4,000 characters.",
-		promptSnippet: "Generate or edit bitmap images via the OpenAI Codex ChatGPT backend image_generation tool.",
-		promptGuidelines: [
-			"Use codex_generate_image when the user asks to generate or edit a raster image with OpenAI/Codex image generation.",
-			"Do not use codex_generate_image without a clear image-generation request, because it consumes the user's Codex image quota.",
-			"The model parameter selects a Codex routing model, not an image model. Do not pass gpt-image-* IDs.",
-			"Output metadata is backend-reported, not independently verified. Check pixels for dimensions and transparency; do not infer a served model from appearance or a successful request.",
-			"Do not automatically repeat quota, connection, deadline, or incomplete-stream failures. The backend may already have consumed image quota.",
-		],
-		parameters: TOOL_PARAMS,
-		executionMode: "parallel", // #4: safe to run concurrently — no shared state, saves serialized per-path
-		async execute(toolCallId, params: ToolParams, signal, onUpdate, ctx) {
+	const guidelines = [
+		"Generate or edit images only on a clear user request; each call consumes Codex image quota.",
+		"The model parameter selects a Codex routing model, not an image model. Do not pass gpt-image-* IDs.",
+		"Output metadata is backend-reported. Inspect pixels for dimensions and transparency; do not infer a served model.",
+		"Do not automatically repeat quota, connection, deadline, incomplete-stream, or artifact-storage failures. Quota may already have been consumed.",
+	];
+
+	async function recordOriginal(
+		artifact: ImageArtifact, toolCallId: string, reservation: Awaited<ReturnType<typeof reserveArtifact>>,
+		ctx: ExtensionToolContext, sessionId: string, originEntryId: string | null,
+	): Promise<string | undefined> {
+		const record = { artifact, toolCallId: toolCallId.slice(0, 256) };
+		let manifestPublished = false;
+		try {
+			await reservation.publish(record);
+			manifestPublished = true;
+		} catch { /* A completed original must survive a metadata-storage failure. */ }
+		// Do not attach late results to an unrelated branch or a replacement
+		// session. The pre-generation reservation and private manifest preserve
+		// recovery on the originating branch, including its forks and resumes.
+		try {
+			if (ctx.sessionManager.getSessionId() === sessionId && originEntryId
+				&& ctx.sessionManager.getBranch().some(entry => entry.id === originEntryId)) {
+				pi.appendEntry(ARTIFACT_ENTRY, record);
+				return undefined;
+			}
+		} catch { /* The context may be inactive after reload; use the manifest. */ }
+		if (manifestPublished) return undefined;
+		return `Artifact recovery metadata could not be persisted. Recover the image from ${artifact.path}. No generation retry was made.`;
+	}
+
+	async function executeImage(
+		artifactMode: boolean, toolCallId: string, params: ToolParams, signal: AbortSignal | undefined,
+		onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionToolContext,
+	): Promise<AgentToolResult<unknown>> {
+		let reservation: Awaited<ReturnType<typeof reserveArtifact>> | undefined;
+		let originEntryId: string | null = null;
+		try {
 			if (typeof params.prompt !== "string" || !params.prompt.trim() || params.prompt.length > MAX_PROMPT_CHARS) {
 				throw new Error("Image prompt must contain 1 to 32,000 characters.");
 			}
@@ -496,15 +539,48 @@ export default function codexImageGen(pi: ExtensionAPI) {
 			}
 			const sessionId = ctx.sessionManager.getSessionId();
 			const saveConfig = resolveSaveConfig(params, ctx.cwd, sessionId, config);
+			const messages: unknown[] = [];
+			const branch = ctx.sessionManager.getBranch();
+			const completedPaths = new Set(branch.flatMap(entry => {
+				const record = entry.type === "custom" && entry.customType === ARTIFACT_ENTRY ? artifactRecord(entry.data) : undefined;
+				return record ? [record.artifact.path] : [];
+			}));
+			for (const entry of params.numLastImagesToInclude !== undefined ? branch : []) {
+				if (entry.type === "message") messages.push(entry.message);
+				if (entry.type === "custom_message") messages.push(entry);
+				if (entry.type === "custom" && entry.customType === ARTIFACT_ENTRY) {
+					const record = artifactRecord(entry.data);
+					if (record) messages.push({ content: [{ type: "image_artifact", ...record.artifact }] });
+				}
+				if (entry.type === "custom" && entry.customType === RESERVATION_ENTRY) {
+					const pending = artifactReservation(entry.data);
+					const record = pending ? await readArtifactManifest(pending) : undefined;
+					// Normal completions also have a session entry. Prefer that
+					// later entry and avoid counting the same original twice.
+					if (record && !completedPaths.has(record.artifact.path)) {
+						messages.push({ content: [{ type: "image_artifact", ...record.artifact }] });
+					}
+				}
+			}
+			const inputImages = await resolveInputImages(params, ctx.cwd, messages);
+			signal?.throwIfAborted();
+			if (artifactMode) {
+				try {
+					reservation = await reserveArtifact(extensionForFormat(outputFormat));
+				} catch {
+					throw new Error("Image artifact storage is unavailable. No generation request was made.");
+				}
+				signal?.throwIfAborted();
+				// Attach the recovery anchor synchronously before quota/network
+				// work. A cancelled parent may settle while commit I/O is pending.
+				pi.appendEntry(RESERVATION_ENTRY, {
+					path: reservation.path, mimeType: mimeForFormat(outputFormat), toolCallId: toolCallId.slice(0, 256),
+				});
+				originEntryId = ctx.sessionManager.getLeafId();
+			}
 			const auth = await resolveImageAuth(ctx.modelRegistry);
 			const provider = auth.provider;
 			const model = ctx.modelRegistry.find(provider, requestedModel)?.id || requestedModel;
-			const messages: unknown[] = [];
-			for (const entry of ctx.sessionManager.getBranch()) {
-				if (entry.type === "message") messages.push(entry.message);
-				if (entry.type === "custom_message") messages.push(entry);
-			}
-			const inputImages = await resolveInputImages(params, ctx.cwd, messages);
 
 			onUpdate?.({
 				content: [{ type: "text", text: `Requesting image ${inputImages.length > 0 ? "edit" : "generation"} through ${provider}/${model}...` }],
@@ -528,18 +604,37 @@ export default function codexImageGen(pi: ExtensionAPI) {
 			let savedPath: string | undefined;
 			let attemptedPath: string | undefined;
 			let saveWarning: string | undefined;
+			let artifact: ImageArtifact | undefined;
+			let recoveryWarning: string | undefined;
+			if (reservation) {
+				try {
+					artifact = await reservation.commit(imageBytes, mimeForFormat(outputFormat));
+				} catch {
+					// Attempt the requested persistent copy below, never generation again.
+				}
+				// Persist before callbacks, persistent saves, or parent script output.
+				if (artifact) recoveryWarning = await recordOriginal(artifact, toolCallId, reservation, ctx, sessionId, originEntryId);
+			}
 			if (saveConfig.mode !== "none" && saveConfig.outputDir) {
 				attemptedPath = imagePath(outputFormat, saveConfig.outputDir, parsed.image.id || toolCallId);
 				try {
 					savedPath = await saveImage(imageBytes, outputFormat, saveConfig.outputDir, parsed.image.id || toolCallId);
-					onUpdate?.({
-						content: [{ type: "text", text: `Image saved to ${savedPath}.` }],
-						details: { provider, model, savedPath, byteCount: imageBytes.length },
-					});
 				} catch (error) {
-					saveWarning = `Image generation succeeded, but the image could not be saved to disk: ${error instanceof Error ? error.message : String(error)}`;
+					const reason = (error instanceof Error ? error.message : String(error))
+						.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").slice(0, 500);
+					saveWarning = `Image generation succeeded, but the image could not be saved to disk: ${reason}`;
 				}
 			}
+			if (artifactMode && !artifact) {
+				if (savedPath) {
+					artifact = { path: savedPath, mimeType: mimeForFormat(outputFormat), byteCount: imageBytes.length };
+					recoveryWarning = await recordOriginal(artifact, toolCallId, reservation!, ctx, sessionId, originEntryId);
+					saveWarning = "Temporary artifact storage failed; recover the original from the persistent saved path. No generation retry was made.";
+				} else {
+					throw new Error("Image generation succeeded, but artifact storage failed and no usable file could be saved. Image quota may have been consumed. No automatic retry was made.");
+				}
+			}
+			saveWarning = [saveWarning, recoveryWarning].filter(Boolean).join(" ") || undefined;
 
 			const summary = [
 				`Generated image via ${provider}/${model} using the backend-selected image model.`,
@@ -548,17 +643,28 @@ export default function codexImageGen(pi: ExtensionAPI) {
 				reportedImage.quality ? `Backend-reported quality: ${reportedImage.quality}.` : undefined,
 				reportedImage.background ? `Backend-reported background: ${reportedImage.background}.` : undefined,
 				parsed.image.revisedPrompt ? `Revised prompt: ${parsed.image.revisedPrompt}` : undefined,
-				savedPath ? `Saved image to: ${savedPath}` : "Image was not saved to disk.",
+				artifact ? `Original image artifact: ${artifact.path}.` : undefined,
+				savedPath ? `Saved image to: ${savedPath}` : artifactMode ? "No persistent image copy was saved." : "Image was not saved to disk.",
 				saveWarning ? `Warning: ${saveWarning}` : undefined,
 			]
 				.filter(Boolean)
 				.join(" ");
 
+			if (savedPath || artifact) onUpdate?.({
+				content: [{ type: "text", text: artifact ? `Original image artifact: ${artifact.path}.` : `Image saved to ${savedPath}.` }],
+				details: { provider, model, savedPath, artifact, byteCount: imageBytes.length },
+			});
+
 			return {
 				content: [
 					{ type: "text", text: summary },
-					{ type: "image", data: parsed.image.result, mimeType: mimeForFormat(outputFormat) },
+					...(!artifactMode ? [{ type: "image" as const, data: parsed.image.result, mimeType: mimeForFormat(outputFormat) }] : []),
 				],
+				...(artifact ? { structuredContent: {
+					summary, artifact: { ...artifact },
+					...(savedPath ? { savedPath } : {}),
+					...(saveWarning ? { saveWarning } : {}),
+				} } : {}),
 				details: {
 					provider,
 					model,
@@ -570,6 +676,7 @@ export default function codexImageGen(pi: ExtensionAPI) {
 					outputFormat,
 					saveMode: saveConfig.mode,
 					savedPath,
+					artifact,
 					attemptedPath,
 					saveWarning,
 					inputImageCount: inputImages.length,
@@ -579,6 +686,51 @@ export default function codexImageGen(pi: ExtensionAPI) {
 					usage: parsed.usage,
 				},
 			};
+		} finally {
+			// Cleanup only reservations made by this call, never completed originals.
+			await reservation?.dispose().catch(() => undefined);
+		}
+	}
+
+	const description = "Generate or edit an image with the OpenAI Codex ChatGPT backend built-in image_generation tool. The backend selects the image model. Accepts up to five local or recent conversation images (20 MiB each, 50 MiB total). Requires /login codex-images or existing legacy Pi OAuth credentials; works with openai OAuth chat and does not require the Codex app or an API key. Network deadline: 5 minutes; output image limit: 32 MiB; backend text is limited to 4,000 characters.";
+	pi.registerTool({
+		name: "codex_generate_image",
+		label: "Codex Image",
+		exposure: "model-only",
+		description: `${description} Direct model calls only; returns an inline image. For codemode workflows use codex_generate_image_artifact.`,
+		promptSnippet: "Generate or edit bitmap images via the OpenAI Codex ChatGPT backend image_generation tool.",
+		promptGuidelines: guidelines,
+		parameters: TOOL_PARAMS,
+		executionMode: "parallel",
+		execute: (id, params, signal, update, ctx) => executeImage(false, id, params, signal, update, ctx),
+	});
+	pi.registerTool({
+		name: "codex_generate_image_artifact",
+		label: "Codex Image Artifact",
+		exposure: "codemode",
+		description: `${description} Returns structured metadata and a private temporary original path, never image bytes. save=none disables persistent copies, not temporary storage. Completed artifacts survive script errors and reload until user/OS cleanup. Read artifact.path and call image(block) only for explicit display. Other nested callers and explicitly activated direct calls are supported. Recover current-branch paths with /image-artifacts.`,
+		promptGuidelines: [
+			...guidelines,
+			"For display read result.artifact.path and call image(block) only if read returns an image block; otherwise report its text note. Do not print image bytes.",
+			"For chained edits pass result.artifact.path through referencedImagePaths; each edit consumes quota.",
+		],
+		parameters: TOOL_PARAMS,
+		outputSchema: ARTIFACT_OUTPUT,
+		executionMode: "parallel",
+		execute: (id, params, signal, update, ctx) => executeImage(true, id, params, signal, update, ctx),
+	});
+	pi.registerCommand("image-artifacts", {
+		description: "List the last 20 generated original artifact paths on the current branch (no generation).",
+		handler: async (_args, ctx) => {
+			const records = (await branchArtifacts(ctx.sessionManager.getBranch())).slice(-20);
+			pi.sendMessage({
+				customType: "codex-image-artifact-list",
+				content: records.length ? records.map(record =>
+					`${record.artifact.path} (${record.artifact.mimeType}, ${record.artifact.byteCount} bytes)`,
+				).join("\n") + "\nTemporary originals may be removed by user/OS cleanup. Copy needed assets to persistent storage."
+					: "No image artifacts recorded on this branch.",
+				display: true,
+			});
 		},
 	});
 }

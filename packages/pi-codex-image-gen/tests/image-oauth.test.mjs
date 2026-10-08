@@ -72,6 +72,7 @@ test("extension registers an auth-only provider and Pi owns credential persisten
       models.setProvider(provider);
     },
     registerTool() {},
+    registerCommand() {},
   });
   const ui = interaction(async authorize => callback(authorize));
   await models.login(IMAGE_AUTH_PROVIDER, "oauth", ui.value);

@@ -26,6 +26,10 @@ Within CLI fallback, the CLI exposes three subcommands:
 
 Rules:
 - Use the Pi `codex_generate_image` tool by default for new image generation requests.
+- `codex_generate_image` is model-only; call it directly, never through codemode. For scripted workflows use `tools.codex_generate_image_artifact(...)`, which returns `{ summary, artifact: { path, mimeType, byteCount }, savedPath?, saveWarning? }` without image bytes. Both tools support the same generation/edit parameters and subscription login. Use Pi >=1.1.0.
+- To display an artifact, call `tools.read({path: result.artifact.path})`, then `image(block)` if the returned value is an image block. Pi can resize or omit an un-decodable display image; the original remains unchanged. Never print or store base64 image bytes. Pass artifact paths directly through `referencedImagePaths` for chained edits.
+- Artifact `save: "none"` still writes a private temporary original; it means no persistent user copy. Completed originals survive script failure/timeout, reload, shutdown, and branch changes until user/OS cleanup. Copy needed project assets to persistent storage. Run `/image-artifacts` to recover current-branch paths without generation. Recent-image selection includes branch-local original artifacts, even if never displayed; reference-size limits still apply.
+- Do not retry artifact-storage failures automatically. Known storage failures reject before generation; failures after backend success can already have consumed quota. A successful requested persistent save can be used as recovery if the temporary write fails. If neither succeeds, the tool explicitly reports that no artifact is recoverable.
 - Image login is separate from chat: use `/login codex-images` and complete the ChatGPT OAuth flow in Pi. The Codex app is not required. Existing legacy Pi `openai-codex` OAuth can be a fallback; new `openai` plan-sharing chat OAuth cannot generate images. Never ask the user to paste login URLs or tokens into chat.
 - The tool's `model` parameter selects a Codex routing model, not Flare or Sunburst. Do not claim a specific served image model unless the response reports it. Read `details.reportedImage` for backend-reported output settings, then inspect the actual image; prompt requests for quality, dimensions, or transparency are not guarantees.
 - The default routing model is `gpt-6-astra`. Explicit tool parameters and configuration values override this default.
@@ -42,7 +46,7 @@ Rules:
 
 Pi tool save-path policy:
 - In Pi tool mode, generated images are saved under Pi's agent directory by default: `<pi-agent-dir>/generated-images/<pi-session-id>/<image-call-id>.*`. The default Pi agent directory is `~/.pi/agent`, but it can be overridden with `PI_CODING_AGENT_DIR`; use Pi's configured agent directory, not a hardcoded home path.
-- Do not describe or rely on OS temp as the default Pi tool destination.
+- Do not describe OS temp as the default persistent destination. The artifact tool additionally keeps a private temporary original regardless of persistent save mode; its path is not a durable project asset.
 - Use the tool's `save` and `saveDir` controls to choose a save directory. Custom mode appends a session directory; it does not accept an exact output filename. If an exact asset path is needed, copy the generated image there and leave the original in place.
 - Save-path precedence in Pi tool mode:
   1. If the user names a destination, copy the selected output there and leave the original in place.
