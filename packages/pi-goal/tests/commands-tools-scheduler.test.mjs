@@ -134,6 +134,9 @@ test("goal tools expose create/get/update behavior", async () => {
     clearContinuation: () => {},
   };
   registerGoalTools(pi, runtime);
+  assert.equal(pi.tools.get("update_goal").exposure, "model-only");
+  assert.equal(pi.tools.get("get_goal").exposure, undefined);
+  assert.equal(pi.tools.get("create_goal").exposure, undefined);
   const ctx = makeCtx();
 
   let result = await pi.tools.get("get_goal").execute("1", {}, undefined, undefined, ctx);

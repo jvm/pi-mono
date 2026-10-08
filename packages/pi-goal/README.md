@@ -18,6 +18,10 @@ Give Pi a durable objective and let it keep working until the job is verified do
 pi install npm:@mocito/pi-goal
 ```
 
+Requires Pi 1.0.2 or newer for the model-only terminal-update safeguard.
+Development and session-contract tests use Pi 1.0.2. Older runtimes are not
+supported; there is no legacy fallback for nested terminal updates.
+
 For local development:
 
 ```bash
@@ -45,6 +49,15 @@ Replacing a non-complete goal asks for confirmation when UI is available.
 - `get_goal` returns current goal state and remaining budget.
 - `create_goal` creates a goal only when explicitly requested and fails if one already exists.
 - `update_goal` lets the model mark a goal `complete` or `blocked` only. It should mark complete only after requirement-by-requirement verification, and blocked only after the same blocker repeats for at least three goal turns.
+
+`update_goal` is model-only: it remains available directly to the model with
+codemode disabled, `on`, or `only`, but cannot be called from codemode scripts or
+other tools through `ctx.executeTool()`. Run verification first, inspect the
+results, then call `update_goal` as the only tool call in a separate final
+assistant turn. `get_goal` and `create_goal` remain callable from scripts.
+
+The extension enforces this call boundary, not the truth of the model's
+verification evidence. Trusted extensions still run with the user's permissions.
 
 ## Behavior
 
@@ -114,6 +127,12 @@ npm test --workspace packages/pi-goal
 npm run pack:dry-run --workspace packages/pi-goal
 npm audit --omit=dev
 ```
+
+The session-contract suite uses real Pi loading, tool dispatch, provider
+serialization, and session trees with synthetic goals and mocked provider
+traffic. It checks direct and nested calls, codemode discovery, termination,
+reloads, model changes, and branch reconstruction without live credentials or
+provider requests.
 
 Before publishing, also run the root validation loop:
 

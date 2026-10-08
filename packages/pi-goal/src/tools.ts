@@ -90,14 +90,16 @@ export function registerGoalTools(pi: ExtensionAPI, runtime: ToolRuntime): void 
   pi.registerTool({
     name: "update_goal",
     label: "Update Goal",
-    description: "Mark the current Pi goal complete or blocked. Only model-controlled terminal goal updates are accepted.",
+    description: "Mark the current Pi goal complete or blocked. Call directly as the only tool call in a separate final assistant turn, after inspecting verification results. Not callable from codemode or other tools.",
     promptSnippet: "Mark the persistent goal complete or blocked after strict verification.",
     promptGuidelines: [
+      "Call update_goal directly as the only tool call in a separate final assistant turn, never from codemode or another tool.",
       "Use update_goal with status complete only after explicit requirement-by-requirement verification proves the full goal is satisfied.",
       "Use update_goal with status blocked only after the same blocker repeats for at least three consecutive goal turns.",
       "Never use update_goal for pause, resume, budget_limited, usage_limited, or edits; those are user/system-controlled.",
     ],
     parameters: UpdateGoalParams,
+    exposure: "model-only",
     executionMode: "sequential",
     async execute(toolCallId, params, _signal, _onUpdate, ctx) {
       if (params.status !== "complete" && params.status !== "blocked") throw new Error("update_goal only accepts status complete or blocked.");
@@ -142,6 +144,8 @@ export function registerGoalTools(pi: ExtensionAPI, runtime: ToolRuntime): void 
 
 export function assertStandaloneUpdateGoalCall(branchEntries: BranchEntry[], toolCallId: string) {
   const toolContext = findToolCallContext(branchEntries, toolCallId);
+  // A direct executor may have no transcript context. This guard checks sibling
+  // calls, not caller authority: Pi enforces nested-call denial via model-only exposure.
   if (!toolContext) return undefined;
   if (toolContext.siblingToolCalls.length > 1) {
     throw new Error("update_goal must be the only tool call in its assistant turn. Run verification commands first, inspect their results, then call update_goal in a separate final turn.");
