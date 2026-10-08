@@ -22,9 +22,9 @@ Fingerprint serialization stops at the remaining history byte budget, including
 for individual strings. Unsupported JSON containers use normal Pi handling
 instead. This bounds the extension's fingerprint work, not Pi's own request size.
 
-The compaction event bus shares request data with installed cooperating local
-extensions. Those extensions have the same trust level as Pi itself. Temporary
-compaction transforms do not commit reasoning state.
+The obsolete direct-compaction event-bus listener has been removed. Ordinary
+request hooks remain the only runtime transformation path. Pi's standard
+summarizer and its persisted compaction boundary remain supported.
 
 Install telemetry sends only package/version/runtime metadata to
 `https://mocito.dev/api/report-install`, once per version, with a five-second

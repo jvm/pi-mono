@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { codexHarness, compactionResponse, requestBody, textResponse } from "../../../tests/codex-harness.mjs";
+import { codexHarness, requestBody, textResponse } from "../../../tests/codex-harness.mjs";
 
 process.env.CI = "1";
 process.env.PI_OFFLINE = "1";
@@ -185,14 +185,11 @@ test("resume, fork and branch traversal use only surviving Pi entries", async (t
 });
 
 for (const factories of [[reasoning, compaction, fast, tools], [tools, fast, compaction, reasoning]]) {
-  test(`compaction uses current effort without mutating the pin (${factories[0].name} first)`, async (t) => {
+  test(`public-only compaction leaves legacy inference and standard summaries intact (${factories[0].name} first)`, async (t) => {
     const requests = [];
-    let failCompaction = true;
     t.mock.method(globalThis, "fetch", async (_url, init) => {
       const next = requestBody(init); requests.push(next);
-      return next.input.some((item) => item.type === "compaction_trigger")
-        ? failCompaction ? new Response("", { status: 400 }) : compactionResponse()
-        : textResponse();
+      return textResponse();
     });
     const h = await codexHarness(factories);
     try {
@@ -202,26 +199,15 @@ for (const factories of [[reasoning, compaction, fast, tools], [tools, fast, com
       await h.session.prompt("second");
       h.session.setThinkingLevel("max");
       const before = structuredClone(h.sessionManager.getBranch().filter((e) => e.customType === STATE_TYPE));
-      // Run the public direct-request event, without installing a failed checkpoint.
-      const normal = requests.at(-1);
-      const data = { ctx: h.ctx, payload: { ...normal,
-        input: [...normal.input.filter((i) => i.type !== "configuration_update"), { type: "compaction_trigger" }],
-        reasoning: { effort: "max" },
-      } };
-      h.api.events.emit("pi-codex-compaction:request:v1", data);
-      assert.equal(data.payload.reasoning.effort, "low");
-      assert.equal(updates(data.payload).at(-1).reasoning.effort, "max");
+      assert.equal(requests.at(-1).service_tier, "priority");
+      assert.equal(requests.at(-1).tools.find((t) => t.name === "apply_patch").type, "custom");
+      const result = await h.session.compact();
+      assert.notEqual(result.details?.kind, "pi-codex-compaction");
+      assert.equal(requests.some((r) => r.context_management || r.input.some((i) => i.type === "compaction_trigger")), false);
       assert.deepEqual(h.sessionManager.getBranch().filter((e) => e.customType === STATE_TYPE), before);
-      failCompaction = false;
-      await h.session.compact();
-      const compact = requests.findLast((r) => r.input.some((i) => i.type === "compaction_trigger"));
-      assert.equal(compact.service_tier, "priority");
-      assert.equal(compact.reasoning.effort, "low");
-      assert.equal(updates(compact).at(-1).reasoning.effort, "max");
-      assert.equal(compact.tools.find((t) => t.name === "apply_patch").type, "custom");
       await h.session.prompt("after checkpoint");
       assert.equal(requests.at(-1).reasoning.effort, "max");
-      assert.equal(requests.at(-1).input[0].type, "compaction");
+      assert.notEqual(requests.at(-1).input[0].type, "compaction");
       assert.deepEqual(requests.at(-1).input[1], { type: "configuration_update", reasoning: { effort: "max" } });
       h.session.setThinkingLevel("low");
       await h.session.prompt("after checkpoint change");
@@ -296,11 +282,13 @@ test("a user-authored summary prefix is still fingerprinted as user input", () =
 });
 
 test("real compaction failure and cancellation leave saved effort metadata intact", async (t) => {
+  let compacting = false;
   let cancel = false;
   let h;
   t.mock.method(globalThis, "fetch", async (_url, init) => {
     const next = requestBody(init);
-    if (!next.input.some((i) => i.type === "compaction_trigger")) return textResponse();
+    assert.equal(next.input.some((i) => i.type === "compaction_trigger"), false);
+    if (!compacting) return textResponse();
     if (cancel) {
       queueMicrotask(() => h.session.abortCompaction());
       return new Promise((_resolve, reject) => {
@@ -317,13 +305,13 @@ test("real compaction failure and cancellation leave saved effort metadata intac
     h.session.setThinkingLevel("high");
     await h.session.prompt("second");
     const before = structuredClone(h.sessionManager.getBranch().filter((e) => e.customType === STATE_TYPE));
+    compacting = true;
     cancel = true;
     await assert.rejects(() => h.session.compact(), /cancel|abort/i);
     assert.deepEqual(h.sessionManager.getBranch().filter((e) => e.customType === STATE_TYPE), before);
     assert.equal(h.sessionManager.getBranch().some((e) => e.type === "compaction"), false);
     cancel = false;
-    const fallback = await h.session.compact();
-    assert.notEqual(fallback.details?.kind, "pi-codex-compaction");
+    await assert.rejects(() => h.session.compact());
     assert.deepEqual(h.sessionManager.getBranch().filter((e) => e.customType === STATE_TYPE), before);
   } finally { await h.close(); }
 });

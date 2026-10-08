@@ -5,7 +5,7 @@ request effort and needlessly invalidating its cached prefix.
 
 - Uses Pi's existing thinking controls. No new command or provider.
 - Keeps effort updates at stable positions across retries, resume, forks and trees.
-- Works alone, or with `pi-fast`, `pi-codex-tools` and `pi-codex-compaction`.
+- Works alone, or with `pi-fast` and `pi-codex-tools`.
 
 ## Installation
 
@@ -43,8 +43,13 @@ State is reconstructed from the active session branch on every request. It store
 efforts, item positions and SHA-256 history fingerprints, not duplicate prompts.
 After successful compaction, a new request baseline and an explicit effort update
 after the checkpoint restore the selected effort. Failed compaction cannot change
-the saved pin. With `pi-codex-compaction`, direct checkpoint requests also receive
-the current settings through its versioned public event bus.
+the saved pin.
+
+Current `pi-codex-compaction` releases target only the public `openai` route and
+no longer provide legacy RemoteCompactionV2 or its event-bus adapters. This
+reasoning extension remains legacy-provider-only and is inactive on that public
+route. On its supported legacy route, manual compaction uses Pi's standard
+summarizer. This change does not migrate the reasoning-update feature.
 
 If history changes outside normal append/branch/compaction operations, the package
 starts a new baseline rather than placing an update at an unchecked position.
@@ -64,8 +69,10 @@ No Codex code is copied or vendored.
 
 The Codex backend accepted Astra `configuration_update` values through `max` in
 live subscription probes on 2026-09-11 without additional beta headers. The
-combined Fast + grammar + reasoning + remote-compaction smoke test also passed:
-the continuation recalled the test word, and Pi recorded compaction usage. Public
+then-current combined Fast + grammar + reasoning + remote-compaction smoke test also passed:
+the continuation recalled the test word, and Pi recorded compaction usage.
+That is historical evidence for the removed integration; the current smoke test
+uses standard Pi compaction instead. Public
 [reasoning documentation](https://developers.openai.com/api/docs/guides/reasoning)
 describes the input shape, but is not treated as proof of Codex support.
 

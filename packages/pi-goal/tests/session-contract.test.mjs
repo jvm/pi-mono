@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createCodemodeExtension, SessionManager } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { codexHarness, compactionResponse, requestBody, textResponse } from "../../../tests/codex-harness.mjs";
+import { codexHarness, requestBody, textResponse } from "../../../tests/codex-harness.mjs";
 import { registerGoalTools } from "../src/tools.ts";
 import { applyGoalMutation, createGoalMutation, reconstructGoalState, statusMutation } from "../src/state.ts";
 import { GOAL_ENTRY_TYPE } from "../src/types.ts";
@@ -243,9 +243,7 @@ for (const reverse of [false, true]) {
     t.mock.method(globalThis, "fetch", async (_url, init) => {
       const body = requestBody(init);
       requests.push(body);
-      return body.input.some((item) => item.type === "compaction_trigger")
-        ? compactionResponse({ input_tokens: 20, output_tokens: 1, total_tokens: 21 })
-        : textResponse();
+      return textResponse();
     });
     await h.session.prompt("Old fixture context.");
     h.session.setThinkingLevel("high");
@@ -264,8 +262,10 @@ for (const reverse of [false, true]) {
     assert.deepEqual(requests.at(-1).input, lastRequest.input);
     assert.deepEqual(requests.at(-1).reasoning, lastRequest.reasoning);
     assert.deepEqual(h.sessionManager.getBranch().filter((entry) => entry.customType === STATE_TYPE), before);
-    await h.session.compact();
-    assert.equal(goalState(h).tokensUsed, tokensBefore + 11 + 21);
+    const compacted = await h.session.compact();
+    assert.notEqual(compacted.details?.kind, "pi-codex-compaction");
+    assert.equal(requests.some((r) => r.input.some((item) => item.type === "compaction_trigger")), false);
+    assert.equal(goalState(h).tokensUsed, tokensBefore + 11 + compacted.usage.totalTokens);
     assert.deepEqual(h.sessionManager.getBranch().filter((entry) => entry.customType === STATE_TYPE), before);
     assert.deepEqual(h.errors, []);
   });

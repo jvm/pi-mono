@@ -4,11 +4,15 @@ Root `AGENTS.md` applies.
 
 ## Invariants
 
-- Use Codex RemoteCompactionV2 only for `openai-codex` models using the `openai-codex-responses` API.
-- Send the current model's compaction `input` only the history Pi is discarding, plus a compatible previous opaque Codex checkpoint when one exists; do not duplicate Pi-kept user input. Retain the normal request envelope around that input.
-- Rehydrate opaque `compaction.encrypted_content` only for the same supported Codex model, endpoint, account, and authentication mode. Keep the bounded readable fallback for model/provider switches.
-- Bound compaction input and response size, use HTTPS, honor cancellation, and never log prompts, credentials, auth headers, or provider responses.
-- Fall back to standard Pi compaction when Codex auth, transport, response shape, or context limits are unavailable.
+- Default automatic `context_management` on for eligible requests; preserve explicit off settings and Pi's standard recovery compactor.
+- Enable it only on the official public `openai`/`openai-responses` route for GPT-5/GPT-6 candidates. Do not change providers, credentials, or billing mode.
+- Do not restore legacy backend transport, beta headers, compat serializers, or direct-compaction event-bus adapters.
+- Stop cache warming only when the actual cached request used automatic compaction. Leave unrelated providers and skipped requests unchanged.
+- Adopt only completed, bounded, ordered output. Use `output_item.done`, not `output_item.added`; the terminal output array can be empty.
+- Replay the latest checkpoint and its exact output suffix without duplicating the normalized assistant message or dropping later tool results.
+- Keep ordinary response usage on the assistant entry, never duplicate it on the checkpoint.
+- Bound captured and persisted output, honor cancellation, and never log prompts, credentials, headers, or encrypted content.
+- Preserve Pi's standard compactor as a safety net. Do not claim lower cost or latency without measured evidence.
 
 ## Validation
 

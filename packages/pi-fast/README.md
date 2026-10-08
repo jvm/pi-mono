@@ -60,7 +60,7 @@ Live checks with the new ChatGPT OAuth route rejected `fast` with HTTP 400
 (`Unsupported service_tier: fast`), while `priority` completed successfully.
 The account catalog advertised Fast as `priority`, so subscription requests
 use that spelling directly. The extension checks authentication on each request,
-including cooperating compaction requests, so a change in authentication changes
+including ordinary requests with server-side compaction, so a change in authentication changes
 the requested tier without another toggle. It does not send a rejected request
 first or retry it with a different tier.
 
@@ -112,8 +112,9 @@ pi -e /path/to/pi-mono/packages/pi-fast
 ```
 
 This is an npm-compatible TypeScript Pi package. There is no runtime build step.
-With an updated `pi-codex-compaction` installed, the same Fast toggle also applies
-to its direct compaction requests through Pi's event bus.
+With `pi-codex-compaction` installed, the same Fast toggle applies to ordinary
+public OpenAI requests that enable server-side compaction. No separate
+direct-compaction event-bus adapter is needed or provided.
 
 ## Usage
 

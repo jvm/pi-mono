@@ -6,9 +6,24 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Default-on automatic server-side compaction for eligible public OpenAI Responses requests, including ChatGPT subscription authentication. Keep `/server-compaction off`, persisted overrides, and optional thresholds.
+- Commit streamed checkpoints through Pi's public turn-end boundary and replay the latest checkpoint plus its exact output suffix, including mid-response checkpoints and tool continuations.
+- Bound checkpoint storage, bind replay to the model and credential, preserve readable fallbacks and normal Pi compaction, and avoid counting ordinary response usage twice.
+- Add real-session regression coverage and an explicitly gated, synthetic-text subscription comparison. The small live Astra trial verified replay but did not demonstrate lower total latency or token use than standard Pi compaction.
+- Verify immediate text streaming and tool continuation without a second Pi compaction when its safety net is enabled. Add flow-timing instrumentation to the gated benchmark; the earlier live trial did not measure streaming gaps.
+
 ### Changed
 
+- Require Pi 1.1.0 or later for the public turn-end boundary and normalized-transcript APIs.
+- Scope cache-warming interception to the actual automatic-compaction request instead of a global enabled toggle.
 - Update the shared Pi development and contract-test baseline to 1.1.0; require Node.js >=22.19.0 to match the host runtime. Pi remains a host-supplied peer dependency.
+
+### Removed
+
+- **Breaking:** Remove legacy `openai-codex` RemoteCompactionV2 support, direct backend transport, beta headers, temporary `pi-ai/compat` serialization, old transport helper exports, legacy TUI confirmations, and direct-compaction event-bus contracts.
+- Remove the unused direct `pi-tui` dependency. Existing legacy session files remain untouched, with readable fallback rather than cross-provider opaque replay.
 
 ## [0.1.5] - 2026-09-17
 

@@ -10,8 +10,9 @@ Root `AGENTS.md` applies.
   checked history boundaries. Never emit adjacent updates.
 - Persist only bounded effort metadata and SHA-256 history fingerprints in
   branch-local custom entries. Do not store prompts or credentials.
-- Compaction request transforms are read-only; failed compaction cannot change
-  live state. A successful checkpoint starts a new window.
+- Standard compaction must not mutate live reasoning state while summarizing.
+  A successful compaction starts a new window. Do not restore the removed
+  direct-compaction event-bus adapter.
 - Leave unsupported providers, Pro/multi-agent modes and auto-truncated requests
   unchanged. Never fall back to a public API key.
 
