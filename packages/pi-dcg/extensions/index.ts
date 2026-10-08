@@ -4,6 +4,7 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { loadDcgBridgeConfig, type DcgBridgeConfig } from "../src/config.js";
+import { ConfirmationQueue } from "../src/confirmation-queue.js";
 import {
   DcgClient,
   DcgProcessError,
@@ -135,6 +136,8 @@ export default function piDcg(
 
   const config = dependencies.config ?? loadDcgBridgeConfig();
   const client = dependencies.client ?? new DcgClient(config);
+  const confirmations = new ConfirmationQueue();
+  const lifetime = new AbortController();
   let version: string | undefined;
   let lastNotifiedError: string | undefined;
   let warnedAboutVersion = false;
@@ -160,15 +163,24 @@ export default function piDcg(
     cwd: string,
     ctx: ExtensionContext,
   ): Promise<GuardOutcome> => {
+    // Capture once: ctx.signal is a live getter and may change when a run ends.
+    const turnSignal = ctx.signal;
+    const signal = turnSignal ? AbortSignal.any([turnSignal, lifetime.signal]) : lifetime.signal;
+    const cancelled = (): GuardOutcome => ({
+      block: true,
+      reason: "dcg check or confirmation was cancelled; the command was not run.",
+    });
+    if (signal.aborted) return cancelled();
     if (!command.trim()) return { block: false };
 
     let result;
     try {
-      result = await client.check(command, cwd, ctx.signal);
+      result = await client.check(command, cwd, signal);
+      if (signal.aborted) return cancelled();
       markHealthy(ctx);
     } catch (error) {
-      if (error instanceof DcgProcessError && error.code === "aborted") {
-        return { block: true, reason: "dcg check was cancelled; the command was not run." };
+      if (signal.aborted || (error instanceof DcgProcessError && error.code === "aborted")) {
+        return cancelled();
       }
       markDegraded(ctx, error);
       if (config.onError === "block") {
@@ -196,13 +208,16 @@ export default function piDcg(
 
     let approved = false;
     try {
-      approved = await ctx.ui.confirm(
+      approved = await confirmations.confirm(signal, () => ctx.ui.confirm(
         "dcg requires confirmation",
         `Command:\n${truncate(command, MAX_COMMAND_PREVIEW_CHARS)}\n\n${reason}`,
-      );
+        { signal },
+      ));
     } catch {
+      if (signal.aborted) return cancelled();
       return { block: true, reason: `${reason}\n\nThe confirmation dialog failed, so the command was blocked.` };
     }
+    if (signal.aborted) return cancelled();
     return approved ? { block: false } : { block: true, reason: `${reason}\n\nThe command was not approved.` };
   };
 
@@ -231,8 +246,8 @@ export default function piDcg(
     const outcome = await guard(command, ctx.cwd, ctx);
     if (outcome.block) return { block: true, reason: outcome.reason };
 
-    // Pi executes this same input object after all tool_call handlers finish.
-    // Seal the checked value so a later extension cannot replace it unchecked.
+    // Seal against later mutations. Pi 1.1.0 cannot reconcile an input reference
+    // replaced by an earlier handler; see the documented upstream limitation.
     sealCheckedBashCommand(event, command);
     return undefined;
   });
@@ -277,6 +292,7 @@ export default function piDcg(
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    lifetime.abort();
     clearStatus(ctx);
   });
 }
