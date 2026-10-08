@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Documentation
+
+- Add provider/auth/billing and safe-fallback matrix; correct the native OAuth smoke-test explanation for the Pi 1.1.0 baseline.
+
 ### Changed
 
 - Remove the obsolete direct-compaction event-bus adapter. Public server-side compaction keeps the normal request's Fast tier; legacy provider inference support is unchanged.

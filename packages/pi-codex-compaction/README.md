@@ -95,12 +95,23 @@ inference during the server's compaction pass. It does not set `background: true
 
 ## Support and recovery
 
+Authentication stays with Pi: `/login openai` with **Sign in with ChatGPT**
+uses plan quota; an OpenAI API key uses separate API billing. Neither path
+falls back to the other. This is automatic `context_management` in ordinary
+`/responses`, not the standalone `/responses/compact` API or the removed private
+RemoteCompactionV2 protocol.
+
 | Route | Behavior |
 | --- | --- |
 | `openai` + `openai-responses`, official endpoint, GPT-5/GPT-6 | Automatic compaction on by default; server/model availability still applies |
 | Same route with ChatGPT sign-in | Live checkpoint/replay verified with `gpt-6-astra` |
 | Same route with an API key | Mocked contract coverage; no live billing test |
 | Legacy `openai-codex`, custom endpoints, other providers, routed model mismatch | Left unchanged; no compaction or auth hooks for those routes |
+
+GPT-6.1 Sol matches the GPT-6 candidate guard, but the existing live replay
+evidence is Astra-only. Model eligibility is not proof of account availability.
+No default model is changed. See the [provider migration assessment](../pi-openai-reasoning/README.md#provider-migration-assessment)
+for the separate reasoning-update limitation.
 
 - Requests with `configuration_update`, `compaction_trigger`, an existing
   `context_management`, stateful continuation, truncation, background processing,

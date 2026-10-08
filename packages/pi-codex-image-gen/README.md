@@ -155,6 +155,17 @@ In subscription tests on September 11, 2026, the direct endpoint accepted Flare,
 
 ## Authentication
 
+| Credential / route | Model selection | Usage and fallback |
+| --- | --- | --- |
+| `codex-images` OAuth / private Codex Responses | `model` selects a routing model, not an image model | ChatGPT image quota; preferred credential |
+| Legacy Pi `openai-codex` OAuth / same backend | Same routing semantics | Used only when owned image credentials are absent; no switch after an auth/generation failure |
+| Pi `openai` ChatGPT plan-sharing login | Any chat model | Not accepted for image generation; never sent to this backend |
+| OpenAI API key | Explicit standalone Python CLI only | Separate API billing; never an automatic fallback from the Pi tool |
+
+Changing the chat default to GPT-6.1 Sol does not change image authentication
+or certify the image backend's served model. The backend chooses the image
+model; successful inference on another route is not image capability evidence.
+
 The extension owns an image-capable ChatGPT OAuth flow, registered as **Codex Images** (`codex-images`). Pi stores its credentials and handles refresh. Your chat provider can remain `openai`; image authentication is independent.
 
 ```

@@ -46,6 +46,16 @@ remains `https://chatgpt.com/backend-api/codex/responses`.
 
 ### Request tier by authentication
 
+| Provider / API | Login / models | Fallback and billing |
+| --- | --- | --- |
+| `openai` / `openai-responses` | API key; allowlisted models above | `fast`; API charges, no subscription fallback |
+| `openai` / `openai-responses` | `/login openai`, Sign in with ChatGPT; same allowlist | `priority`; plan usage, no API-key fallback |
+| Legacy `openai-codex` | Existing Codex OAuth; same allowlist | `priority`; subscription usage |
+| Other providers/APIs or non-allowlisted models | Any | Payload unchanged; footer shows `Fast n/a` |
+
+GPT-6.1 Sol is already allowlisted here. That does not enable it in
+`pi-openai-reasoning`, whose private protocol remains verified only for Astra.
+
 OpenAI's [API Fast documentation](https://developers.openai.com/api/docs/guides/fast-mode)
 uses `fast` as the current spelling and accepts `priority` as an equivalent alias.
 The extension defaults to the current spelling for API-key access:
@@ -163,7 +173,8 @@ npm run -w packages/pi-fast smoke:native-openai -- /path/to/node_modules/@earend
 This command uses only synthetic in-memory credentials and mocked HTTP. It
 checks subscription/API-key tier selection, toggles, and authentication switches
 without changing the monorepo's pinned dependencies or making live requests.
-It is separate from `test` because the pinned Pi predates native OpenAI OAuth.
+It is separate from `test` so other installed Pi versions can be checked without
+changing the pinned Pi 1.1.0 baseline, which already includes native OpenAI OAuth.
 
 Smoke test (Pi 0.99.1 or later): sign in with ChatGPT on `openai`, then
 select `openai/gpt-6.1-sol`, enable `/fast on`, and send a short prompt.
