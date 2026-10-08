@@ -12,6 +12,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Fixed
 
+- Keep `update_goal` model-only on supported Pi runtimes (Pi 1.0.2 or newer), preventing codemode and other nested tool calls from completing or blocking a goal before the model inspects verification results. Preserve direct final-turn updates and script access to `get_goal` and `create_goal`.
 - Let `enableInstallTelemetry: false` override an enabled `PI_TELEMETRY` environment flag.
 
 ## [0.1.11] - 2026-07-17
