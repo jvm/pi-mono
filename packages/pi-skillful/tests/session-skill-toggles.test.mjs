@@ -248,6 +248,38 @@ test("project toggle settings apply only when project is trusted", async () => {
   await shutdown(trusted, trustedCtx);
 });
 
+test("prompt toggles change only owned structured visibility and never clear an earlier restriction", async () => {
+  await writeGlobal({
+    hiddenSkills: ["hidden", "bundled"],
+    toggleSlots: { 1: "hidden", 2: "bundled", 3: "restricted" },
+  });
+  const commands = [skillCommand("hidden"), skillCommand("bundled"), skillCommand("restricted")];
+  commands[1].sourceInfo.origin = "package";
+  const harness = createHarness({ commands, previousEditor: createEditor() });
+  const ctx = await start(harness, home, false);
+  const skills = commands.map((command, index) => ({
+    name: command.name.slice("skill:".length), sourceInfo: command.sourceInfo, disableModelInvocation: index === 2,
+  }));
+  const apply = () => {
+    const event = { systemPromptOptions: { skills, forceSystemPrompt: "Explicit policy." } };
+    assert.equal(harness.handlers.get("before_agent_start")(event), undefined);
+    assert.equal(event.systemPromptOptions.forceSystemPrompt, "Explicit policy.");
+    return event.systemPromptOptions.skills;
+  };
+  try {
+    assert.deepEqual(apply().map(skill => skill.disableModelInvocation), [true, false, true]);
+    const editor = harness.createInstalledEditor();
+    editor.handleInput("\x1b1");
+    const notifications = harness.notifications.length;
+    editor.handleInput("\x1b2");
+    assert.equal(harness.notifications.length, notifications, "bundled skills have no toggle slot");
+    assert.deepEqual(apply().map(skill => skill.disableModelInvocation), [false, false, true]);
+    assert.equal(skills[0].disableModelInvocation, false, "resource-loader skills remain unchanged");
+  } finally {
+    await shutdown(harness, ctx);
+  }
+});
+
 test.after(async () => {
   await rm(home, { recursive: true, force: true });
 });

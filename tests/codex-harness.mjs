@@ -47,6 +47,7 @@ export function textResponse(text = "OK") {
 /** Real Pi loader, event runner, tool registry, provider serializer and session tree. */
 export async function codexHarness(factories, options = {}) {
   const dir = await mkdtemp(join(tmpdir(), "pi-codex-contract-"));
+  const cwd = options.cwd ?? dir;
   const credentials = new InMemoryCredentialStore();
   await credentials.modify("openai-codex", async () => ({
     type: "oauth", access: testToken, refresh: "unused-fixture", expires: Date.now() + 3_600_000,
@@ -64,13 +65,14 @@ export async function codexHarness(factories, options = {}) {
     compaction: { enabled: false, reserveTokens: 8192, keepRecentTokens: 1 },
     retry: options.retry ?? { enabled: false },
   });
-  const sessionManager = options.sessionManager ?? SessionManager.inMemory(dir);
+  const sessionManager = options.sessionManager ?? SessionManager.inMemory(cwd);
   let api;
   let ctx;
   const errors = [];
   const loader = new DefaultResourceLoader({
-    cwd: dir, agentDir: dir, settingsManager,
+    cwd, agentDir: dir, settingsManager,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+    ...(options.skills ? { skillsOverride: () => ({ skills: options.skills, diagnostics: [] }) } : {}),
     systemPromptOverride: () => "Test assistant.",
     extensionFactories: [...factories, (pi) => {
       api = pi;
@@ -79,13 +81,13 @@ export async function codexHarness(factories, options = {}) {
   });
   await loader.reload();
   const { session, extensionsResult } = await createAgentSession({
-    cwd: dir, agentDir: dir, model, modelRuntime, sessionManager, settingsManager,
+    cwd, agentDir: dir, model, modelRuntime, sessionManager, settingsManager,
     resourceLoader: loader, thinkingLevel: "low",
     sessionStartEvent: options.sessionStartEvent,
     ...(options.tools ? { tools: options.tools } : {}),
   });
   if (extensionsResult.errors.length) throw new Error("Fixture extension load failed");
-  await session.bindExtensions({ mode: "print", onError: (error) => errors.push(error) });
+  await session.bindExtensions({ mode: "print", ...options.bindings, onError: (error) => errors.push(error) });
   return {
     session, sessionManager, modelRuntime, model, api, ctx, errors,
     async close() { session.dispose(); await rm(dir, { recursive: true, force: true }); },

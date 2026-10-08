@@ -20,7 +20,6 @@ import {
   writeProjectSkillfulOverride,
   writeToggleSlots,
 } from "../config.js";
-import { replaceSkillsSection } from "../skill-prompt.js";
 import { isTopLevelSkill, listLoadedSkills, type LoadedSkillInfo } from "../skills.js";
 import { hasActiveSessionSkillToggles, refreshSessionSkillToggles } from "./session-skill-toggles.js";
 const SCOPES: SkillfulScope[] = ["global", "project"];
@@ -100,12 +99,9 @@ export default function skillVisibility(pi: ExtensionAPI) {
     const hidden = await refreshHiddenSkillCache(ctx.cwd, ctx.isProjectTrusted());
     if (hidden.size === 0 || !event.systemPromptOptions.skills?.length) return;
 
-    const filteredSkills: Skill[] = event.systemPromptOptions.skills.map((skill) =>
+    event.systemPromptOptions.skills = event.systemPromptOptions.skills.map((skill) =>
       isTopLevelSkill(skill) && hidden.has(skill.name) ? { ...skill, disableModelInvocation: true } : skill,
     );
-    const systemPrompt = replaceSkillsSection(event.systemPrompt, filteredSkills);
-    if (!systemPrompt) return;
-    return { systemPrompt };
   });
 
   pi.registerCommand("skillful", {

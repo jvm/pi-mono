@@ -76,6 +76,16 @@ Register https://github.com/owner/repo.git with Pi Scout, then inspect how it im
 
 After a repository is registered, the agent sees its local path in the system prompt and can inspect it with local file tools.
 
+### Prompt updates
+
+Pi Scout uses the structured prompt API in Pi 1.1.0 or newer. It owns the `scout_repos` section and updates that section without replacing the full system prompt or other extensions' sections. When the last reference is removed or its directory disappears, the section is removed on the next prompt.
+
+The section contains only repository names, local paths, and read-only usage guidance. Origin URLs, credentials, branch names, and other record metadata are not included.
+
+A deliberate full-prompt override from another extension (`systemPrompt` or `forceSystemPrompt`) takes precedence. Scout does not append to or rewrite that override, so its author controls whether reference context is included. Scout tools remain available according to their normal registration rules.
+
+Pi records section updates in the session transcript. Providers that do not support mid-conversation system changes may require a full prompt checkpoint; this does not guarantee cache savings.
+
 ## Tools
 
 | Tool | Purpose |

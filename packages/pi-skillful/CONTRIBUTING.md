@@ -33,6 +33,14 @@ pi -e /path/to/pi-mono/packages/pi-skillful
 
 ## Pull request checklist
 
+For prompt changes, also run the shared real-session contracts from the monorepo root:
+
+```bash
+node --import tsx --test tests/structured-prompts.test.mjs
+```
+
+These load both Skillful and Scout through Pi's SDK, inspect serialized provider requests and session history, and exercise the toggle editor wrapper. They use disposable profiles, synthetic credentials, temporary reference directories, and mocked provider responses; they do not use a live model or existing user settings. Coverage includes extension load order, explicit prompt overrides, hidden skill invocation, codemode, reload, resume, fork/tree navigation, and providers that collapse system updates.
+
 Before opening a pull request:
 
 - Run `npm run check`.

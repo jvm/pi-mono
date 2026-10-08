@@ -82,13 +82,13 @@ export default function piScout(pi: ExtensionAPI) {
     },
   });
 
-
   pi.on("before_agent_start", async (event) => {
     await syncScoutRmTool();
     const state = await loadPrunedState();
     const scoutPrompt = buildScoutPrompt(state.repos);
-    if (!scoutPrompt) return;
-    return { systemPrompt: `${event.systemPrompt}\n\n${scoutPrompt}` };
+    // Change only our section; a deliberate forceSystemPrompt remains authoritative.
+    if (scoutPrompt) event.systemPromptOptions.sections.scout_repos = scoutPrompt;
+    else delete event.systemPromptOptions.sections.scout_repos;
   });
 }
 
