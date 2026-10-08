@@ -65,7 +65,11 @@ jobs:
           persist-credentials: false
 
       - name: Install Semgrep
-        run: python3 -m pip install --user semgrep==1.144.0
+        run: |
+          python3 -m venv "$RUNNER_TEMP/semgrep"
+          # Semgrep 1.144.0 pins MCP 1.16.0, whose typing helper was removed in Pydantic 2.14.
+          "$RUNNER_TEMP/semgrep/bin/python" -m pip install semgrep==1.144.0 pydantic==2.13.5
+          echo "$RUNNER_TEMP/semgrep/bin" >> "$GITHUB_PATH"
 
       - name: Run Semgrep
         run: semgrep scan --config p/default --error
