@@ -43,7 +43,8 @@ function createTool(registerProvider = () => {}) {
   let tool;
   extension({
     registerProvider,
-    registerTool(value) { tool = value; },
+    registerCommand() {},
+    registerTool(value) { if (value.name === "codex_generate_image") tool = value; },
   });
   assert.ok(tool);
   return tool;

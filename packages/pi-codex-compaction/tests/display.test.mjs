@@ -12,6 +12,7 @@ process.env.PI_OFFLINE = "1";
 // Private access is test-only; production uses documented extension APIs.
 const piRoot = new URL(".", import.meta.resolve("@earendil-works/pi-coding-agent"));
 const { InteractiveMode } = await import(new URL("modes/interactive/interactive-mode.js", piRoot));
+const { ProgramStatusReporter } = await import(new URL("modes/interactive/program-status-reporter.js", piRoot));
 const { initTheme } = await import(new URL("modes/interactive/theme/theme.js", piRoot));
 initTheme("dark");
 const savedType = "pi-codex-compaction:saved:v1";
@@ -30,12 +31,13 @@ for (const reason of ["manual", "threshold", "overflow"]) {
         chatContainer: new Container(),
         pendingTools: new Map(),
         compactionQueuedMessages: [],
-        ui: { requestRender() {}, terminal: { setProgress() {} } },
+        ui: { requestRender() {}, terminal: { setProgress() {}, setProgramStatus() {} } },
         footer: { invalidate() {} },
         toolOutputExpanded: false,
         outputPad: 1,
         mermaidMarkdownTransformer: (text) => text,
       });
+      view.programStatus = new ProgramStatusReporter(() => view.ui.terminal, () => h.sessionManager.getSessionName());
       await h.session.bindExtensions({
         mode: "tui",
         uiContext: { notify: (message, level) => view.showExtensionNotify(message, level) },

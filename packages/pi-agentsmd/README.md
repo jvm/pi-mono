@@ -70,7 +70,7 @@ The `/init` command sends a structured prompt to the active AI model. The model 
 
 Requirements:
 
-- Node.js >= 20.6.0
+- Node.js >= 22.19.0
 - npm
 
 ```bash

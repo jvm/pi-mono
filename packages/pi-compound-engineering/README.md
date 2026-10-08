@@ -135,7 +135,7 @@ This package is source-distributed. Pi loads the TypeScript extensions directly.
 
 Requirements:
 
-- Node.js >= 20.6.0
+- Node.js >= 22.19.0
 - npm
 - `tar` binary (macOS, Linux, WSL)
 

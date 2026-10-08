@@ -30,7 +30,7 @@ Each package installs independently. Pick the capability you need, then follow i
 | Need | Package | What it adds |
 | --- | --- | --- |
 | Search the web, docs, and real code | [pi-web-kit](./packages/pi-web-kit) | Context-efficient web search, page fetch, library docs, and code search tools. |
-| Generate or edit images | [pi-codex-image-gen](./packages/pi-codex-image-gen) | Conversational image generation and editing through ChatGPT Codex auth, with optional Images 2.5 API controls. |
+| Generate or edit images | [pi-codex-image-gen](./packages/pi-codex-image-gen) | Conversation and codemode image workflows through ChatGPT subscription auth, with a separate optional API fallback. |
 
 ### Safety and continuity
 
@@ -42,6 +42,10 @@ Each package installs independently. Pick the capability you need, then follow i
 ## Development
 
 This repo uses npm workspaces. Run commands from the repository root unless package-specific docs say otherwise.
+
+Use Node.js >=22.19.0. All extension workspaces share the Pi 1.1.0 development
+and contract-test baseline; Pi remains a host-supplied peer dependency. CI
+validates the minimum Node version and Node 24.
 
 ```bash
 npm install

@@ -22,7 +22,24 @@ pi install -l /path/to/pi-mono/packages/pi-codex-image-gen
 pi
 ```
 
-With Pi 0.85.1 or later, run `/login codex-images`, complete the ChatGPT browser login, and ask Pi to generate an image. Chat can stay on `openai` OAuth. Neither the Codex app nor Pi's legacy OAuth helpers are required.
+With Pi 1.1.0 or later, run `/login codex-images`, complete the ChatGPT browser login, and ask Pi to generate an image. Chat can stay on `openai` OAuth. Neither the Codex app nor Pi's legacy OAuth helpers are required.
+
+### Image delivery smoke test
+
+The default tests use real Pi sessions with synthetic credentials and mocked SSE;
+they do not consume subscription quota. Test both nested events and the parent
+codemode result. The shared development baseline is Pi 1.1.0 on Node >=22.19.0.
+
+For an explicitly authorized live smoke test, load this package in a disposable
+Pi profile with the existing image-capable OAuth login. Keep credentials out of
+the repository and do not copy them into test fixtures. Generate one image using
+`codex_generate_image_artifact` with `save: "none"`, inspect its original pixels,
+and display it by reading `result.artifact.path` and passing the returned image
+block to `image()`. Report the reader's text note if no image block is returned.
+Run `/image-artifacts`, reload, and recover the same file without regeneration.
+Check that a nested call to `codex_generate_image` is unavailable without making
+another image request. Do not retry an ambiguous connection/quota failure.
+Do not use the separately billed API CLI.
 
 For a one-off run without changing settings:
 
