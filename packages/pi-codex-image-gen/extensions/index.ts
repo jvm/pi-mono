@@ -17,7 +17,7 @@ import { type Static, Type } from "typebox";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import { extractImageAccountId, imageAuthProvider, IMAGE_AUTH_PROVIDER } from "../src/image-oauth.js";
 import { abortable, httpFailure, MAX_IMAGE_BYTES, parseCodexSse, withRequestDeadline, type ParsedCodexResponse } from "../src/codex-response.js";
-import { ARTIFACT_ENTRY, artifactRecord, reserveArtifact, type ImageArtifact } from "../src/artifacts.js";
+import { ARTIFACT_ENTRY, RESERVATION_ENTRY, artifactRecord, artifactReservation, readArtifactManifest, branchArtifacts, reserveArtifact, type ImageArtifact } from "../src/artifacts.js";
 
 const PACKAGE_NAME = "pi-codex-image-gen";
 const LEGACY_PROVIDER = "openai-codex";
@@ -492,13 +492,28 @@ export default function codexImageGen(pi: ExtensionAPI) {
 		"Do not automatically repeat quota, connection, deadline, incomplete-stream, or artifact-storage failures. Quota may already have been consumed.",
 	];
 
-	function recordOriginal(artifact: ImageArtifact, toolCallId: string): string | undefined {
+	async function recordOriginal(
+		artifact: ImageArtifact, toolCallId: string, reservation: Awaited<ReturnType<typeof reserveArtifact>>,
+		ctx: ExtensionToolContext, sessionId: string, originEntryId: string | null,
+	): Promise<string | undefined> {
+		const record = { artifact, toolCallId: toolCallId.slice(0, 256) };
+		let manifestPublished = false;
 		try {
-			pi.appendEntry(ARTIFACT_ENTRY, { artifact, toolCallId: toolCallId.slice(0, 256) });
-			return undefined;
-		} catch {
-			return `Artifact recovery metadata could not be persisted. Recover the image from ${artifact.path}. No generation retry was made.`;
-		}
+			await reservation.publish(record);
+			manifestPublished = true;
+		} catch { /* A completed original must survive a metadata-storage failure. */ }
+		// Do not attach late results to an unrelated branch or a replacement
+		// session. The pre-generation reservation and private manifest preserve
+		// recovery on the originating branch, including its forks and resumes.
+		try {
+			if (ctx.sessionManager.getSessionId() === sessionId && originEntryId
+				&& ctx.sessionManager.getBranch().some(entry => entry.id === originEntryId)) {
+				pi.appendEntry(ARTIFACT_ENTRY, record);
+				return undefined;
+			}
+		} catch { /* The context may be inactive after reload; use the manifest. */ }
+		if (manifestPublished) return undefined;
+		return `Artifact recovery metadata could not be persisted. Recover the image from ${artifact.path}. No generation retry was made.`;
 	}
 
 	async function executeImage(
@@ -506,6 +521,7 @@ export default function codexImageGen(pi: ExtensionAPI) {
 		onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionToolContext,
 	): Promise<AgentToolResult<unknown>> {
 		let reservation: Awaited<ReturnType<typeof reserveArtifact>> | undefined;
+		let originEntryId: string | null = null;
 		try {
 			if (typeof params.prompt !== "string" || !params.prompt.trim() || params.prompt.length > MAX_PROMPT_CHARS) {
 				throw new Error("Image prompt must contain 1 to 32,000 characters.");
@@ -524,12 +540,26 @@ export default function codexImageGen(pi: ExtensionAPI) {
 			const sessionId = ctx.sessionManager.getSessionId();
 			const saveConfig = resolveSaveConfig(params, ctx.cwd, sessionId, config);
 			const messages: unknown[] = [];
-			for (const entry of ctx.sessionManager.getBranch()) {
+			const branch = ctx.sessionManager.getBranch();
+			const completedPaths = new Set(branch.flatMap(entry => {
+				const record = entry.type === "custom" && entry.customType === ARTIFACT_ENTRY ? artifactRecord(entry.data) : undefined;
+				return record ? [record.artifact.path] : [];
+			}));
+			for (const entry of params.numLastImagesToInclude !== undefined ? branch : []) {
 				if (entry.type === "message") messages.push(entry.message);
 				if (entry.type === "custom_message") messages.push(entry);
 				if (entry.type === "custom" && entry.customType === ARTIFACT_ENTRY) {
 					const record = artifactRecord(entry.data);
 					if (record) messages.push({ content: [{ type: "image_artifact", ...record.artifact }] });
+				}
+				if (entry.type === "custom" && entry.customType === RESERVATION_ENTRY) {
+					const pending = artifactReservation(entry.data);
+					const record = pending ? await readArtifactManifest(pending) : undefined;
+					// Normal completions also have a session entry. Prefer that
+					// later entry and avoid counting the same original twice.
+					if (record && !completedPaths.has(record.artifact.path)) {
+						messages.push({ content: [{ type: "image_artifact", ...record.artifact }] });
+					}
 				}
 			}
 			const inputImages = await resolveInputImages(params, ctx.cwd, messages);
@@ -540,6 +570,13 @@ export default function codexImageGen(pi: ExtensionAPI) {
 				} catch {
 					throw new Error("Image artifact storage is unavailable. No generation request was made.");
 				}
+				signal?.throwIfAborted();
+				// Attach the recovery anchor synchronously before quota/network
+				// work. A cancelled parent may settle while commit I/O is pending.
+				pi.appendEntry(RESERVATION_ENTRY, {
+					path: reservation.path, mimeType: mimeForFormat(outputFormat), toolCallId: toolCallId.slice(0, 256),
+				});
+				originEntryId = ctx.sessionManager.getLeafId();
 			}
 			const auth = await resolveImageAuth(ctx.modelRegistry);
 			const provider = auth.provider;
@@ -576,7 +613,7 @@ export default function codexImageGen(pi: ExtensionAPI) {
 					// Attempt the requested persistent copy below, never generation again.
 				}
 				// Persist before callbacks, persistent saves, or parent script output.
-				if (artifact) recoveryWarning = recordOriginal(artifact, toolCallId);
+				if (artifact) recoveryWarning = await recordOriginal(artifact, toolCallId, reservation, ctx, sessionId, originEntryId);
 			}
 			if (saveConfig.mode !== "none" && saveConfig.outputDir) {
 				attemptedPath = imagePath(outputFormat, saveConfig.outputDir, parsed.image.id || toolCallId);
@@ -591,7 +628,7 @@ export default function codexImageGen(pi: ExtensionAPI) {
 			if (artifactMode && !artifact) {
 				if (savedPath) {
 					artifact = { path: savedPath, mimeType: mimeForFormat(outputFormat), byteCount: imageBytes.length };
-					recoveryWarning = recordOriginal(artifact, toolCallId);
+					recoveryWarning = await recordOriginal(artifact, toolCallId, reservation!, ctx, sessionId, originEntryId);
 					saveWarning = "Temporary artifact storage failed; recover the original from the persistent saved path. No generation retry was made.";
 				} else {
 					throw new Error("Image generation succeeded, but artifact storage failed and no usable file could be saved. Image quota may have been consumed. No automatic retry was made.");
@@ -685,10 +722,7 @@ export default function codexImageGen(pi: ExtensionAPI) {
 	pi.registerCommand("image-artifacts", {
 		description: "List the last 20 generated original artifact paths on the current branch (no generation).",
 		handler: async (_args, ctx) => {
-			const records = ctx.sessionManager.getBranch().flatMap(entry => {
-				const record = entry.type === "custom" && entry.customType === ARTIFACT_ENTRY ? artifactRecord(entry.data) : undefined;
-				return record ? [record] : [];
-			}).slice(-20);
+			const records = (await branchArtifacts(ctx.sessionManager.getBranch())).slice(-20);
 			pi.sendMessage({
 				customType: "codex-image-artifact-list",
 				content: records.length ? records.map(record =>

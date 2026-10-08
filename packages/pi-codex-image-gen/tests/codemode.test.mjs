@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, open, readFile, readdir, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -8,7 +8,7 @@ import { createCodemodeExtension, SessionManager } from "@earendil-works/pi-codi
 import { Type } from "typebox";
 import { codexHarness, requestBody, textResponse } from "../../../tests/codex-harness.mjs";
 import imageExtension from "../.test-dist/extensions/index.js";
-import { ARTIFACT_ENTRY, artifactRecord, reserveArtifact } from "../.test-dist/src/artifacts.js";
+import { ARTIFACT_ENTRY, RESERVATION_ENTRY, artifactRecord, branchArtifacts, readArtifactManifest, reserveArtifact } from "../.test-dist/src/artifacts.js";
 import { REQUEST_TIMEOUT_MS } from "../.test-dist/src/codex-response.js";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
@@ -269,7 +269,7 @@ for (const save of ["none", "custom"]) {
       assert.match(data.saveWarning, /Temporary artifact storage failed/);
       assert.deepEqual(await readFile(data.artifact.path), PNG);
     }
-    assert.equal((await readdir(h.root)).filter(name => name.startsWith("pi-codex-image-")).length, 0);
+    assert.equal((await readdir(h.root)).filter(name => name.startsWith("pi-codex-image-")).length, save === "none" ? 0 : 1);
   });
 }
 
@@ -371,6 +371,75 @@ test("hard script timeout after generation retains artifact metadata", async t =
   assert.deepEqual(await readFile(h.records()[0].data.artifact.path), PNG);
 });
 
+for (const scenario of ["control", "navigation race", "session replacement", "reload"]) {
+  test(`cancelled commit preserves originating-branch recovery (${scenario})`, async t => {
+    const h = await fixture(t);
+    const branchPoint = h.sessionManager.appendCustomEntry("fixture-origin", {});
+    const probe = await open(join(h.root, "sync-probe"), "wx", 0o600);
+    const prototype = Object.getPrototypeOf(probe);
+    await probe.close();
+    const sync = prototype.sync;
+    let enter;
+    const entered = new Promise(resolve => { enter = resolve; });
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    let gated = false;
+    t.mock.method(prototype, "sync", async function (...args) {
+      if (!gated) {
+        gated = true;
+        enter();
+        await gate;
+      }
+      return sync.apply(this, args);
+    });
+    t.after(() => release());
+    const pending = h.script(`await tools.codex_generate_image_artifact({prompt:"fixture",save:"none"});`);
+    await entered; // Production writeFile finished; actual file sync is held.
+    const reservation = h.sessionManager.getBranch().find(entry => entry.customType === RESERVATION_ENTRY);
+    assert.ok(reservation);
+    await h.session.abort();
+    await pending;
+    const originLeaf = h.sessionManager.getLeafId();
+    const originSessionFile = h.sessionManager.getSessionFile();
+    if (scenario === "session replacement") h.sessionManager.newSession();
+    else if (scenario !== "control") h.sessionManager.branch(branchPoint);
+    if (scenario === "reload") await h.session.reload();
+    release();
+    let ready;
+    for (let attempt = 0; attempt < 200; attempt++) {
+      ready = await readArtifactManifest(reservation.data);
+      if (ready) break;
+      await delay(10);
+    }
+    assert.ok(ready, "Completion manifest must become available without generation retry.");
+    // Let the nested cleanup/optional same-branch completion entry settle.
+    await delay(20);
+    if (scenario === "control") h.sessionManager.branch(branchPoint);
+    assert.equal((await branchArtifacts(h.sessionManager.getBranch())).length, 0);
+    await h.session.prompt("/image-artifacts");
+    assert.match(JSON.stringify(h.session.messages.at(-1)), /No image artifacts recorded/);
+    if (scenario === "session replacement") h.sessionManager.setSessionFile(originSessionFile);
+    h.sessionManager.branch(originLeaf);
+    await h.session.reload();
+    const recovered = await branchArtifacts(h.sessionManager.getBranch());
+    assert.equal(recovered.length, 1);
+    assert.deepEqual(await readFile(recovered[0].artifact.path), PNG);
+    await h.session.prompt("/image-artifacts");
+    assert.ok(JSON.stringify(h.session.messages.at(-1)).includes(ready.artifact.path));
+    // A fork/resume that copies only the source branch retains the anchor;
+    // recovery must not depend on completion entries elsewhere in the tree.
+    const fork = h.sessionManager.createBranchedSession(originLeaf);
+    assert.ok(fork);
+    const restored = SessionManager.open(fork);
+    assert.equal((await branchArtifacts(restored.getBranch())).length, 1);
+    const edit = await h.script(`text(await tools.codex_generate_image_artifact({prompt:"fixture edit",save:"none",numLastImagesToInclude:1}));`);
+    assert.equal(edit.isError, false, JSON.stringify(edit.content));
+    assert.equal(h.imageRequests.length, 2);
+    assert.equal(h.imageRequests[1].input[0].content[1].image_url, `data:image/png;base64,${PNG.toString("base64")}`);
+    assert.deepEqual(h.errors, []);
+  });
+}
+
 for (const failure of ["quota", "connection", "incomplete"]) {
   test(`artifact ${failure} failures never retry or retain empty reservations`, async t => {
     const h = await fixture(t);
@@ -422,7 +491,7 @@ test("artifact network deadline fails once and cleans reserved storage", async t
     await rm(root, { recursive: true, force: true });
   });
   let tool;
-  imageExtension({ registerProvider() {}, registerCommand() {}, registerTool(value) {
+  imageExtension({ registerProvider() {}, registerCommand() {}, appendEntry() {}, registerTool(value) {
     if (value.name === "codex_generate_image_artifact") tool = value;
   } });
   const original = globalThis.fetch;
@@ -436,7 +505,7 @@ test("artifact network deadline fails once and cleans reserved storage", async t
   const pending = assert.rejects(tool.execute("fixture", { prompt: "fixture", save: "none" }, undefined, undefined, {
     cwd: root, isProjectTrusted: () => false,
     modelRegistry: { find: () => undefined, getProviderAuth: async () => ({ source: "OAuth", auth: { apiKey: token } }) },
-    sessionManager: { getSessionId: () => "fixture", getBranch: () => [] },
+    sessionManager: { getSessionId: () => "fixture", getBranch: () => [], getLeafId: () => "fixture-origin" },
   }), /timed out after 5 minutes/);
   await requestStarted;
   t.mock.timers.tick(REQUEST_TIMEOUT_MS);
@@ -461,4 +530,28 @@ test("private reservations clean only incomplete files; metadata rejects unsafe 
   }
   await assert.rejects(reserveArtifact("../escape", root), /Unsupported/);
   await assert.rejects(reserveArtifact("png", "/tmp/\nunsafe"), /unsupported/);
+});
+
+test("recovery manifests are bounded, validated, private, and reject symlinks", async t => {
+  const root = await mkdtemp(join(tmpdir(), "artifact-manifest-test-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const pending = await reserveArtifact("png", root);
+  const reservation = { path: pending.path, mimeType: "image/png", toolCallId: "fixture" };
+  assert.equal(await readArtifactManifest(reservation), undefined);
+  const artifact = await pending.commit(PNG, "image/png");
+  await pending.publish({ artifact, toolCallId: "fixture" });
+  await pending.dispose();
+  assert.equal((await stat(`${pending.path}.json`)).mode & 0o777, 0o600);
+  assert.equal((await readArtifactManifest(reservation)).artifact.path, artifact.path);
+  assert.equal(await readArtifactManifest({ ...reservation, toolCallId: "other-call" }), undefined);
+  const target = join(root, "manifest-target.json");
+  await writeFile(target, await readFile(`${pending.path}.json`));
+  await unlink(`${pending.path}.json`);
+  await symlink(target, `${pending.path}.json`);
+  assert.equal(await readArtifactManifest(reservation), undefined);
+  await unlink(`${pending.path}.json`);
+  await writeFile(`${pending.path}.json`, "x".repeat(8193));
+  assert.equal(await readArtifactManifest(reservation), undefined);
+  await writeFile(`${pending.path}.json`, JSON.stringify({ artifact: { ...artifact, mimeType: "text/html" }, toolCallId: "fixture" }));
+  assert.equal(await readArtifactManifest(reservation), undefined);
 });

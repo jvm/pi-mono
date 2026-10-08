@@ -9,7 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  validate:
+    name: check (${{ matrix.node }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -46,3 +47,13 @@ jobs:
 
       - name: Verify package contents
         run: npm run pack:dry-run
+
+  check:
+    runs-on: ubuntu-latest
+    needs: validate
+    if: ${{ always() }}
+    steps:
+      - name: Require all runtime checks
+        env:
+          VALIDATION_RESULT: ${{ needs.validate.result }}
+        run: test "$VALIDATION_RESULT" = success

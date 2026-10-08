@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
 export const ARTIFACT_ENTRY = "codex-image-artifact";
+export const RESERVATION_ENTRY = "codex-image-artifact-reservation";
 
 export interface ImageArtifact {
 	path: string;
@@ -14,6 +15,23 @@ export interface ImageArtifact {
 export interface ArtifactRecord {
 	artifact: ImageArtifact;
 	toolCallId: string;
+}
+
+export interface ArtifactReservation {
+	path: string;
+	mimeType: string;
+	toolCallId: string;
+}
+
+export function artifactReservation(value: unknown): ArtifactReservation | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const record = value as ArtifactReservation;
+	// Reuse the path/MIME/call-ID validation without accepting a completed image.
+	const validated = artifactRecord({
+		artifact: { path: record.path, mimeType: record.mimeType, byteCount: 1 },
+		toolCallId: record.toolCallId,
+	});
+	return validated ? { path: validated.artifact.path, mimeType: validated.artifact.mimeType, toolCallId: validated.toolCallId } : undefined;
 }
 
 // Read metadata, never image bytes, from the current branch. Session files can
@@ -31,6 +49,47 @@ export function artifactRecord(value: unknown): ArtifactRecord | undefined {
 		artifact: { path: artifact.path, mimeType: artifact.mimeType, byteCount: artifact.byteCount },
 		toolCallId: record.toolCallId,
 	};
+}
+
+/** Only a published, bounded manifest marks a reservation ready. The branch
+ * reservation is written before generation, so late completions need not
+ * mutate whichever branch/session the user is viewing after cancellation. */
+export async function readArtifactManifest(reservation: ArtifactReservation): Promise<ArtifactRecord | undefined> {
+	let file: FileHandle | undefined;
+	try {
+		file = await open(`${reservation.path}.json`, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+		const info = await file.stat();
+		const visible = await lstat(`${reservation.path}.json`);
+		if (!info.isFile() || !visible.isFile() || info.ino !== visible.ino || info.dev !== visible.dev || info.size > 8192) return undefined;
+		const buffer = Buffer.alloc(8193);
+		let total = 0;
+		while (total < buffer.length) {
+			const { bytesRead } = await file.read(buffer, total, buffer.length - total, null);
+			if (!bytesRead) break;
+			total += bytesRead;
+		}
+		if (total > 8192) return undefined;
+		const record = artifactRecord(JSON.parse(buffer.subarray(0, total).toString("utf8")));
+		return record?.toolCallId === reservation.toolCallId && record.artifact.mimeType === reservation.mimeType ? record : undefined;
+	} catch {
+		return undefined;
+	} finally {
+		await file?.close().catch(() => undefined);
+	}
+}
+
+export async function branchArtifacts(entries: readonly { type: string; customType?: string; data?: unknown }[]): Promise<ArtifactRecord[]> {
+	const records = new Map<string, ArtifactRecord>();
+	for (const entry of entries) {
+		const reservation = entry.type === "custom" && entry.customType === RESERVATION_ENTRY ? artifactReservation(entry.data) : undefined;
+		const record = reservation ? await readArtifactManifest(reservation)
+			: entry.type === "custom" && entry.customType === ARTIFACT_ENTRY ? artifactRecord(entry.data) : undefined;
+		if (record) {
+			records.delete(record.artifact.path);
+			records.set(record.artifact.path, record);
+		}
+	}
+	return [...records.values()];
 }
 
 /** Reserve private storage before spending quota. Keep completed files until
@@ -64,6 +123,21 @@ export async function reserveArtifact(extension: string, root = tmpdir()) {
 			}
 			committed = true;
 			return { path, mimeType, byteCount: bytes.length };
+		},
+		async publish(record: ArtifactRecord) {
+			const validated = artifactRecord(record);
+			if (!validated) throw new Error("Invalid artifact recovery metadata.");
+			const json = JSON.stringify(validated);
+			if (Buffer.byteLength(json) > 8192) throw new Error("Artifact recovery metadata exceeds the size limit.");
+			const manifest = await open(`${path}.json`, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0), 0o600);
+			try {
+				await manifest.writeFile(json);
+				await manifest.sync();
+			} finally {
+				await manifest.close();
+			}
+			if (record.artifact.path !== path) await rm(path, { force: true });
+			committed = true; // Retain fallback manifests too, never incomplete originals.
 		},
 		async dispose() {
 			try {

@@ -120,12 +120,18 @@ until user or OS temporary-file cleanup; there is no guaranteed retention
 period across OS cleanup or reboot. Copy needed assets to persistent storage.
 Only incomplete reservations owned by the current call are cleaned up.
 
-Path, MIME type, byte count, and call ID are persisted as branch-local
-`codex-image-artifact` session entries, without image bytes or prompts.
+Before generation, a branch-local `codex-image-artifact-reservation` entry
+anchors recovery to the originating branch. On completion, a private, bounded
+JSON manifest beside the reserved original records path, MIME type, byte count,
+and call ID. Normal same-branch completions also append a
+`codex-image-artifact` session entry, without image bytes or prompts. Late
+completions after cancellation do not append records to unrelated branches or
+replacement sessions; the original branch's reservation reads the manifest.
 Run `/image-artifacts` to list the last 20 recorded original paths on the
 current branch without generation or network work. Records survive reload,
 resume, and session forks that preserve the entries; abandoned branches are
-not included. Listing does not verify that a file still exists. A missing
+not included. Listing reads validated recovery manifests, not image bytes, and
+does not verify that an original still exists. A missing
 original fails recent-image editing before generation; do not regenerate it
 automatically.
 
