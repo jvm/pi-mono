@@ -18,9 +18,9 @@ Give Pi a durable objective and let it keep working until the job is verified do
 pi install npm:@mocito/pi-goal
 ```
 
-Requires Pi 1.0.2 or newer for the model-only terminal-update safeguard.
-Development and session-contract tests use Pi 1.1.0. Older runtimes than 1.0.2 are not
-supported; there is no legacy fallback for nested terminal updates.
+Requires Pi 1.1.0 or newer for complete usage accounting and the settlement
+and cache-warming hooks. Development and session-contract tests use Pi 1.1.0.
+There is no legacy fallback for nested terminal updates.
 
 For local development:
 
@@ -69,6 +69,54 @@ The footer and optional editor widget show status, elapsed active time, token us
 
 Provider usage-limit handling pauses active goals when Pi exposes HTTP 429 responses or assistant error messages that indicate subscription, quota, billing, balance, or repeated provider failures. This prevents automatic continuation from retrying indefinitely after provider limits such as 5-hour subscription caps. When the budget is exhausted or a provider limit is detected, a visible `pi-goal-event` message is also delivered to the model so it can stop work and call `update_goal` to finalize the goal instead of continuing to spend tokens on a turn that has effectively been cut off.
 
+### Token accounting and attribution
+
+The goal counts reported tokens from finalized assistant messages, tool results,
+standalone usage entries (including cache warming), compactions, and branch
+summaries. Failed or cancelled calls count when Pi persists their usage.
+Nested tool usage is already aggregated by Pi onto the parent tool result and
+is counted once, not by walking nested calls. Cached input tokens count too.
+This is a token budget, not a currency or provider-quota budget.
+
+The accounting interval starts at the goal's creation/replacement entry and
+ends when it is replaced or cleared on that branch. Earlier work is excluded,
+including entries before creation with the same timestamp. Entries need valid
+timestamps within the interval and no later than the scan time.
+As in earlier v1 releases, **pause stops continuation, not accounting**:
+work while paused, limited, blocked, or complete is still charged to the
+retained goal. Clear or replace the goal before doing unrelated work.
+Completion reports are snapshots of finalized usage at completion.
+
+Accounting uses raw branch history, not the model-context projection. Compacted
+or context-omitted billed attempts still count. Reloads and forks retain the
+inherited entry-ID ledger; divergent branch work is not imported. A tree
+summary's own usage belongs to the destination branch. Navigating back before
+work was done restores that branch's earlier total, not a session-wide spend cap.
+
+Schema-v1 mutations remain compatible; no migration or session rewrite is needed.
+Previously accounted assistant tokens and IDs are retained. The next scan
+backfills newly supported usage entries once, so old goals may show higher
+totals or reach their budgets after upgrading.
+
+Budget enforcement scans saved usage at turn end, before settlement, after
+compaction/tree navigation, on reload, before scheduled continuation, and when
+goals are queried or changed. Pi 1.1 has no extension notification for newly
+saved idle usage, so a session-scoped one-second poll checks for branch changes
+while idle. It does not make provider requests. A budget notice updates visible
+state and model context **without requesting another model turn**.
+
+### Idle cache warming
+
+The extension requests `stop` at an idle warming decision when the retained
+goal has a token budget or is `budget_limited`/`usage_limited`. It never requests
+`warm`, changes Pi's settings, or overrides decisions for no-goal sessions or
+unbudgeted, non-limited goals. Pi uses the last handler that returns an action;
+a later extension can explicitly override this stop.
+
+This policy is idle-only. It does not intercept every provider request, cancel
+in-flight warming, or stop streaming-phase warming. Any persisted warming usage
+within the goal interval is still accounted.
+
 ## Examples
 
 Simple goal:
@@ -112,7 +160,7 @@ Environment flags:
 
 ## Limitations
 
-- Token budget is enforced after finalized assistant usage is visible; v1 cannot hard-stop mid-turn, but the model is notified as soon as the overrun is detected so it can stop further work in the same or next turn.
+- Token budget is enforced after finalized usage is saved. It stops goal-driven continuation, not an in-flight provider call, Pi's own recovery, user-requested work, or another extension's continuation. Usage that a provider/tool does not report cannot be counted.
 - Usage-limit handling is best-effort via HTTP responses and assistant error messages; provider transports vary in how much structured limit information they expose.
 - Automatic continuation is session-local, not a background daemon.
 
@@ -133,6 +181,12 @@ serialization, and session trees with synthetic goals and mocked provider
 traffic. It checks direct and nested calls, codemode discovery, termination,
 reloads, model changes, and branch reconstruction without live credentials or
 provider requests.
+
+Accounting regressions also cover multi-level metered codemode calls, failed
+results, mocked cache warming and remote compaction, branch summaries, context
+omissions, inherited fork histories, and tool-only budget exhaustion. The warming
+tests load the compaction/reasoning hooks in both orders and verify that idle
+refreshes do not change saved reasoning state.
 
 Before publishing, also run the root validation loop:
 

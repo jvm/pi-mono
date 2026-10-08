@@ -19,7 +19,34 @@ export default function piGoal(pi: ExtensionAPI) {
 
   let goal: GoalState | null = null;
   let consecutiveAssistantErrors = 0;
-  const scheduler = new GoalContinuationScheduler(pi, { getGoal: () => goal });
+  const scheduler = new GoalContinuationScheduler(pi, { getGoal: () => goal, beforeContinue: accountAndEnforceBudget });
+  let idleAccountingTimer: ReturnType<typeof setInterval> | undefined;
+
+  function stopIdleAccounting(): void {
+    if (idleAccountingTimer) clearInterval(idleAccountingTimer);
+    idleAccountingTimer = undefined;
+  }
+
+  function startIdleAccounting(ctx: ExtensionContext): void {
+    stopIdleAccounting();
+    let lastLeaf = ctx.sessionManager.getLeafId?.();
+    // Pi 1.1 emits warming entry_appended only to SDK listeners, not extensions.
+    // Poll the cheap public leaf ID; scan billing history only when it changes.
+    idleAccountingTimer = setInterval(() => {
+      try {
+        if (!ctx.isIdle() || !goal) return;
+        const leaf = ctx.sessionManager.getLeafId?.();
+        if (leaf === lastLeaf) return;
+        accountAndEnforceBudget(ctx);
+        lastLeaf = ctx.sessionManager.getLeafId?.();
+      } catch {
+        // SDK disposal can invalidate contexts without dispatching shutdown.
+        // Never keep using a stale context; normal lifecycle checks still apply.
+        stopIdleAccounting();
+      }
+    }, 1000);
+    idleAccountingTimer.unref();
+  }
 
   const setGoal = (next: GoalState | null) => { goal = next; };
 
@@ -36,13 +63,13 @@ export default function piGoal(pi: ExtensionAPI) {
   // Send a visible message to the model so it can react to a terminal
   // status transition (budget exhausted, provider limit hit) instead of
   // silently continuing to spend tokens on work that is about to be cut
-  // off. The scheduler has already been cleared at this point, so this
-  // is the model's only chance to learn about the transition before the
-  // user notices.
+  // off. Budget notices are context-only: they must not buy another request.
+  // Provider-limit wrap-up behavior is retained separately.
   function notifyAgentOfTerminalTransition(
     ctx: ExtensionContext,
     content: string,
     details: Record<string, unknown>,
+    triggerTurn = true,
   ): void {
     pi.sendMessage(
       {
@@ -51,7 +78,7 @@ export default function piGoal(pi: ExtensionAPI) {
         display: true,
         details: { ...details, piGoalVersion: PI_GOAL_VERSION },
       },
-      { triggerTurn: true, deliverAs: ctx.isIdle() ? "steer" : "followUp" },
+      { triggerTurn, deliverAs: ctx.isIdle() ? "steer" : "followUp" },
     );
   }
 
@@ -111,6 +138,7 @@ export default function piGoal(pi: ExtensionAPI) {
           tokensUsed: snapshot.tokensUsed,
           tokenBudget: snapshot.tokenBudget,
         },
+        false,
       );
     }
     updateGoalUi(ctx, goal);
@@ -119,6 +147,7 @@ export default function piGoal(pi: ExtensionAPI) {
   registerGoalRenderers(pi);
   registerGoalTools(pi, {
     getGoal: () => goal,
+    refreshUsage: accountAndEnforceBudget,
     setGoal,
     afterGoalChanged,
     clearContinuation: () => scheduler.clear(),
@@ -128,6 +157,7 @@ export default function piGoal(pi: ExtensionAPI) {
     description: "set or view the goal for a long-running task",
     getArgumentCompletions: goalCompletions,
     handler: async (args, ctx) => {
+      accountAndEnforceBudget(ctx);
       await handleGoalCommand(pi, args, ctx, {
         getGoal: () => goal,
         setGoal,
@@ -147,19 +177,24 @@ export default function piGoal(pi: ExtensionAPI) {
       goal = applyGoalMutation(goal, resumed);
     }
     if (diagnostics.length) ctx.ui.notify(`pi-goal: ${diagnostics[0]}`, "warning");
+    accountAndEnforceBudget(ctx);
     updateGoalUi(ctx, goal);
+    startIdleAccounting(ctx);
     if (goal?.status === "active" && ctx.isIdle() && !ctx.hasPendingMessages()) scheduler.schedule(ctx, "continue");
   });
 
   pi.on("session_tree", async (_event, ctx) => {
     scheduler.clear();
     goal = reconstructGoalState(ctx.sessionManager.getBranch() as any[]);
+    accountAndEnforceBudget(ctx);
     updateGoalUi(ctx, goal);
+    startIdleAccounting(ctx);
     if (goal?.status === "active" && ctx.isIdle() && !ctx.hasPendingMessages()) scheduler.schedule(ctx, "continue");
   });
 
   pi.on("session_compact", async (_event, ctx) => {
     goal = reconstructGoalState(ctx.sessionManager.getBranch() as any[]);
+    accountAndEnforceBudget(ctx);
     updateGoalUi(ctx, goal);
   });
 
@@ -183,12 +218,26 @@ export default function piGoal(pi: ExtensionAPI) {
   });
 
   pi.on("turn_end", async (_event, ctx) => {
+    // Unlike message_end, this boundary sees persisted assistant/tool entries.
     accountAndEnforceBudget(ctx);
   });
 
   pi.on("agent_end", async (_event, ctx) => {
     accountAndEnforceBudget(ctx);
     if (goal?.status === "active") scheduler.schedule(ctx, "continue");
+  });
+
+  pi.on("agent_before_settle", async (_event, ctx) => {
+    accountAndEnforceBudget(ctx);
+  });
+
+  pi.on("cache_warming_decision", async (_event, ctx) => {
+    accountAndEnforceBudget(ctx);
+    // Never enable warming or change no-goal sessions. Pi chains actions in
+    // registration order, so a later handler can explicitly override this stop.
+    if (ctx.isIdle() && goal && (goal.tokenBudget != null || goal.status === "budget_limited" || goal.status === "usage_limited")) {
+      return { action: "stop" };
+    }
   });
 
   pi.on("after_provider_response", async (event, ctx) => {
@@ -209,6 +258,8 @@ export default function piGoal(pi: ExtensionAPI) {
     scheduler.clear();
   });
   pi.on("session_shutdown", async (_event, ctx) => {
+    stopIdleAccounting();
+    accountAndEnforceBudget(ctx);
     if (goal?.status === "active") {
       const time = realizedTimeUsed(goal);
       const stopped = statusMutation(goal, "active", time, undefined, transitionMeta("session_shutdown", goal, time, nowIso()));

@@ -69,7 +69,7 @@ export function applyGoalMutation(current: GoalState | null, mutation: GoalMutat
   }
 }
 
-function isKnownMutation(value: Partial<GoalMutation> | undefined): value is GoalMutation {
+export function isKnownMutation(value: Partial<GoalMutation> | undefined): value is GoalMutation {
   if (!value || value.schemaVersion !== GOAL_SCHEMA_VERSION || typeof value.kind !== "string" || !validTimestamp(value.at)) return false;
   const mutation = value as Record<string, unknown>;
   if (value.kind === "clear") return optionalNonNegativeInteger(mutation.timeUsedSeconds);

@@ -48,6 +48,7 @@ export interface GoalMutationMeta {
   };
   accounting?: {
     scannedAssistantEntries?: number;
+    scannedUsageEntries?: number;
     addedEntryCount?: number;
     cacheTokensIncluded?: boolean;
   };

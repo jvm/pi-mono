@@ -58,9 +58,89 @@ test("extension registers command, tools, renderers, and lifecycle handlers", ()
   assert.ok(pi.tools.has("update_goal"));
   assert.ok(pi.renderers.has("pi-goal-summary"));
   assert.ok(pi.renderers.has("pi-goal-event"));
-  for (const event of ["session_start", "session_tree", "message_end", "turn_end", "agent_end", "context", "session_shutdown"]) {
+  for (const event of ["session_start", "session_tree", "message_end", "turn_end", "agent_end", "agent_before_settle", "cache_warming_decision", "context", "session_shutdown"]) {
     assert.ok(pi.handlers.has(event), `missing ${event}`);
   }
+});
+
+test("idle warming policy stops budgeted/limited goals but leaves unrelated decisions alone", async () => {
+  for (const [status, budget, idle, expected] of [
+    ["active", 100, true, "stop"], ["paused", 100, true, "stop"],
+    ["budget_limited", undefined, true, "stop"], ["usage_limited", undefined, true, "stop"],
+    ["active", undefined, true, undefined], ["paused", undefined, true, undefined],
+    ["active", 100, false, undefined], [undefined, undefined, true, undefined],
+  ]) {
+    const pi = makePi();
+    piGoal(pi);
+    const at = new Date().toISOString();
+    const create = { schemaVersion: 1, kind: "create", goalId: "fixture", objective: "fixture", tokenBudget: budget, at };
+    const branch = status ? [
+      { type: "custom", customType: "pi-goal", data: create },
+      { type: "custom", customType: "pi-goal", data: { ...create, kind: "status", status } },
+    ] : [];
+    const ctx = makeCtx(branch);
+    ctx.isIdle = () => idle;
+    await pi.handlers.get("session_start")[0]({}, ctx);
+    for (const action of ["warm", "stop"]) {
+      const result = await pi.handlers.get("cache_warming_decision")[0]({ action }, ctx);
+      assert.equal(result?.action, expected);
+    }
+    await pi.handlers.get("session_shutdown")[0]({}, ctx);
+  }
+});
+
+test("idle usage enforces a budget, updates get_goal/UI, and shutdown stops polling", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const pi = makePi();
+  piGoal(pi);
+  const at = new Date().toISOString();
+  const branch = [{ type: "custom", customType: "pi-goal", id: "create", timestamp: at,
+    data: { schemaVersion: 1, kind: "create", goalId: "fixture", objective: "fixture", tokenBudget: 100, at } }];
+  const ctx = makeCtx(branch);
+  ctx.sessionManager.getLeafId = () => branch.at(-1).id;
+  await pi.handlers.get("session_start")[0]({}, ctx);
+  branch.push({ type: "usage", id: "warming", timestamp: at, usage: { totalTokens: 500 } });
+  t.mock.timers.tick(1000);
+  const result = await pi.tools.get("get_goal").execute("", {}, undefined, undefined, ctx);
+  assert.equal(result.details.goal.tokensUsed, 500);
+  assert.equal(result.details.goal.remainingTokens, 0);
+  assert.equal(result.details.goal.status, "budget_limited");
+  assert.equal(ctx.ui.statuses.get("pi-goal"), "Goal unmet (500/100)");
+  assert.equal(pi.messages.at(-1).options.triggerTurn, false);
+  await pi.handlers.get("session_shutdown")[0]({}, ctx);
+  const count = pi.entries.length;
+  branch.push({ type: "usage", id: "after-shutdown", timestamp: at, usage: { totalTokens: 200 } });
+  t.mock.timers.tick(2000);
+  assert.equal(pi.entries.length, count);
+});
+
+test("get_goal and before-settle account newly finalized non-message usage", async () => {
+  for (const boundary of ["get_goal", "agent_before_settle"]) {
+    const pi = makePi();
+    piGoal(pi);
+    const ctx = makeCtx();
+    await pi.commands.get("goal").handler("--budget 100 fixture", ctx);
+    ctx.sessionManager.getBranch = () => [
+      { type: "usage", id: "metered", timestamp: new Date().toISOString(), usage: { totalTokens: 500 } },
+    ];
+    if (boundary === "get_goal") await pi.tools.get(boundary).execute("", {}, undefined, undefined, ctx);
+    else await pi.handlers.get(boundary)[0]({}, ctx);
+    assert.equal(pi.entries.at(-1).data.status, "budget_limited");
+    await pi.handlers.get("session_shutdown")[0]({}, ctx);
+  }
+});
+
+test("scheduled continuation rechecks newly persisted usage before sending a prompt", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const pi = makePi();
+  piGoal(pi);
+  const ctx = makeCtx(pi.entries);
+  await pi.commands.get("goal").handler("--budget 100 fixture", ctx);
+  pi.entries.push({ type: "usage", id: "metered", timestamp: new Date().toISOString(), usage: { totalTokens: 500 } });
+  t.mock.timers.tick(1);
+  assert.equal(pi.entries.at(-1).data.status, "budget_limited");
+  assert.ok(!pi.messages.some(({ message }) => message.customType === "pi-goal-context"));
+  await pi.handlers.get("session_shutdown")[0]({}, ctx);
 });
 
 test("session_start reconstructs branch goal and context handler prunes stale contexts", async () => {
@@ -165,7 +245,7 @@ test("budget exceeded transitions active goal to budget_limited and notifies the
   assert.equal(sent.details.kind, "budget_exceeded");
   assert.equal(sent.details.tokensUsed, 250);
   assert.equal(sent.details.tokenBudget, 100);
-  assert.equal(pi.messages.at(-1).options.triggerTurn, true);
+  assert.equal(pi.messages.at(-1).options.triggerTurn, false, "exhausting a budget must not buy a notification turn");
   assert.equal(ctx.ui.statuses.get("pi-goal"), "Goal unmet (250/100)");
 });
 

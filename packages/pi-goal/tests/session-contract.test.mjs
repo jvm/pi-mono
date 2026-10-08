@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createCodemodeExtension, SessionManager } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { codexHarness, requestBody, textResponse } from "../../../tests/codex-harness.mjs";
+import { codexHarness, compactionResponse, requestBody, textResponse } from "../../../tests/codex-harness.mjs";
 import { registerGoalTools } from "../src/tools.ts";
 import { applyGoalMutation, createGoalMutation, reconstructGoalState, statusMutation } from "../src/state.ts";
 import { GOAL_ENTRY_TYPE } from "../src/types.ts";
+import { accountUsageFromBranch } from "../src/accounting.ts";
 
 process.env.CI = "1";
 process.env.PI_OFFLINE = "1";
@@ -50,12 +51,12 @@ function toolResponse(items) {
   });
 }
 
-async function goalHarness(t, { mode = "off", toolsOnly = false, extra = [] } = {}) {
+async function goalHarness(t, { mode = "off", toolsOnly = false, extra = [], tokenBudget } = {}) {
   // Block network before loading anything. Test credentials come only from the
   // shared harness's in-memory fixture store, never from the user's Pi settings.
   t.mock.method(globalThis, "fetch", async () => { throw new Error("Unmocked network request blocked"); });
   const sessionManager = SessionManager.inMemory();
-  const create = createGoalMutation("Synthetic completion-boundary fixture");
+  const create = createGoalMutation("Synthetic completion-boundary fixture", tokenBudget);
   sessionManager.appendCustomEntry(GOAL_ENTRY_TYPE, create);
   const initial = applyGoalMutation(null, create);
   if (!toolsOnly) {
@@ -80,6 +81,218 @@ async function goalHarness(t, { mode = "off", toolsOnly = false, extra = [] } = 
   t.after(async () => { await h.close(); });
   return h;
 }
+
+const meteredUsage = (tokens) => ({
+  input: tokens, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: tokens,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+});
+
+for (const outcome of ["success", "error", "cancelled"]) {
+  test(`codemode aggregates multi-level ${outcome} usage and goal accounts all 522 tokens once`, async (t) => {
+    const metered = (pi) => {
+      pi.registerTool({
+        name: "fixture_metered", label: "Metered", description: "Synthetic metered call.",
+        parameters: Type.Object({}),
+        async execute() {
+          return {
+            content: [{ type: "text", text: outcome }], details: undefined,
+            usage: meteredUsage(500), ...(outcome === "success" ? {} : { isError: true }),
+          };
+        },
+      });
+      pi.registerTool({
+        name: "fixture_wrapper", label: "Wrapper", description: "Another nesting level.",
+        parameters: Type.Object({}),
+        async execute(_id, _args, _signal, _update, ctx) {
+          await ctx.executeTool("fixture_metered", {});
+          // The wrapper reports no nested usage itself.
+          return { content: [{ type: "text", text: "wrapped" }], details: undefined };
+        },
+      });
+    };
+    const h = await goalHarness(t, { mode: "only", extra: [metered] });
+    mockResponses(t, [
+      () => toolResponse([scriptCall('text(await tools.fixture_wrapper({}));')]),
+      () => textResponse(),
+    ]);
+    await h.session.prompt("Exercise nested mock metering.");
+    assert.equal(resultFor(h, "codemode").usage.totalTokens, 500);
+    assert.equal(goalState(h).tokensUsed, 522);
+    assert.equal(accountUsageFromBranch(goalState(h), h.sessionManager.getBranch()).addedTokens, 0);
+    await h.session.reload();
+    assert.equal(goalState(h).tokensUsed, 522);
+    assert.deepEqual(h.errors, []);
+  });
+}
+
+test("tool-only overspend is persisted before settlement without a notification or continuation request", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("Unmocked network request blocked"); });
+  let settledState;
+  const metered = (pi) => {
+    pi.registerTool({
+      name: "fixture_metered", label: "Metered", description: "Synthetic terminating call.",
+      parameters: Type.Object({}),
+      async execute() {
+        return { content: [{ type: "text", text: "done" }], details: undefined, usage: meteredUsage(500), terminate: true };
+      },
+    });
+    pi.on("agent_before_settle", (_event, ctx) => {
+      settledState = reconstructGoalState(ctx.sessionManager.getBranch());
+    });
+  };
+  const h = await codexHarness([piGoal, metered]);
+  t.after(async () => { await h.close(); });
+  const requests = mockResponses(t, [
+    () => toolResponse([functionCall("create_goal", { objective: "Budget fixture", token_budget: 100 })]),
+    () => toolResponse([functionCall("fixture_metered", {})]),
+  ]);
+  await h.session.prompt("Create then exercise a budgeted goal.");
+  assert.equal(goalState(h).tokensUsed, 511, "the creation assistant precedes the accounting interval");
+  assert.equal(goalState(h).status, "budget_limited");
+  assert.equal(settledState.status, "budget_limited");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(requests.length, 2);
+  assert.deepEqual(h.errors, []);
+});
+
+test("idle standalone usage is observed without an assistant turn and survives context omission", async (t) => {
+  const h = await goalHarness(t, { tokenBudget: 100 });
+  const entry = h.sessionManager.appendUsage("cache_warm", "fixture", "fixture", meteredUsage(500));
+  // Idle warming has no extension entry_appended hook in Pi 1.1.
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  assert.equal(goalState(h).tokensUsed, 500);
+  assert.equal(goalState(h).status, "paused");
+  assert.ok(goalState(h).accountedUsage.entryIds.includes(entry.id));
+  await h.session.reload();
+  assert.equal(goalState(h).tokensUsed, 500);
+  assert.deepEqual(h.errors, []);
+});
+
+test("context-omitted billed attempts and forked histories retain branch-local totals", async (t) => {
+  const h = await goalHarness(t);
+  mockResponses(t, [() => textResponse(), () => textResponse()]);
+  await h.session.prompt("Billed fixture attempt.");
+  const billed = h.sessionManager.getBranch().findLast((entry) => entry.type === "message" && entry.message.role === "assistant");
+  h.sessionManager.appendContextEdit(billed.id, null);
+  h.sessionManager.appendUsage("fixture", "fixture", "fixture", meteredUsage(500));
+  await h.session.reload();
+  assert.equal(goalState(h).tokensUsed, 511);
+  assert.ok(!h.sessionManager.buildSessionProjection().entries.some((entry) => entry.sourceEntry.id === billed.id && entry.messages.length));
+  const fork = SessionManager.inMemory("/tmp", { id: "accounting-fork-fixture" }, structuredClone(h.sessionManager.getBranch()));
+  const forked = await codexHarness([piGoal], { sessionManager: fork });
+  t.after(async () => { await forked.close(); });
+  fork.appendUsage("fixture", "fixture", "fixture", meteredUsage(30));
+  await forked.session.reload();
+  assert.equal(goalState(forked).tokensUsed, 541);
+  assert.equal(goalState(h).tokensUsed, 511);
+  await h.session.prompt("Original branch fixture.");
+  assert.equal(goalState(h).tokensUsed, 522);
+  assert.deepEqual(h.errors, []);
+  assert.deepEqual(forked.errors, []);
+});
+
+test("compaction and tree-summary usage are charged at lifecycle boundaries", async (t) => {
+  const summarize = (pi) => {
+    pi.on("session_before_compact", (event) => ({
+      compaction: {
+        summary: "Synthetic summary", firstKeptEntryId: event.preparation.firstKeptEntryId,
+        tokensBefore: event.preparation.tokensBefore, usage: meteredUsage(100),
+      },
+    }));
+    pi.on("session_before_tree", () => ({ summary: { summary: "Synthetic branch summary", usage: meteredUsage(200) } }));
+  };
+  const h = await goalHarness(t, { extra: [summarize] });
+  mockResponses(t, [() => textResponse(), () => textResponse()]);
+  await h.session.prompt("First fixture message.");
+  const target = h.sessionManager.getLeafId();
+  await h.session.prompt("Second fixture message.");
+  await h.session.compact();
+  assert.equal(goalState(h).tokensUsed, 122);
+  const billed = h.sessionManager.getBranch().find((entry) => entry.type === "compaction");
+  assert.equal(billed.usage.totalTokens, 100);
+  await h.session.navigateTree(target, { summarize: true });
+  const summary = h.sessionManager.getBranch().findLast((entry) => entry.type === "branch_summary");
+  assert.equal(summary.usage.totalTokens, 200);
+  assert.equal(goalState(h).tokensUsed, 211, "abandoned branch work is not imported with its summary");
+  assert.deepEqual(h.errors, []);
+});
+
+async function waitFor(predicate, diagnostic = () => "") {
+  const deadline = Date.now() + 5000;
+  while (!predicate()) {
+    assert.ok(Date.now() < deadline, `mocked warming/accounting did not finish: ${diagnostic()}`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+async function enableFastFixtureWarming(h) {
+  h.session.settingsManager.setCacheWarmingMode("idle");
+  await h.session.setModel({
+    ...h.model, promptCache: { short: 11, long: 11 },
+    cost: { input: 1_000_000, output: 1, cacheRead: 1, cacheWrite: 0 },
+  });
+}
+
+for (const reverse of [false, true]) {
+  test(`mocked idle warming counts usage without changing compaction/reasoning state (reverse=${reverse})`, async (t) => {
+    const { default: reasoning } = await import("../../pi-openai-reasoning/extensions/index.ts");
+    const { default: compaction } = await import("../../pi-codex-compaction/extensions/index.ts");
+    const { STATE_TYPE } = await import("../../pi-openai-reasoning/src/reasoning.ts");
+    const h = await goalHarness(t, { extra: reverse ? [compaction, reasoning] : [reasoning, compaction] });
+    const requests = [];
+    t.mock.method(globalThis, "fetch", async (_url, init) => {
+      const body = requestBody(init);
+      requests.push(body);
+      return body.input.some((item) => item.type === "compaction_trigger")
+        ? compactionResponse({ input_tokens: 20, output_tokens: 1, total_tokens: 21 })
+        : textResponse();
+    });
+    await h.session.prompt("Old fixture context.");
+    h.session.setThinkingLevel("high");
+    await h.session.prompt("Kept fixture context.");
+    assert.equal(goalState(h).tokensUsed, 22);
+    await enableFastFixtureWarming(h);
+    await h.session.prompt("Warm fixture with cooperating hooks loaded.");
+    const lastRequest = requests.at(-1);
+    const before = structuredClone(h.sessionManager.getBranch().filter((entry) => entry.customType === STATE_TYPE));
+    const tokensBefore = goalState(h).tokensUsed;
+    h.session.setThinkingLevel("low");
+    await waitFor(() => h.sessionManager.getBranch().some((entry) => entry.type === "usage" && entry.kind === "cache_warm"),
+      () => JSON.stringify({ status: h.session.cacheWarmingStatus, requests: requests.length, errors: h.errors }));
+    h.session.settingsManager.setCacheWarmingMode("off");
+    await waitFor(() => goalState(h).tokensUsed === tokensBefore + 11);
+    assert.deepEqual(requests.at(-1).input, lastRequest.input);
+    assert.deepEqual(requests.at(-1).reasoning, lastRequest.reasoning);
+    assert.deepEqual(h.sessionManager.getBranch().filter((entry) => entry.customType === STATE_TYPE), before);
+    await h.session.compact();
+    assert.equal(goalState(h).tokensUsed, tokensBefore + 11 + 21);
+    assert.deepEqual(h.sessionManager.getBranch().filter((entry) => entry.customType === STATE_TYPE), before);
+    assert.deepEqual(h.errors, []);
+  });
+}
+
+test("real warming decision chain stops budgeted goals and permits an explicit later override", async (t) => {
+  let decisions = 0;
+  let override = false;
+  const other = (pi) => pi.on("cache_warming_decision", () => {
+    decisions++;
+    return override ? { action: "warm" } : undefined;
+  });
+  const h = await goalHarness(t, { tokenBudget: 100, extra: [other] });
+  let requests = 0;
+  t.mock.method(globalThis, "fetch", async () => { requests++; return textResponse(); });
+  await enableFastFixtureWarming(h);
+  await h.session.prompt("Budgeted fixture.");
+  await waitFor(() => decisions === 1);
+  assert.equal(requests, 1, "pi-goal stopped the idle refresh");
+  override = true;
+  await h.session.prompt("Explicit override fixture.");
+  await waitFor(() => h.sessionManager.getBranch().some((entry) => entry.type === "usage"));
+  h.session.settingsManager.setCacheWarmingMode("off");
+  await waitFor(() => goalState(h).tokensUsed === 33);
+  assert.equal(requests, 3);
+  assert.deepEqual(h.errors, []);
+});
 
 function mockResponses(t, responses) {
   const requests = [];

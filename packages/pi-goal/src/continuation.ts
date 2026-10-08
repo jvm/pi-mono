@@ -6,6 +6,7 @@ import type { GoalContextReason, GoalState } from "./types.js";
 
 export interface ContinuationRuntime {
   getGoal(): GoalState | null;
+  beforeContinue?(ctx: ExtensionContext): void;
 }
 
 export class GoalContinuationScheduler {
@@ -32,6 +33,7 @@ export class GoalContinuationScheduler {
 
   private async fire(ctx: ExtensionContext, reason: GoalContextReason): Promise<void> {
     this.scheduled = false;
+    this.runtime.beforeContinue?.(ctx);
     const goal = this.runtime.getGoal();
     if (!goal || goal.status !== "active" || goal.goalId !== this.lastGoalId) return;
     if (ctx.hasPendingMessages()) return;
