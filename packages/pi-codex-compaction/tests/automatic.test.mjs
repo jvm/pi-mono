@@ -102,6 +102,8 @@ test("real Pi adopts a mid-response checkpoint and replays its exact suffix with
     await h.session.prompt("old private fixture", { expandPromptTemplates: false });
     const entry = h.manager.getBranch().find((e) => e.type === "compaction");
     assert.equal(entry?.details.kind, kind);
+    assert.match(entry.details.identity, /^[a-f0-9]{64}$/);
+    assert.doesNotMatch(JSON.stringify(entry.details), /sk-fixture-not-a-real-key/);
     assert.equal(entry.usage, undefined, "ordinary response owns usage");
     assert.equal(requests.length, 1, "no separate compaction inference");
     assert.deepEqual(requests[0].context_management, [{ type: "compaction", compact_threshold: 1000 }]);

@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import type { Model } from "@earendil-works/pi-ai";
 import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { createGrammarToolInputProperties } from "@earendil-works/pi-ai/api/constrained-sampling";
@@ -123,10 +123,14 @@ async function identity(ctx: ExtensionContext): Promise<string | undefined> {
   if (!supports(ctx.model)) return undefined;
   const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
   if (!auth.ok || !auth.apiKey || (auth.baseUrl !== undefined && auth.baseUrl !== ENDPOINT)) return undefined;
-  // Conservative credential binding: rotation invalidates replay, including OAuth
-  // refresh. Never persist the token or rely on unverified JWT claims as identity.
-  return hash([ctx.model.id, ENDPOINT, ctx.modelRegistry.isUsingOAuth(ctx.model),
-    auth.apiKey, sorted(auth.headers ?? {}), sorted(ctx.model.headers ?? {})]);
+  // These are provider-issued, high-entropy bearer credentials, not passwords.
+  // Use the credential as an HMAC key over domain-separated replay metadata.
+  // Rotation invalidates replay, including OAuth refresh. Never persist the key
+  // or infer account identity from unverified JWT claims.
+  return createHmac("sha256", auth.apiKey).update(JSON.stringify([
+    KIND, ctx.model.id, ENDPOINT, ctx.modelRegistry.isUsingOAuth(ctx.model),
+    sorted(auth.headers ?? {}), sorted(ctx.model.headers ?? {}),
+  ])).digest("hex");
 }
 
 function summaryText(item: unknown): string | undefined {

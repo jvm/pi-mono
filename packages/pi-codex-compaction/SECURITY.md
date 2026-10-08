@@ -38,8 +38,10 @@ The checkpoint and its exact post-checkpoint output suffix are sensitive session
 data. Provider encryption does not make the surrounding transcript or suffix
 public. Neither is logged or sent through install telemetry.
 
-A SHA-256 fingerprint binds replay to the current credential, auth mode, model,
-endpoint and headers without storing the credentials in checkpoint details.
+A domain-separated HMAC-SHA-256 binds replay to the current credential, auth
+mode, model, endpoint and headers. The provider-issued, high-entropy bearer
+credential is the HMAC key and is never stored in checkpoint details. This is
+credential binding, not storage or verification of user-chosen passwords.
 Rotation invalidates replay, including OAuth token refresh. The fallback is
 a bounded transcript excerpt, not a complete summary. The original history and
 fallback remain subject to the user's Pi session-file permissions and retention.
