@@ -57,6 +57,9 @@ export async function codexHarness(factories, options = {}) {
   const model = modelRuntime.getModel("openai-codex", "gpt-6-astra");
   if (!model) throw new Error("Pi catalog has no Astra");
   const settingsManager = SettingsManager.inMemory({
+    // Fixtures mock fetch, not WebSocket. Never attempt the live WS transport
+    // before falling back to the mocked SSE response.
+    transport: "sse",
     ...(options.defaultTools ? { defaultTools: options.defaultTools } : {}),
     compaction: { enabled: false, reserveTokens: 8192, keepRecentTokens: 1 },
     retry: options.retry ?? { enabled: false },
@@ -78,6 +81,7 @@ export async function codexHarness(factories, options = {}) {
   const { session, extensionsResult } = await createAgentSession({
     cwd: dir, agentDir: dir, model, modelRuntime, sessionManager, settingsManager,
     resourceLoader: loader, thinkingLevel: "low",
+    sessionStartEvent: options.sessionStartEvent,
     ...(options.tools ? { tools: options.tools } : {}),
   });
   if (extensionsResult.errors.length) throw new Error("Fixture extension load failed");

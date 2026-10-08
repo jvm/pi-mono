@@ -6,7 +6,7 @@ Give Pi a durable objective and let it keep working until the job is verified do
 
 ## Features
 
-- **Work beyond one turn** — Pi continues an active goal whenever it becomes idle.
+- **Work beyond one turn** — Pi continues an active goal after successful runs, without restarting cancelled or failed work.
 - **Persistent branch-aware state** — goals survive reloads and follow session trees, forks, and clones without leaking across divergent branches.
 - **Budget control** — cap token use, monitor remaining budget, and pause or resume work at any time.
 - **Visible progress** — track status, active time, token usage, and budget from Pi's UI.
@@ -63,11 +63,40 @@ verification evidence. Trusted extensions still run with the user's permissions.
 
 Goal state is stored as immutable `pi-goal` custom session entries and reconstructed from `ctx.sessionManager.getBranch()`, so state follows Pi session branches, tree navigation, forks, and reloads.
 
-When an active goal is idle, the extension injects a hidden `pi-goal-context` message and triggers another turn. A context filter keeps only the latest goal context message for the current goal to avoid linear context growth.
+After a successful run, the extension accounts finalized usage and proposes a
+hidden `pi-goal-context` message at Pi's actionable `agent_before_settle` boundary.
+Pi finishes its retry, overflow recovery, compaction, and queued work before
+reaching that boundary. Pi then validates the proposed context and owns the next
+request; there is no post-run `agent_end` timer or new run from `agent_settled`.
+A context filter keeps only the latest message for the current active goal.
+Earlier messages remain in append-only session history.
+
+Cancellation, terminal assistant errors, and failed/cancelled automatic
+compaction suppress goal continuation for that run. Cancellation and ordinary
+errors leave the stored goal active; they do not silently pause or clear it.
+The compaction-failure stop survives queued steering/follow-up work and resets
+only when the whole run reaches the notification-only `agent_settled` event.
+Explicit new input can start work again. Use `/goal pause` to keep it paused.
+Pending steering, follow-up, and user messages take priority and are not consumed
+or duplicated by the goal extension.
+
+Initial `/goal` commands, `/goal resume`, active session startup/reload, and tree
+navigation retain a separate activation path because there may be no running
+boundary. Tree activation waits for navigation to finish. Each activation
+rechecks goal/session/branch identity, saved usage, idle state, and pending work.
+A real run or a goal/session/branch transition invalidates an obsolete activation.
+Resuming or reloading a session with an active goal can therefore restart it,
+including after an earlier cancellation.
+
+Boundary proposals preserve other extensions' entries and continuation requests.
+The incoming `context.canContinue` describes the preview before the goal message:
+it can be false after a normal assistant reply. The goal's custom-message draft
+makes that preview runnable; Pi checks the final preview after all handlers.
+Declining goal continuation does not veto another extension's continuation.
 
 The footer and optional editor widget show status, elapsed active time, token usage, and budget.
 
-Provider usage-limit handling pauses active goals when Pi exposes HTTP 429 responses or assistant error messages that indicate subscription, quota, billing, balance, or repeated provider failures. This prevents automatic continuation from retrying indefinitely after provider limits such as 5-hour subscription caps. When the budget is exhausted or a provider limit is detected, a visible `pi-goal-event` message is also delivered to the model so it can stop work and call `update_goal` to finalize the goal instead of continuing to spend tokens on a turn that has effectively been cut off.
+Provider usage-limit handling pauses active goals when Pi exposes HTTP 429 responses or assistant error messages that indicate subscription, quota, billing, balance, or repeated provider failures. This prevents automatic continuation from retrying indefinitely after provider limits such as 5-hour subscription caps. When the budget is exhausted or a provider limit is detected, a visible `pi-goal-event` notice is saved to model context without requesting a wrap-up turn. The model can act on that notice during a request independently started by Pi, the user, or another extension; the notice itself does not spend more tokens.
 
 ### Token accounting and attribution
 
@@ -154,7 +183,7 @@ Environment flags:
 ## Troubleshooting
 
 - If continuation does not start, run `/goal status` and confirm the goal is `active`.
-- If a goal stops unexpectedly, check whether it reached its token budget or the provider returned a rate/usage limit. Usage-limit pauses may include a provider reset hint when one is available. A budget-exhausted or rate-limited goal is also surfaced to the model as a `pi-goal-event` in the conversation so it can call `update_goal`; if the model never receives that, the goal stays in `budget_limited` until you run `/goal resume` or `/goal clear`.
+- If a goal stops unexpectedly, check whether the run was cancelled, failed, or hit a token budget/provider limit. Usage-limit pauses may include a provider reset hint. Budget/provider notices do not start another request; the goal remains `budget_limited` or `usage_limited` until explicitly resumed, cleared, or finalized during later work.
 - If context appears stale after tree navigation or reload, run `/goal status`; branch state is reconstructed from the active branch.
 - In print/JSON modes, commands and tools work, but interactive confirmations/editors are unavailable.
 
@@ -163,6 +192,7 @@ Environment flags:
 - Token budget is enforced after finalized usage is saved. It stops goal-driven continuation, not an in-flight provider call, Pi's own recovery, user-requested work, or another extension's continuation. Usage that a provider/tool does not report cannot be counted.
 - Usage-limit handling is best-effort via HTTP responses and assistant error messages; provider transports vary in how much structured limit information they expose.
 - Automatic continuation is session-local, not a background daemon.
+- Oversized stored objectives (over 4,000 characters) are not automatically continued or silently truncated. Edit the objective before resuming.
 
 ## Development and validation
 
@@ -187,6 +217,21 @@ results, mocked cache warming and remote compaction, branch summaries, context
 omissions, inherited fork histories, and tool-only budget exhaustion. The warming
 tests load the compaction/reasoning hooks in both orders and verify that idle
 refreshes do not change saved reasoning state.
+
+The settlement suite exercises the production extension in real Pi sessions
+with bounded mocked responses. It covers cancellation (including retry and
+pre-settlement cancellation), successful/exhausted retries, compaction
+success/failure, canonical context edits, user queues, extension ordering,
+terminal tools, startup/resume/reload, replacement, forks, tree navigation, and
+TUI/print/JSON/RPC bindings. It also advances controlled timers after settlement
+to detect an obsolete timer that would restart the run. No live credentials are
+used; HTTP responses are mocked and WebSocket traffic is blocked.
+
+Run the focused lifecycle smoke test from the monorepo root:
+
+```bash
+node --import tsx --test packages/pi-goal/tests/settlement-contract.test.mjs
+```
 
 Before publishing, also run the root validation loop:
 
