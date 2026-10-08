@@ -40,7 +40,9 @@ public. Neither is logged or sent through install telemetry.
 
 A domain-separated HMAC-SHA-256 binds replay to the current credential, auth
 mode, model, endpoint and headers. The provider-issued, high-entropy bearer
-credential is the HMAC key and is never stored in checkpoint details. This is
+credential and potentially secret headers form the HMAC key material and are
+never stored in checkpoint details. Only non-secret routing/auth-mode metadata
+is used as the HMAC message. This is
 credential binding, not storage or verification of user-chosen passwords.
 Rotation invalidates replay, including OAuth token refresh. The fallback is
 a bounded transcript excerpt, not a complete summary. The original history and

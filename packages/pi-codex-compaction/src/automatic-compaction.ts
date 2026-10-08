@@ -124,13 +124,14 @@ async function identity(ctx: ExtensionContext): Promise<string | undefined> {
   const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
   if (!auth.ok || !auth.apiKey || (auth.baseUrl !== undefined && auth.baseUrl !== ENDPOINT)) return undefined;
   // These are provider-issued, high-entropy bearer credentials, not passwords.
-  // Use the credential as an HMAC key over domain-separated replay metadata.
+  // Use credential material (including potentially secret headers) as the HMAC
+  // key, and only non-secret routing/auth-mode metadata as its message.
   // Rotation invalidates replay, including OAuth refresh. Never persist the key
   // or infer account identity from unverified JWT claims.
-  return createHmac("sha256", auth.apiKey).update(JSON.stringify([
-    KIND, ctx.model.id, ENDPOINT, ctx.modelRegistry.isUsingOAuth(ctx.model),
-    sorted(auth.headers ?? {}), sorted(ctx.model.headers ?? {}),
-  ])).digest("hex");
+  const key = JSON.stringify([auth.apiKey, sorted(auth.headers ?? {}), sorted(ctx.model.headers ?? {})]);
+  const authMode = ctx.modelRegistry.isUsingOAuth(ctx.model) ? "oauth" : "api-key";
+  return createHmac("sha256", key)
+    .update(JSON.stringify([KIND, ctx.model.id, ENDPOINT, authMode])).digest("hex");
 }
 
 function summaryText(item: unknown): string | undefined {

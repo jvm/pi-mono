@@ -200,6 +200,22 @@ test("credential rotation uses readable fallback, never the old opaque checkpoin
   } finally { await h.close(); }
 });
 
+for (const change of ["headers", "auth-mode"]) {
+  test(`${change} changes invalidate replay even with the same API credential`, async (t) => {
+    const requests = mockResponses(t, [[checkpoint(), text("msg_1", "answer")], [text("msg_2", "next")]]);
+    const h = await harness();
+    try {
+      await h.session.prompt("old");
+      if (change === "headers") await h.session.setModel({ ...h.model, headers: { "x-fixture-scope": "changed" } });
+      else t.mock.method(h.runtime, "isUsingOAuth", () => true);
+      await h.session.prompt("new");
+      assert.equal(requests[1].input.some((item) => item.type === "compaction"), false);
+      assert.match(JSON.stringify(requests[1].input), /bounded readable fallback/);
+      assert.deepEqual(h.errors, []);
+    } finally { await h.close(); }
+  });
+}
+
 test("context edits to the retained assistant prevent stale raw replay", async (t) => {
   const requests = mockResponses(t, [[checkpoint(), text("msg_1", "secret")], [text("msg_2", "next")]]);
   const h = await harness();
