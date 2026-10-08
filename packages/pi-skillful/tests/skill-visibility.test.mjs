@@ -93,13 +93,13 @@ for (const mode of ["tui", "print"]) {
     };
 
     await handlers.get("session_start")({ reason: "startup" }, ctx);
-    const result = await handlers.get("before_agent_start")(
-      { systemPrompt: `base${formatSkillsForPrompt(skills)}`, systemPromptOptions: { skills } },
-      ctx,
-    );
-
-    assert.ok(result.systemPrompt.includes(`<name>${projectSkill.name}</name>`));
-    assert.ok(!result.systemPrompt.includes(`<name>${globalSkill.name}</name>`));
+    const event = { systemPrompt: "Unrelated prompt text", systemPromptOptions: { skills } };
+    assert.equal(await handlers.get("before_agent_start")(event, ctx), undefined);
+    const prompt = formatSkillsForPrompt(event.systemPromptOptions.skills);
+    assert.ok(prompt.includes(`<name>${projectSkill.name}</name>`));
+    assert.ok(!prompt.includes(`<name>${globalSkill.name}</name>`));
+    assert.equal(event.systemPrompt, "Unrelated prompt text");
+    assert.equal(skills[0].disableModelInvocation, undefined);
   });
 }
 
@@ -116,13 +116,33 @@ test("trusted project visibility settings override global settings", async () =>
   const ctx = { cwd, isProjectTrusted: () => true, ui: { theme: identityTheme } };
 
   await handlers.get("session_start")({ reason: "startup" }, ctx);
-  const result = await handlers.get("before_agent_start")(
-    { systemPrompt: `base${formatSkillsForPrompt(skills)}`, systemPromptOptions: { skills } },
-    ctx,
-  );
+  const event = { systemPromptOptions: { skills } };
+  assert.equal(await handlers.get("before_agent_start")(event, ctx), undefined);
+  const prompt = formatSkillsForPrompt(event.systemPromptOptions.skills);
+  assert.ok(prompt.includes(`<name>${globalSkill.name}</name>`));
+  assert.ok(!prompt.includes(`<name>${projectSkill.name}</name>`));
+});
 
-  assert.ok(result.systemPrompt.includes(`<name>${globalSkill.name}</name>`));
-  assert.ok(!result.systemPrompt.includes(`<name>${projectSkill.name}</name>`));
+test("visibility preserves package skills, earlier restrictions, and explicit prompt overrides", async () => {
+  await writeSettings(globalSettingsPath, { skillful: { hiddenSkills: ["hidden", "bundled"] } });
+  const hidden = skill("hidden");
+  const bundled = { ...skill("bundled"), sourceInfo: { ...skill("bundled").sourceInfo, origin: "package" } };
+  const restricted = { ...skill("restricted"), disableModelInvocation: true };
+  const { handlers } = registerVisibility();
+  const event = {
+    systemPrompt: "Explicit policy.",
+    systemPromptOptions: {
+      skills: [hidden, bundled, restricted], forceSystemPrompt: "Explicit policy.",
+      sections: { unrelated: "Leave this alone." },
+    },
+  };
+  assert.equal(await handlers.get("before_agent_start")(event, { cwd: home, isProjectTrusted: () => false }), undefined);
+  assert.equal(event.systemPromptOptions.skills[0].disableModelInvocation, true);
+  assert.equal(event.systemPromptOptions.skills[1], bundled);
+  assert.equal(event.systemPromptOptions.skills[2], restricted);
+  assert.equal(hidden.disableModelInvocation, undefined);
+  assert.equal(event.systemPromptOptions.forceSystemPrompt, "Explicit policy.");
+  assert.deepEqual(event.systemPromptOptions.sections, { unrelated: "Leave this alone." });
 });
 
 test("untrusted projects expose only global settings in the menu", async () => {

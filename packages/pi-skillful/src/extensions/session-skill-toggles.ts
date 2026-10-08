@@ -3,7 +3,6 @@ import {
   type AppKeybinding,
   type ExtensionAPI,
   type KeybindingsManager,
-  type Skill,
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteProvider, EditorComponent, EditorTheme, Focusable, KeyId, TUI } from "@earendil-works/pi-tui";
@@ -16,7 +15,6 @@ import {
   type SkillToggleModifier,
   type SkillToggleSlot,
 } from "../config.js";
-import { replaceSkillsSection } from "../skill-prompt.js";
 import { isTopLevelSkill, listLoadedSkills } from "../skills.js";
 
 const STORE_KEY = Symbol.for("pi-skillful.sessionSkillTogglesStore");
@@ -90,13 +88,13 @@ export default function sessionSkillToggles(pi: ExtensionAPI) {
   pi.on("before_agent_start", (event) => {
     if (state.slots.length === 0 || !event.systemPromptOptions.skills?.length) return;
 
-    const updatedSkills: Skill[] = event.systemPromptOptions.skills.map((skill) =>
-      isTopLevelSkill(skill) ? { ...skill, disableModelInvocation: !isSkillActive(normalizeSkillName(skill.name)) } : skill,
+    // Active slots lift only Skillful's own restriction, never frontmatter or
+    // restrictions already applied by another prompt handler.
+    event.systemPromptOptions.skills = event.systemPromptOptions.skills.map((skill) =>
+      isTopLevelSkill(skill) && !isSkillActive(normalizeSkillName(skill.name))
+        ? { ...skill, disableModelInvocation: true }
+        : skill,
     );
-
-    const systemPrompt = replaceSkillsSection(event.systemPrompt, updatedSkills);
-    if (!systemPrompt) return;
-    return { systemPrompt };
   });
 
   pi.on("session_shutdown", (event, ctx) => {

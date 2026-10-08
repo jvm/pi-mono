@@ -8,11 +8,14 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Changed
 
+- Update skill visibility and session toggles through Pi's structured prompt API instead of replacing the rendered system prompt. Preserve unrelated sections and deliberate full-prompt overrides.
 - Update the shared Pi development and contract-test baseline to 1.1.0; require Node.js >=22.19.0 to match the host runtime. Pi remains a host-supplied peer dependency.
 - Share install telemetry mechanics through `@mocito/install-telemetry` while preserving Pi-specific settings and state paths.
 
 ### Fixed
 
+- Apply visibility settings to Pi 1.1.0's wrapped skills section, including when file readers are hidden behind codemode.
+- Keep frontmatter and earlier extensions' visibility restrictions when session toggle slots are active.
 - Restore hidden-skill startup colors on Pi 1.x while preserving theme changes, expanded resource paths, and reloads.
 - Let `enableInstallTelemetry: false` override an enabled `PI_TELEMETRY` environment flag.
 

@@ -102,6 +102,16 @@ Configured slots appear on the prompt editor's top border as `N skill-name`. Pro
 
 On app startup, non-hidden skills are active and hidden skills are inactive. Within a running Pi process, `/new` preserves the current toggle state for the new session. Resuming, forking, cloning, reloading, or restarting Pi resets toggle state from settings. Inline `/skill:name` invocation remains explicit and works even when that skill is inactive. Skills bundled in Pi packages are never modified by these toggles.
 
+### Prompt updates and extension composition
+
+Visibility and toggles use Pi's structured `systemPromptOptions.skills` API (Pi 1.1.0 or newer), not text replacement of the full system prompt. Pi records skill-list changes in the session transcript, alongside independent updates from other extensions such as Scout.
+
+An active slot can lift a restriction from `skillful.hiddenSkills`, but does not clear `disable-model-invocation` frontmatter or a restriction applied by an earlier prompt handler. Later handlers see the updated list and can apply their own policy. Package-bundled skills remain outside Skillful's visibility controls and toggle slots.
+
+A deliberate full-prompt override from another extension (`systemPrompt` or `forceSystemPrompt`) takes precedence. Skillful updates the structured skill list but does not rewrite that override; its author controls any skill descriptions embedded in the replacement text. Explicit skill invocation remains available.
+
+Structured changes let Pi update individual prompt sections. Providers that cannot accept mid-conversation system changes may still need a full prompt checkpoint; cache savings are not guaranteed.
+
 ## Installation
 
 Install from npm:
