@@ -14,6 +14,9 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Fixed
 
+- Request automatic goal continuation through `agent_before_settle` after Pi's recovery and queued work, rather than an `agent_end` timer. Preserve other handlers' proposals and append-only history while sending at most one current goal context to the model.
+- Do not restart cancelled/failed runs or failed automatic compaction. Provider-limit notices, like budget notices, no longer request a wrap-up turn.
+- Preserve explicit start/resume/reload activation and wait for tree navigation to finish. Invalidate stale activations across goal/session/branch changes; reject oversized stored objectives without truncation.
 - Keep `update_goal` model-only on supported Pi runtimes (Pi 1.0.2 or newer), preventing codemode and other nested tool calls from completing or blocking a goal before the model inspects verification results. Preserve direct final-turn updates and script access to `get_goal` and `create_goal`.
 - Let `enableInstallTelemetry: false` override an enabled `PI_TELEMETRY` environment flag.
 - Count finalized tool, standalone, compaction, and branch-summary usage in goal budgets, including already-aggregated nested calls and context-omitted billed attempts. Preserve schema-v1 ledgers and backfill previously missed entries once within the branch-local goal lifetime.

@@ -53,3 +53,17 @@ boundary. Unreported usage cannot be counted, active requests can overrun, and
 other extensions can override idle warming decisions. Pause and terminal goal
 states stop goal continuation but do not exclude later branch usage; clear or
 replace a retained goal before unrelated work.
+
+Automatic goal continuation is proposed at Pi's `agent_before_settle` boundary,
+after recovery and queued work, rather than starting a new run from a timer.
+Cancelled/error outcomes and failed automatic compaction do not request more
+goal work. Budget and provider-limit notices are context-only and do not request
+a wrap-up turn. These checks control the goal extension's requests, not Pi's own
+recovery, user input, or another trusted extension's continuation.
+
+Explicit activation on creation, resume, startup/reload, and tree navigation
+rechecks the current goal, session, branch, pending work, and finalized budget.
+Old activations are invalidated on lifecycle changes. An active stored goal can
+resume on reload; use `/goal pause` to persist a stop across reloads.
+Continuation retains JSON framing for untrusted objectives and refuses stored
+objectives beyond the public 4,000-character limit instead of truncating them.

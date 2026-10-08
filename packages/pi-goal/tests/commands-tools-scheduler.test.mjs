@@ -9,7 +9,7 @@ function makeCtx(branch = []) {
     hasUI: true,
     isIdle: () => true,
     hasPendingMessages: () => false,
-    sessionManager: { getBranch: () => branch },
+    sessionManager: { getBranch: () => branch, getSessionId: () => "fixture", getLeafId: () => branch.at(-1)?.id ?? null },
     ui: {
       notify: (message, type = "info") => notifications.push({ message, type }),
       confirm: async () => true,
@@ -215,27 +215,91 @@ test("update_goal rejects mixed verification and terminal tool calls in one turn
   assert.equal(goal.status, "active");
 });
 
-test("scheduler sends one hidden goal continuation when idle", async () => {
+test("scheduler sends one hidden goal activation when idle", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const pi = makePi();
   const goal = { goalId: "g1", objective: "ship", status: "active", tokensUsed: 0, timeUsedSeconds: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), activeStartedAt: new Date().toISOString(), accountedUsage: { tokens: 0, entryIds: [] } };
   const scheduler = new GoalContinuationScheduler(pi, { getGoal: () => goal });
   scheduler.schedule(makeCtx(), "continue");
   scheduler.schedule(makeCtx(), "continue");
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  t.mock.timers.tick(1);
   assert.equal(pi.messages.length, 1);
   assert.equal(pi.messages[0].message.customType, "pi-goal-context");
   assert.equal(pi.messages[0].message.display, false);
   assert.equal(pi.messages[0].options.triggerTurn, true);
 });
 
-test("scheduler does not continue with pending user messages", async () => {
+test("scheduler does not continue with pending user messages", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const pi = makePi();
   const goal = { goalId: "g1", objective: "ship", status: "active", tokensUsed: 0, timeUsedSeconds: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), activeStartedAt: new Date().toISOString(), accountedUsage: { tokens: 0, entryIds: [] } };
   const scheduler = new GoalContinuationScheduler(pi, { getGoal: () => goal });
   const ctx = { ...makeCtx(), hasPendingMessages: () => true };
   scheduler.schedule(ctx, "continue");
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  t.mock.timers.tick(1);
   assert.equal(pi.messages.length, 0);
+});
+
+test("settlement composes drafts without vetoing another handler or duplicating goal context", () => {
+  const pi = makePi();
+  let goal = { goalId: "g1", objective: "ship", status: "active", tokensUsed: 0, timeUsedSeconds: 0 };
+  const scheduler = new GoalContinuationScheduler(pi, { getGoal: () => goal });
+  const foreign = { type: "custom", customType: "another-extension", data: { retained: true } };
+  const event = { entries: [foreign], continue: true, outcome: "completed", context: { canContinue: false, pendingMessages: [] } };
+  const result = scheduler.beforeSettle(event, makeCtx());
+  assert.equal(result.continue, true);
+  assert.equal(result.entries.length, 2);
+  assert.equal(result.entries[0], foreign);
+  assert.equal(result.entries[1].type, "custom_message");
+  assert.equal(result.entries[1].customType, "pi-goal-context");
+  assert.equal(pi.messages.length, 0, "boundary proposals must not use sendMessage");
+  assert.deepEqual(event.entries, [foreign], "do not mutate the upstream proposal");
+  assert.deepEqual(scheduler.beforeSettle({ ...event, entries: result.entries, context: { ...event.context, canContinue: true } }, makeCtx()), { continue: true });
+  for (const outcome of ["aborted", "error"]) {
+    assert.equal(scheduler.beforeSettle({ ...event, outcome }, makeCtx()), undefined);
+  }
+  assert.equal(scheduler.beforeSettle({ ...event, context: { ...event.context, pendingMessages: [{ role: "user" }] } }, makeCtx()), undefined);
+  assert.equal(scheduler.beforeSettle(event, { ...makeCtx(), signal: AbortSignal.abort() }), undefined);
+  for (const status of ["paused", "complete", "blocked", "budget_limited", "usage_limited"]) {
+    goal = { ...goal, status };
+    assert.equal(scheduler.beforeSettle(event, makeCtx()), undefined, "declining is not continue:false");
+  }
+});
+
+test("activation timers recheck identity, pending work, cancellation, and idle state", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const change of ["busy", "pending", "cancelled", "session", "branch", "goal", "paused", "cleared", "disposed"]) {
+    const pi = makePi();
+    let goal = { goalId: "g1", objective: "ship", status: "active", tokensUsed: 0, timeUsedSeconds: 0 };
+    const ctx = makeCtx([{ id: "leaf" }]);
+    const scheduler = new GoalContinuationScheduler(pi, { getGoal: () => goal });
+    scheduler.schedule(ctx);
+    if (change === "busy") ctx.isIdle = () => false;
+    if (change === "pending") ctx.hasPendingMessages = () => true;
+    if (change === "cancelled") ctx.signal = AbortSignal.abort();
+    if (change === "session") ctx.sessionManager.getSessionId = () => "replacement";
+    if (change === "branch") ctx.sessionManager.getBranch = () => [];
+    if (change === "goal") goal = { ...goal, goalId: "replacement" };
+    if (change === "paused") goal = { ...goal, status: "paused" };
+    if (change === "cleared") scheduler.clear();
+    if (change === "disposed") ctx.isIdle = () => { throw new Error("Inactive extension runtime"); };
+    t.mock.timers.tick(1);
+    assert.equal(pi.messages.length, 0, change);
+    assert.equal(scheduler.isScheduled(), false);
+  }
+});
+
+test("boundary goal context stays bounded without truncating the objective", () => {
+  const pi = makePi();
+  let goal = { goalId: "g1", objective: "<".repeat(4000), status: "active", tokensUsed: 0, timeUsedSeconds: 0 };
+  const scheduler = new GoalContinuationScheduler(pi, { getGoal: () => goal });
+  const event = { entries: [], continue: false, outcome: "completed", context: { canContinue: false, pendingMessages: [] } };
+  const result = scheduler.beforeSettle(event, makeCtx());
+  assert.ok(result.entries[0].content.length < 32_000);
+  const encodedObjective = result.entries[0].content.match(/<objective_json>(.*?)<\/objective_json>/)[1];
+  assert.equal(JSON.parse(encodedObjective), goal.objective);
+  goal = { ...goal, objective: "x".repeat(4001) };
+  assert.equal(scheduler.beforeSettle(event, makeCtx()), undefined, "oversized persisted data must not become an unbounded prompt");
 });
 
 test("context filter keeps only newest current goal context", () => {

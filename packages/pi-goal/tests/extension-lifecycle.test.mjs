@@ -37,7 +37,7 @@ function makeCtx(branch = []) {
     hasUI: true,
     isIdle: () => true,
     hasPendingMessages: () => false,
-    sessionManager: { getBranch: () => branch },
+    sessionManager: { getBranch: () => branch, getSessionId: () => "fixture", getLeafId: () => branch.at(-1)?.id ?? null },
     ui: {
       notifications: [],
       statuses: new Map(),
@@ -58,7 +58,7 @@ test("extension registers command, tools, renderers, and lifecycle handlers", ()
   assert.ok(pi.tools.has("update_goal"));
   assert.ok(pi.renderers.has("pi-goal-summary"));
   assert.ok(pi.renderers.has("pi-goal-event"));
-  for (const event of ["session_start", "session_tree", "message_end", "turn_end", "agent_end", "agent_before_settle", "cache_warming_decision", "context", "session_shutdown"]) {
+  for (const event of ["session_start", "session_before_tree", "session_tree", "session_compact_failed", "agent_start", "message_end", "turn_end", "agent_end", "agent_before_settle", "cache_warming_decision", "context", "session_shutdown"]) {
     assert.ok(pi.handlers.has(event), `missing ${event}`);
   }
 });
@@ -175,7 +175,7 @@ test("provider 429 transitions active goal to usage_limited", async () => {
   assert.match(ctx.ui.statuses.get("pi-goal"), /usage limits/);
 });
 
-test("provider 429 notifies the agent so it can wrap up", async () => {
+test("provider 429 appends a notice without requesting another turn", async () => {
   const pi = makePi();
   piGoal(pi);
   const ctx = makeCtx();
@@ -185,7 +185,7 @@ test("provider 429 notifies the agent so it can wrap up", async () => {
   assert.match(sent.content, /provider_limit/);
   assert.equal(sent.display, true);
   assert.equal(sent.details.kind, "provider_limit");
-  assert.equal(pi.messages.at(-1).options.triggerTurn, true);
+  assert.equal(pi.messages.at(-1).options.triggerTurn, false);
 });
 
 test("assistant usage-limit error transitions active goal to usage_limited", async () => {

@@ -19,6 +19,7 @@ export default function piGoal(pi: ExtensionAPI) {
 
   let goal: GoalState | null = null;
   let consecutiveAssistantErrors = 0;
+  let automaticCompactionFailed = false;
   const scheduler = new GoalContinuationScheduler(pi, { getGoal: () => goal, beforeContinue: accountAndEnforceBudget });
   let idleAccountingTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -63,13 +64,10 @@ export default function piGoal(pi: ExtensionAPI) {
   // Send a visible message to the model so it can react to a terminal
   // status transition (budget exhausted, provider limit hit) instead of
   // silently continuing to spend tokens on work that is about to be cut
-  // off. Budget notices are context-only: they must not buy another request.
-  // Provider-limit wrap-up behavior is retained separately.
+  // off. Terminal notices are context-only: they must not buy another request.
   function notifyAgentOfTerminalTransition(
-    ctx: ExtensionContext,
     content: string,
     details: Record<string, unknown>,
-    triggerTurn = true,
   ): void {
     pi.sendMessage(
       {
@@ -78,7 +76,7 @@ export default function piGoal(pi: ExtensionAPI) {
         display: true,
         details: { ...details, piGoalVersion: PI_GOAL_VERSION },
       },
-      { triggerTurn, deliverAs: ctx.isIdle() ? "steer" : "followUp" },
+      { triggerTurn: false },
     );
   }
 
@@ -101,7 +99,6 @@ export default function piGoal(pi: ExtensionAPI) {
     updateGoalUi(ctx, goal);
     scheduler.clear();
     notifyAgentOfTerminalTransition(
-      ctx,
       `<provider_limit>\nYour persistent Pi goal has been paused because the provider hit a usage/rate limit${suffix}. The goal is in the "usage_limited" state. Do not do any more work that would use additional tokens. Use /goal resume to continue after the limit resets, or call update_goal with status "complete" or "blocked" to finalize the goal now.\n</provider_limit>`,
       {
         kind: "provider_limit",
@@ -130,7 +127,6 @@ export default function piGoal(pi: ExtensionAPI) {
       ctx.ui.notify("Goal token budget reached.", "warning");
       scheduler.clear();
       notifyAgentOfTerminalTransition(
-        ctx,
         `<budget_exceeded>\nYour persistent Pi goal's token budget of ${snapshot.tokenBudget} has been reached (used ${snapshot.tokensUsed} tokens). Stop work immediately to avoid burning more tokens. If all requirements are satisfied, call update_goal with status "complete". If the goal cannot be completed, call update_goal with status "blocked". Do not do any more work that would use additional tokens.\n</budget_exceeded>`,
         {
           kind: "budget_exceeded",
@@ -138,7 +134,6 @@ export default function piGoal(pi: ExtensionAPI) {
           tokensUsed: snapshot.tokensUsed,
           tokenBudget: snapshot.tokenBudget,
         },
-        false,
       );
     }
     updateGoalUi(ctx, goal);
@@ -168,6 +163,9 @@ export default function piGoal(pi: ExtensionAPI) {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    scheduler.clear();
+    automaticCompactionFailed = false;
+    consecutiveAssistantErrors = 0;
     const diagnostics: string[] = [];
     goal = reconstructGoalState(ctx.sessionManager.getBranch() as any[], diagnostics);
     if (goal?.status === "active" && !goal.activeStartedAt) {
@@ -185,17 +183,33 @@ export default function piGoal(pi: ExtensionAPI) {
 
   pi.on("session_tree", async (_event, ctx) => {
     scheduler.clear();
+    automaticCompactionFailed = false;
+    consecutiveAssistantErrors = 0;
     goal = reconstructGoalState(ctx.sessionManager.getBranch() as any[]);
     accountAndEnforceBudget(ctx);
     updateGoalUi(ctx, goal);
     startIdleAccounting(ctx);
-    if (goal?.status === "active" && ctx.isIdle() && !ctx.hasPendingMessages()) scheduler.schedule(ctx, "continue");
+    if (goal?.status === "active" && !ctx.hasPendingMessages()) scheduler.schedule(ctx, "continue", { afterTree: true });
   });
 
   pi.on("session_compact", async (_event, ctx) => {
     goal = reconstructGoalState(ctx.sessionManager.getBranch() as any[]);
     accountAndEnforceBudget(ctx);
     updateGoalUi(ctx, goal);
+  });
+
+  pi.on("session_compact_failed", (event) => {
+    if (event.reason !== "manual") {
+      automaticCompactionFailed = true;
+      scheduler.clear();
+    }
+  });
+
+  pi.on("agent_start", () => {
+    // A real run supersedes any idle activation. Never leave a timer behind
+    // that could restart the session after cancellation or recovery.
+    scheduler.clear();
+    automaticCompactionFailed = false;
   });
 
   pi.on("message_end", async (event: any, ctx) => {
@@ -224,11 +238,11 @@ export default function piGoal(pi: ExtensionAPI) {
 
   pi.on("agent_end", async (_event, ctx) => {
     accountAndEnforceBudget(ctx);
-    if (goal?.status === "active") scheduler.schedule(ctx, "continue");
   });
 
-  pi.on("agent_before_settle", async (_event, ctx) => {
+  pi.on("agent_before_settle", (event, ctx) => {
     accountAndEnforceBudget(ctx);
+    if (!automaticCompactionFailed) return scheduler.beforeSettle(event, ctx);
   });
 
   pi.on("cache_warming_decision", async (_event, ctx) => {
@@ -254,6 +268,10 @@ export default function piGoal(pi: ExtensionAPI) {
     scheduler.clear();
   });
   pi.on("session_before_fork", async (_event, ctx) => {
+    accountAndEnforceBudget(ctx);
+    scheduler.clear();
+  });
+  pi.on("session_before_tree", (_event, ctx) => {
     accountAndEnforceBudget(ctx);
     scheduler.clear();
   });
