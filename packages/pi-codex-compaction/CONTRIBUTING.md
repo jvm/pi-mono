@@ -4,57 +4,59 @@ Thanks for your interest in contributing to `pi-codex-compaction`.
 
 ## Development setup
 
+Run from the monorepo root:
+
 ```bash
 npm install
 npm run -w packages/pi-codex-compaction check
+npm test -w packages/pi-codex-compaction
+npm run -w packages/pi-codex-compaction pack:dry-run
 ```
 
-This package is source-distributed: Pi loads the TypeScript extension files directly. There is no build step for runtime use.
+The package is source-distributed. Pi loads TypeScript directly; there is no
+runtime build step.
 
 ## Pull request checklist
 
-Before opening a pull request:
-
-- Run `npm run -w packages/pi-codex-compaction check`.
-- Run `npm test -w packages/pi-codex-compaction`.
-- Run `npm audit --omit=dev`.
-- Run `npm run -w packages/pi-codex-compaction pack:dry-run` and confirm the package contents are intentional.
-- Update `README.md` if user-visible behavior changes.
-- Update `CHANGELOG.md` for notable changes.
-- Keep examples and paths generic; do not commit API keys, tokens, auth headers, local settings, or provider configuration containing secrets.
+- Run package checks and tests.
+- Run `npm run validate` for security-sensitive or cross-package changes.
+- Inspect packed contents; never publish tests, session fixtures, or local settings.
+- Update README, CHANGELOG, and SECURITY when their documented behavior changes.
+- Never commit credentials, auth headers, private history, or opaque checkpoints.
 
 ## Coding guidelines
 
-- Keep the Codex provider/API capability check explicit and future-compatible.
-- Preserve current-model compaction, context bounds, cancellation, HTTPS, and standard Pi fallback behavior.
-- Add a regression test when changing wire parsing, request construction, checkpoint rehydration, or model-switch fallback behavior.
+Use public Pi request, stream, and turn-end APIs. Preserve normal streaming and
+the effective request rather than constructing a separate compaction request.
+Do not restore legacy provider transport or the temporary compat serializer.
 
-## Token-budget regression and smoke checks
+Automatic mode defaults on only for eligible public OpenAI requests. Preserve
+off overrides, safe checkpoint bounds, cancellation, credential binding, ordinary
+usage accounting, and standard Pi recovery. Never infer model-token counts from
+ciphertext length or equate request count with cost.
 
-`tests/integration.test.mjs` uses the real Pi compaction hook, serializer, and
-session tree with fake credentials and mocked Responses transport. A synthetic
-long transcript must produce a remote checkpoint even when its UTF-8 bytes
-exceed the numeric token budget. Oversized input must still invoke the standard
-compactor and record a safe fallback reason. A later model request must not
-contain the diagnostic entry. No private session fixtures or live requests are
-needed for these tests.
+## Regression and smoke tests
 
-The token conversion follows Codex's ordinary JSON-item heuristic:
-[byte-to-token estimate](https://github.com/openai/codex/blob/654b0a77d0d2f81aa21f61caf7af4be88fe550bb/codex-rs/utils/string/src/truncate.rs)
-and [history sizing](https://github.com/openai/codex/blob/654b0a77d0d2f81aa21f61caf7af4be88fe550bb/codex-rs/core/src/context_manager/history.rs).
-This package keeps all serialized opaque/image bytes in its estimate instead of
-copying Codex's modality-specific discounts. Never equate bytes and tokens or
-remove the independent wire-size ceiling.
+`tests/automatic.test.mjs` exercises real Pi sessions, serializer, tool loops and
+session projection with fake credentials and mocked Responses streams.
+`tests/default-mode.test.mjs` checks default policy, unsupported routes and
+cache-warming decisions. No live requests are needed for ordinary validation.
 
-For an offline replay, reconstruct a compaction's discarded history in memory,
-use fake authentication, replace `fetch` with a fixture checkpoint response,
-and call `createRemoteCompaction`. Print only sizes and the success/fallback
-code. Do not save the transcript, request, auth headers, or opaque content.
+Add integration coverage when changing checkpoint capture, ordering, replay,
+threshold coordination, or message normalization. Keep a stream open to verify
+text delivery before completion. Successful checkpoint adoption must not start
+a second Pi compaction between tool continuations. Missing checkpoints must
+leave the standard compactor available.
 
-For an approved live smoke test, follow the procedure in [README.md](./README.md#reference-and-smoke-test).
-Check for `fromHook: true` and `details.kind: "pi-codex-compaction"` on success.
-On fallback, inspect only the reason and counters in the custom diagnostic
-entry. Never inspect or print `encryptedContent`.
+The gated `tests/benchmark-automatic.mjs` consumes subscription usage and is not
+part of `npm test`. Obtain explicit approval before every live run. Use synthetic
+text only, bound requests and input, and never print raw provider errors,
+credentials, or encrypted content. `tests/AUTOMATIC_BENCHMARK.md` documents the
+existing measurements and their limits.
+
+For an approved TUI smoke test, follow the procedure in README. Check saved
+checkpoint replay after reload, branch navigation and mode-off. Do not interpret
+passing protocol tests as proof of long-session latency or cost savings.
 
 ## Code of conduct
 

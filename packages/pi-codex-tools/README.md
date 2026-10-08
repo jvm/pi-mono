@@ -79,9 +79,9 @@ Pi 0.85.1's model catalog advertises grammar-tool support for `gpt-6-astra` on b
 
 The [GPT-6 guide](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6-astra) also describes async tool calls, mid-turn steering, and reasoning updates. Those belong to the provider/session runtime and are not enabled by this extension. Patch execution remains sequential; provider-side parallel tool calling remains enabled.
 
-With an updated `pi-codex-compaction` installed, the package supplies its owned
-grammar metadata through Pi's public event bus. This keeps raw `apply_patch`
-calls and results intact in direct Codex compaction requests, including Astra.
+With `pi-codex-compaction` installed, public server-side compaction uses Pi's
+ordinary effective request, including this tool's grammar, calls and results.
+The former direct-compaction grammar event-bus adapter has been removed.
 No private Pi registry is patched.
 
 ### Filesystem behavior

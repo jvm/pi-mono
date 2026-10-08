@@ -8,6 +8,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Changed
 
+- Remove the obsolete direct-compaction grammar event-bus adapter. Public server-side compaction preserves the ordinary request's grammar declarations.
 - Update the shared Pi development and contract-test baseline to 1.1.0; require Node.js >=22.19.0 to match the host runtime. Pi remains a host-supplied peer dependency.
 - Register `apply_patch` with model-only exposure, excluding nested calls through codemode.
 - Hide selected native `edit` and `write` declarations through Pi's public loadout hook while keeping their implementations, activation, and exposure intact for nested calls.

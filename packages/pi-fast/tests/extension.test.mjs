@@ -236,19 +236,12 @@ for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
     const context = makeContext({ provider: "openai-codex", id });
     const request = pi.handlers.get("before_provider_request")[0];
     const payload = { input: [], reasoning: { effort: "max" }, service_tier: "default" };
-    const compact = () => {
-      const event = { payload, ctx: context };
-      pi.events.emit("pi-codex-compaction:request:v1", event);
-      return event.payload;
-    };
     await pi.handlers.get("session_start")[0]({}, context);
     assert.equal(context.statuses.at(-1).value, "Fast off");
     assert.equal(await request({ payload }, context), undefined);
-    assert.equal(compact(), payload);
     await pi.commands.get("fast").handler("on", context);
     assert.equal(context.statuses.at(-1).value, "Fast on");
     assert.deepEqual(await request({ payload }, context), { ...payload, service_tier: "priority" });
-    assert.deepEqual(compact(), { ...payload, service_tier: "priority" });
     assert.equal(payload.service_tier, "default");
     for (const model of [
       { provider: "openai", id },
@@ -260,7 +253,6 @@ for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
       await pi.handlers.get("model_select")[0]({}, context);
       assert.equal(context.statuses.at(-1).value, "Fast n/a");
       assert.equal(await request({ payload }, context), undefined);
-      assert.equal(compact(), payload);
     }
     context.model = { provider: "openai-codex", id };
     await pi.handlers.get("model_select")[0]({}, context);
@@ -268,7 +260,6 @@ for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
     await pi.commands.get("fast").handler("off", context);
     assert.equal(context.statuses.at(-1).value, "Fast off");
     assert.equal(await request({ payload }, context), undefined);
-    assert.equal(compact(), payload);
     for (const malformed of [undefined, null, [], "payload"]) {
       assert.equal(applyFastMode(malformed, context.model), malformed);
     }
@@ -351,7 +342,7 @@ for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-
   });
 
   for (const isUsingOAuth of [true, false]) {
-    test(`${id} supports OpenAI ${isUsingOAuth ? "ChatGPT OAuth" : "API-key"} requests and compaction`, async () => {
+    test(`${id} supports OpenAI ${isUsingOAuth ? "ChatGPT OAuth" : "API-key"} requests`, async () => {
       const pi = makePi();
       piFast(pi);
       const model = { provider: "openai", api: "openai-responses", id };
@@ -359,26 +350,18 @@ for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-
       const tier = isUsingOAuth ? "priority" : "fast";
       const request = pi.handlers.get("before_provider_request")[0];
       const payload = { model: id, input: [], service_tier: "default" };
-      const compact = (ctx) => {
-        const event = { payload, ctx };
-        pi.events.emit("pi-codex-compaction:request:v1", event);
-        return event.payload;
-      };
       assert.equal(supportsFastMode(model), true);
       await pi.handlers.get("session_start")[0]({}, context);
       assert.equal(context.statuses.at(-1).value, "Fast off");
       assert.equal(await request({ payload }, context), undefined);
-      assert.equal(compact(context), payload);
       await pi.commands.get("fast").handler("on", context);
       assert.equal(context.statuses.at(-1).value, "Fast on");
       assert.deepEqual(await request({ payload }, context), { ...payload, service_tier: tier });
-      assert.deepEqual(compact(context), { ...payload, service_tier: tier });
       assert.equal(payload.service_tier, "default");
 
       context.modelRegistry.isUsingOAuth = () => !isUsingOAuth;
       const switchedTier = isUsingOAuth ? "fast" : "priority";
       assert.deepEqual(await request({ payload }, context), { ...payload, service_tier: switchedTier });
-      assert.deepEqual(compact(context), { ...payload, service_tier: switchedTier });
       context.modelRegistry.isUsingOAuth = () => isUsingOAuth;
 
       for (const ctx of [
@@ -389,7 +372,6 @@ for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-
         await pi.handlers.get("model_select")[0]({}, ctx);
         assert.equal(ctx.statuses.at(-1).value, "Fast n/a");
         assert.equal(await request({ payload }, ctx), undefined);
-        assert.equal(compact(ctx), payload);
         await pi.commands.get("fast").handler("on", ctx);
         assert.equal(ctx.notifications.at(-1).type, "warning");
       }
@@ -399,7 +381,6 @@ for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-
       await pi.commands.get("fast").handler("off", context);
       assert.equal(context.statuses.at(-1).value, "Fast off");
       assert.equal(await request({ payload }, context), undefined);
-      assert.equal(compact(context), payload);
     });
   }
 }

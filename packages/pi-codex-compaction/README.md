@@ -1,19 +1,19 @@
 # pi-codex-compaction
 
-Keep long Pi sessions usable on OpenAI Codex models by replacing Pi's local summary request with Codex's provider-side **RemoteCompactionV2** checkpoint when the current model supports the Codex Responses API.
+Keep long Pi sessions flowing with **automatic server-side compaction** inside
+ordinary OpenAI Responses requests. The server can emit an encrypted checkpoint
+and continue inference without Pi stopping for a separate summary request.
 
-## Features
+- **On by default** for eligible public `openai` GPT-5/GPT-6 requests.
+- Uses your existing ChatGPT subscription login or API-key authentication without
+  changing providers, models, credentials, or billing mode.
+- Preserves Pi's effective tools, streamed text, tool continuations, and Fast tier.
+- Saves checkpoints on the session branch for reload and continuation.
+- Keeps `/server-compaction off`, manual `/compact`, and Pi's standard compactor
+  as recovery options.
 
-- Uses the current `openai-codex` model for each compaction; it never silently changes the session model.
-- Sends only the history Pi is discarding, plus the previous Codex checkpoint, so the incoming/kept user message is not duplicated.
-- Retains the normal Codex Responses request envelope, including system instructions, active tool schemas, reasoning settings, prompt-cache fields, and routing fields.
-- Persists Codex's opaque encrypted checkpoint and rehydrates it only for supported Codex requests.
-- Reuses checkpoints only for the same model, trusted endpoint, Codex account, and authentication mode.
-- Bounds input with a Codex-style UTF-8 token estimate and a separate hard byte limit, trims tool output when necessary, retries transient failures, and honors cancellation.
-- Falls back to standard Pi compaction on failure or when custom compaction instructions are requested.
-- Keeps a bounded readable transcript excerpt so switching models or providers remains usable.
-
-The current Codex catalog includes `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Capability detection follows the provider/API contract (`openai-codex` + `openai-codex-responses`) rather than a brittle model-name list. Use Pi 0.85.1 or later.
+Requires **Pi 1.1.0 or later**. The package name is unchanged, but the legacy
+`openai-codex` provider is no longer supported.
 
 ## Installation
 
@@ -33,109 +33,157 @@ Or load it for one run:
 pi -e /path/to/pi-mono/packages/pi-codex-compaction
 ```
 
-## Behavior
+Select a GPT-5/GPT-6 model on provider `openai`, API `openai-responses`, at
+`https://api.openai.com/v1`. No enable command is needed. A previously saved
+`off` setting on the current session branch remains respected.
 
-After a Codex checkpoint is saved, the TUI shows
-`[compaction (codex)] Checkpoint saved.` Pi's built-in `[compaction]` heading
-remains unchanged. The notice is stored as a TUI-only custom session entry, so it
-survives the compaction chat rebuild and reload. It is not added to model context.
-Standard Pi compaction does not create a Codex success notice.
-Print, JSON, and RPC modes receive no extra notification.
+Load this package **after extensions that transform provider requests**. Pi
+orders handlers by extension load order. The compatibility guard cannot prevent
+a later extension from adding incompatible fields.
 
-When Pi starts compaction on a supported Codex model, the extension sends a streamed Responses request whose `input` contains only discardable history, any compatible prior checkpoint, and a `compaction_trigger` item. The normal request envelope is retained because Codex's compaction path is parity-tested against ordinary Responses requests; this includes the effective system prompt, active tool definitions, reasoning level, prompt-cache fields, and routing fields. The request uses the `remote_compaction_v2` beta feature, and the returned opaque checkpoint and bounded provider usage are stored in the Pi compaction entry. Later requests rehydrate the raw checkpoint only when the model, endpoint, account, and authentication mode match; other providers/models receive the bounded textual fallback instead.
+## Controls and thresholds
 
-Compaction uses the model active when Pi triggers it. If a session switches from a larger to a smaller model, the remote request is bounded against the new model's context window and tool outputs are reduced before sending. A previous opaque checkpoint is treated as incompatible after a model, endpoint, account, or authentication-mode switch; Pi's readable previous summary is sent instead. If the full request still cannot fit, the extension leaves compaction to Pi's normal implementation.
+```text
+/server-compaction status
+/server-compaction off
+/server-compaction on
+/server-compaction on 100000
+```
 
-If the remote request fails or returns an unexpected response, Pi's standard compaction path runs. Cancellation remains cancelled. Custom compaction instructions also use Pi's standard path because RemoteCompactionV2 has no documented custom-instructions field. The direct checkpoint request is restricted to `https://chatgpt.com`, rejects redirects, limits request/response size, and never decodes or logs `encrypted_content`. No configuration is required.
+Commands persist the mode and optional token threshold on the current session
+branch, not in global or project settings. `on` without a number uses the startup
+threshold, or the default when none was supplied.
 
-### Size limits
+`--server-compaction` defaults to true.
+`--server-compaction-threshold 100000` supplies a startup threshold.
+Saved command settings take precedence.
 
-Input is estimated as `ceil(UTF-8 request bytes / 4)`, with 8,192 tokens reserved
-from the active model's context window. This uses Codex's ordinary-item heuristic,
-not an exact tokenizer. The complete transformed request is counted, including
-system instructions, tool definitions, and routing fields. Opaque checkpoints
-and image data remain counted at their serialized size; they are not decoded or
-discounted. Non-ASCII text uses UTF-8 bytes, not JavaScript string length.
+The default threshold is 60% of Pi's local trigger
+(`contextWindow - reserveTokens`), including per-model reserve overrides. This
+is a headroom heuristic, not an OpenAI-prescribed optimal threshold. Explicit
+thresholds must be integers of at least 1,000 and below Pi's local trigger.
+Invalid or too-late thresholds leave ordinary inference unchanged.
 
-The uncompressed request also has an independent **16 MiB hard limit**. Tool
-outputs are reduced only when one of these limits is exceeded. User messages,
-tool calls, and opaque checkpoints are not removed. If the remaining request
-still cannot fit, or the model's context limit is unknown, standard Pi compaction
-runs. The estimate can differ from the server's token count; a server rejection
-still uses the existing fallback.
+Very small thresholds can compact repeatedly within one response and increase
+latency and token use. Do not use the 1,000-token protocol-test threshold for
+ordinary long sessions.
 
-### Fallback diagnostics
+## How continuation works
 
-A fallback on a supported model records a local custom session entry with type
-`pi-codex-compaction:fallback:v1`. It contains `version: 1` and a reason:
-`custom-instructions`, `auth-unavailable`, `request-unavailable`,
-`context-window-unavailable`, `context-limit`, `request-size-limit`, or
-`remote-failed`. Size failures also include estimated tokens, token budget,
-request bytes, byte limit, and the number of tool outputs reduced.
-Unexpected preparation failures use `request-unavailable`; `remote-failed`
-is reserved for failures from the transport call.
+The extension adds
+`context_management: [{ type: "compaction", compact_threshold: ... }]`,
+`store: false`, and `stream: true` to eligible ordinary requests. It does not
+construct a separate compaction request or reconstruct tool declarations.
+Pi's actual request retains grammar tools, hidden loadouts, reasoning options,
+Fast settings, and declarations carried through `additional_tools`.
 
-No prompt, tool content, encrypted checkpoint, account identifier, credential, or
-raw provider error is included. These entries are not sent to the model. Pi
-shows a warning only in TUI mode when notifications are available; print, JSON,
-and RPC modes get no extra notifications or console output. Unsupported models
-and cancelled attempts do not create fallback diagnostics. Diagnostic storage
-or notification failure does not stop the standard compactor.
+Text streams normally. After successful completion, the extension commits a
+Pi compaction entry at `turn_end`, before the next assistant response. It stores
+the latest encrypted checkpoint and the exact provider output following it.
+On subsequent requests, it replaces the readable fallback and the retained
+assistant's serialized items with that checkpoint and output suffix. Later
+tool results and messages remain.
 
-## Development
+The original transcript stays in the session file. Reload and tree navigation
+use the selected branch, not a global cache. Turning the mode off stops requesting
+new checkpoints but still replays a compatible saved checkpoint while the
+extension remains loaded.
 
-### Other Codex extensions
+Successful adoption avoids a separate Pi compaction lifecycle, including between
+tool continuations. It does **not** promise zero server-side delay or concurrent
+inference during the server's compaction pass. It does not set `background: true`.
 
-With `pi-fast` installed, direct compaction requests use the current Fast toggle.
-With `pi-codex-tools` installed, `apply_patch` keeps its raw grammar definition,
-custom-tool calls, and custom-tool results during compaction. Neither package is
-required. No package reads a private Pi tool registry.
-With `pi-openai-reasoning` installed, verified Astra requests keep the original
-request effort and receive the current effort as a configuration update.
-Failed compaction does not change saved reasoning state.
+## Support and recovery
 
-Pi 0.85.1 does not expose grammar metadata in `getAllTools()`. Two synchronous,
-versioned `pi.events` contracts let cooperating extensions supply it:
+| Route | Behavior |
+| --- | --- |
+| `openai` + `openai-responses`, official endpoint, GPT-5/GPT-6 | Automatic compaction on by default; server/model availability still applies |
+| Same route with ChatGPT sign-in | Live checkpoint/replay verified with `gpt-6-astra` |
+| Same route with an API key | Mocked contract coverage; no live billing test |
+| Legacy `openai-codex`, custom endpoints, other providers, routed model mismatch | Left unchanged; no compaction or auth hooks for those routes |
 
-- `pi-codex-compaction:tools:v1`: `{ model, tools }`, before provider serialization.
-  A tool owner can attach its own `constrainedSampling` metadata.
-- `pi-codex-compaction:request:v1`: `{ ctx, messages, payload }`, after input
-  assembly and before size checks. A listener can replace `payload`. This event
-  is not the general `before_provider_request` chain and does not carry auth.
-  Size checks use the transformed envelope, including field removals.
+- Requests with `configuration_update`, `compaction_trigger`, an existing
+  `context_management`, stateful continuation, truncation, background processing,
+  or enabled multi-agent mode are not opted in.
+- Keep Pi's normal automatic compaction enabled. If no checkpoint is adopted,
+  its normal threshold and overflow recovery remain available. Manual `/compact`,
+  including custom instructions, uses Pi's standard summarizer.
+- Failed, cancelled, malformed, oversized, or unsupported output does not
+  replace history. An unsuccessful automatic attempt pauses new automatic
+  requests until `/server-compaction on` or session reload. The extension does
+  not issue an extra paid retry or switch credentials; Pi owns its own retries.
+- Adoption supports reasoning, single-text assistant messages, function/custom
+  calls, and compaction items. Other output shapes leave history intact.
+- Replay requires the same model, endpoint, auth mode, credential and relevant
+  headers. Credential rotation, including OAuth refresh, conservatively uses
+  the readable excerpt rather than an unverified checkpoint.
+- Edits or transforms of the retained assistant prevent stale raw replay. The
+  fallback is a bounded excerpt, **not a complete summary**. Edits to history
+  already compacted cannot retroactively change an opaque checkpoint.
+- Pi cannot measure the opaque checkpoint's token footprint natively. Local
+  context estimates are not exact server-context measurements.
+- Cache warming is stopped only when the last ordinary request actually enabled
+  automatic compaction. Turning the toggle off does not make an already-cached
+  automatic request safe to replay; a new ordinary non-automatic request clears
+  that restriction. Unrelated providers retain their normal warming behavior.
+- Usage stays on the ordinary assistant response and is counted once. Bounded
+  success diagnostics stay local; they contain timing and size counters, not
+  conversation content.
 
-Other extensions' private request changes are not applied automatically.
-Unknown third-party grammar metadata needs cooperation through the tools event.
-The checkpoint entry includes standard Pi `usage`, including cache reads and
-cache writes, as well as the original bounded token counters in `details`.
-Costs follow Pi's catalog estimates. They are not a ChatGPT subscription bill.
+## Migration from the legacy provider
 
-### Reference and smoke test
+Legacy RemoteCompactionV2 requests, `chatgpt.com/backend-api` transport, beta
+headers, the temporary `pi-ai/compat` serializer, old transport helper exports,
+and the `pi-codex-compaction:tools:v1` / `:request:v1` event-bus contracts have
+been removed. Fast and grammar integrations now use the ordinary Pi pipeline.
 
-The automated display smoke tests exercise Pi's actual compaction-end handler
-and chat renderer for manual, threshold, and overflow compaction. They check
-redraw, reload, standard compaction, and exclusion from subsequent model requests.
-Only provider responses and terminal I/O are replaced with local fixtures.
+Existing legacy session files are not modified or deleted. Old encrypted
+checkpoints are not migrated or replayed across providers; their readable
+fallback remains available. Use compatible package versions together.
+`pi-fast` and `pi-codex-tools` still support their own legacy-provider use cases;
+this change removes only their obsolete direct-compaction adapters.
 
-Behavior was checked against `openai/codex` commit
-`654b0a77d0d2f81aa21f61caf7af4be88fe550bb` (2026-09-11), notably
-`core/src/compact_remote_v2{,_attempt}.rs`. No Codex code was copied.
-RemoteCompactionV2 is a changing Codex protocol, not the public `/responses/compact`
-API. Async tools and mid-turn steering require upstream Pi support.
+`pi-openai-reasoning` remains a legacy-provider-only extension. This package
+does not migrate it or enable its reasoning-update feature on the public route.
+Automatic compaction and histories containing `configuration_update` are
+incompatible in the public API.
 
-For a small live test, load this package and select `openai-codex/gpt-6-astra`.
-Send two short messages, run `/compact`, then ask about the first message.
-Confirm `[compaction (codex)] Checkpoint saved.` remains visible after the
-compaction finishes and after `/reload`. Then run
-`/compact Focus on recent work` and confirm the standard-compaction warning
-appears without a new Codex success notice.
-Repeat with `/fast on` and `pi-codex-tools` loaded. Check that compaction succeeds,
-the continuation retains context, and session usage includes compaction tokens.
-Use only a temporary file if you test `apply_patch`. Do not generate images.
+## Validation and measured results
+
+Tests use real Pi sessions with mocked transport to cover effective loadouts,
+streaming, tool continuations, checkpoint ordering, branches, reloads,
+cancellation, credential changes, context edits, default-on behavior, and
+the standard compaction safety net.
+
+A small live subscription test with `gpt-6-astra` verified checkpoint adoption,
+replay, and synthetic fact recall. At a deliberately low 1,000-token threshold,
+automatic mode used two requests versus four for standard Pi. The first answer
+completed sooner, but overall elapsed time and reported token use were higher.
+That protocol test did not measure long-session streaming continuity and does
+not establish cost or latency savings.
+
+In a checkout, `tests/AUTOMATIC_BENCHMARK.md` contains the measurements, limits,
+and Codex source comparison. `tests/benchmark-automatic.mjs` is an explicitly
+gated live test and is not run by `npm test`. Live testing requires approval to
+consume usage; use synthetic text, not private session history or images.
 
 ```bash
-npm install
 npm run -w packages/pi-codex-compaction check
 npm test -w packages/pi-codex-compaction
 npm run -w packages/pi-codex-compaction pack:dry-run
 ```
+
+For an approved TUI smoke test, cross the configured threshold in a synthetic
+session, then check facts from earlier turns and a tool continuation. Check replay
+after `/reload`, mode-off, and branch navigation. Successful adoption should
+not start Pi's separate compaction lifecycle.
+
+References:
+
+- [OpenAI compaction guide](https://developers.openai.com/api/docs/guides/compaction)
+- [ChatGPT subscription inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)
+- [Subscription restrictions](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)
+- [Reasoning-update restrictions](https://developers.openai.com/api/docs/guides/deployment-checklist)
+
+Install telemetry is best-effort, once per version. Disable it with
+`PI_OFFLINE=1`, `PI_TELEMETRY=0`, or `enableInstallTelemetry: false`.

@@ -23,9 +23,9 @@ The extension does not read or log prompts, credentials, auth headers, or provid
 
 Fast mode is off by default unless `pi-fast.enabledByDefault` is explicitly `true`. Session toggles are not persisted. Models outside the allowlist are not modified. Fast processing can increase API charges or subscription usage, so the setting is an explicit opt-in and the footer and toggle notifications make the requested state visible. The toggle does not guarantee the server delivers Fast processing, and API token-cost estimates do not establish subscription billing.
 
-The same in-memory service-tier transform applies to the
-`pi-codex-compaction:request:v1` event when that package is installed.
-This does not read the conversation or add a network request.
+Ordinary requests that enable server-side compaction receive the same in-memory
+service-tier transform. The obsolete direct-compaction event-bus adapter has
+been removed. This does not read the conversation or add a network request.
 
 On startup, `@mocito/install-telemetry` sends a best-effort install/update telemetry ping to the configured telemetry endpoint once per package version unless Pi telemetry is disabled, offline mode is enabled, or Pi runs in CI. The ping contains only the package name, version, and parsed platform/runtime/architecture from its User-Agent; it does not include prompts, file paths, config values, environment variables, or API keys.
 

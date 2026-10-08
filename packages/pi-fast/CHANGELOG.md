@@ -8,6 +8,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Changed
 
+- Remove the obsolete direct-compaction event-bus adapter. Public server-side compaction keeps the normal request's Fast tier; legacy provider inference support is unchanged.
 - Update the shared Pi development and contract-test baseline to 1.1.0; require Node.js >=22.19.0 to match the host runtime. Pi remains a host-supplied peer dependency.
 
 ## [0.2.0] - 2026-10-02

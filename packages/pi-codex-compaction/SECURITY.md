@@ -7,46 +7,74 @@ Security fixes are provided for the latest released version of `pi-codex-compact
 ## Reporting a vulnerability
 
 Please do not open a public issue for suspected security vulnerabilities.
-
-Report privately through [GitHub Security Advisories](https://github.com/jvm/pi-mono/security/advisories/new) or by contacting the repository maintainer through GitHub. Include:
-
-- a description of the issue;
-- steps to reproduce;
-- affected versions or commits, if known;
-- any suggested mitigation.
+Report privately through
+[GitHub Security Advisories](https://github.com/jvm/pi-mono/security/advisories/new)
+or contact the maintainer through GitHub. Include the affected version,
+description, reproduction steps, and any suggested mitigation.
 
 ## Security model
 
-`pi-codex-compaction` is a Pi package. Pi extensions execute with the same permissions as the local user running Pi. Users should review installed Pi packages and only install packages from sources they trust.
+Pi extensions execute with the permissions of the local user. Install only
+trusted packages. This extension enables automatic compaction by default only
+for eligible `openai` GPT-5/GPT-6 models on `openai-responses` at the exact
+official endpoint `https://api.openai.com/v1`.
 
-For supported `openai-codex` models, the extension sends the portion of conversation Pi is about to discard to the OpenAI Codex Responses endpoint over HTTPS, using credentials and provider headers resolved by Pi. The request also includes the normal Codex Responses envelope: the effective system prompt, active tool schemas, reasoning settings, and provider-generated cache/routing fields. It stores the provider-issued opaque `encrypted_content` checkpoint in the local Pi session's compaction details so compatible Codex requests can reuse it. The checkpoint is not decoded, printed, or logged.
+It transforms ordinary Pi requests; it does not make direct HTTP inference
+requests, register a provider, or use ChatGPT's legacy backend endpoints.
+Pi owns TLS, transport limits, cancellation, provider retries, authentication,
+and credential refresh. The extension does not copy credentials between
+providers or fall back from subscription authentication to API-key billing.
 
-The extension bounds request, compaction input, and response size, validates the HTTPS endpoint against the official `chatgpt.com` origin, rejects redirects, validates the account claim shape, binds checkpoints to a hashed account identity/model/endpoint/authentication mode, honors Pi cancellation, and retries only transient transport failures. It falls back to standard Pi compaction on authentication, transport, response, or context-limit failures. A bounded textual transcript excerpt remains in the compaction summary so switching to another model or provider does not leave the session with only an unusable Codex checkpoint. The fallback may contain conversation content already present in the local session and is still subject to the user's normal Pi session-file permissions.
+## Checkpoints and local data
 
-The extension never logs prompts, conversation contents, credentials, authorization headers, or raw provider responses. Install/update telemetry is best-effort and sends only package/version/runtime metadata; it can be disabled with `PI_OFFLINE=1`, `PI_TELEMETRY=0`, or Pi's `enableInstallTelemetry: false` setting.
+Raw `response.output_item.done` items are copied, bounded to 1,024 items and
+4 MiB total, and adopted only after matching successful stream completion.
+Added/partial items are never treated as checkpoints. Unknown output forms,
+missing indices, failed streams, and cancellation leave history intact.
+Encrypted checkpoint strings are additionally limited to 2 million characters.
+The complete persisted details are bounded to 4 MiB.
 
-Direct requests allow only the official `/backend-api/codex/responses` endpoint
-on the default HTTPS port, without query strings or fragments. Total request
-time is limited to five minutes, including retries. Completed streams are closed
-without waiting for a server disconnect. A pre-aborted request does no network I/O.
-Null auth headers remove matching model headers; beta features are merged.
+The checkpoint and its exact post-checkpoint output suffix are sensitive session
+data. Provider encryption does not make the surrounding transcript or suffix
+public. Neither is logged or sent through install telemetry.
 
-Cooperating local extensions can inspect and transform compaction inputs through
-the documented event bus before size checks. These events contain no credentials.
-They have the same trust level as other installed Pi extensions.
+A domain-separated HMAC-SHA-256 binds replay to the current credential, auth
+mode, model, endpoint and headers. The provider-issued, high-entropy bearer
+credential and potentially secret headers form the HMAC key material and are
+never stored in checkpoint details. Only non-secret routing/auth-mode metadata
+is used as the HMAC message. This is
+credential binding, not storage or verification of user-chosen passwords.
+Rotation invalidates replay, including OAuth token refresh. The fallback is
+a bounded transcript excerpt, not a complete summary. The original history and
+fallback remain subject to the user's Pi session-file permissions and retention.
 
-Context sizing uses `ceil(UTF-8 serialized request bytes / 4)` with an 8,192-token
-reserve from the active model's context window. It is an estimate, not a strict
-tokenizer bound. The complete transformed envelope is counted, including opaque
-content at its serialized size. A separate 16 MiB uncompressed request limit is
-enforced before network I/O. The HTTPS, redirect, response-size, checkpoint
-compatibility, and cancellation checks remain independent of token estimation.
+Replay checks the canonical retained assistant and serialized output
+fingerprints. Omitted, edited, or transformed messages fall back rather than
+restoring stale raw content. As with Pi text summaries, edits to already-compacted
+source history cannot alter an opaque checkpoint. Legacy checkpoint details are
+not migrated or replayed across provider/authentication boundaries.
 
-Fallback diagnostics store only a fixed reason code and finite non-negative
-size counters in `pi-codex-compaction:fallback:v1` custom session entries.
-These local records never include credentials, account/model identifiers,
-request content, encrypted checkpoints, or raw errors, and do not enter model
-context. No external diagnostic telemetry is added. They use the existing
-session's permissions and retention policy.
+## Extension composition and recovery
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for development and validation instructions.
+Load this extension after request transformers. Its compatibility check cannot
+constrain a later trusted extension that changes the payload. It skips observed
+reasoning configuration updates, stateful continuation, truncation, multi-agent
+requests, and preexisting compaction policies.
+
+Cache warming is stopped only for a cached request that actually enabled
+automatic compaction, because replay could produce an uncommitted checkpoint.
+Other providers and skipped requests retain Pi's normal warming behavior.
+Turning automatic mode off still blocks warming the old automatic request until
+a new ordinary request replaces it.
+
+The extension does not execute tools, duplicate response usage, or issue an
+automatic paid retry after a failed attempt. Pi's standard compaction remains
+available. Local success diagnostics contain only a version, elapsed
+milliseconds, byte count and output-item count.
+
+No project settings are read. Install telemetry is best-effort, once per
+version, with a five-second timeout. It sends only package/version/runtime
+metadata and respects CI, `PI_OFFLINE`, `PI_TELEMETRY`, and
+`enableInstallTelemetry: false`.
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for validation and live-test precautions.

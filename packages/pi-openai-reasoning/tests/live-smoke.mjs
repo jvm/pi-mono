@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { codexHarness } from "../../../tests/codex-harness.mjs";
 import reasoning from "../extensions/index.ts";
-import compaction from "../../pi-codex-compaction/extensions/index.ts";
 import fast from "../../pi-fast/extensions/index.ts";
 import tools from "../../pi-codex-tools/extensions/index.ts";
 
@@ -25,7 +24,7 @@ const observe = (pi) => pi.on("before_provider_request", (event) => {
     grammar: body.tools?.find((t) => t.name === "apply_patch")?.type === "custom",
   });
 });
-const h = await codexHarness([reasoning, compaction, fast, tools, observe], { modelRuntime });
+const h = await codexHarness([reasoning, fast, tools, observe], { modelRuntime });
 let timer;
 async function bounded(run) {
   let expired = false;
@@ -60,11 +59,11 @@ try {
   assert.equal(requests.at(-1).fast, true);
   assert.equal(requests.at(-1).grammar, true);
   const checkpoint = await bounded(() => h.session.compact());
-  assert.equal(checkpoint.details?.kind, "pi-codex-compaction", "Remote compaction fell back");
+  assert.notEqual(checkpoint.details?.kind, "pi-codex-compaction", "Use Pi's standard compactor");
   assert.ok(checkpoint.usage?.totalTokens > 0, "Compaction usage missing");
   await prompt("What word did I ask you to remember? Reply with that word only. Do not use tools.");
   assert.ok(h.session.messages.at(-1).content.some((c) => c.type === "text" && c.text.includes("ORBIT")));
-  assert.equal(requests.at(-1).checkpoint, true);
+  assert.equal(requests.at(-1).checkpoint, false);
   assert.deepEqual(requests.at(-1).updates, ["medium"]);
   assert.equal(requests.at(-1).effort, "medium");
   assert.deepEqual(h.errors, []);
