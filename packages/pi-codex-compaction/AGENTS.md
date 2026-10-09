@@ -11,6 +11,7 @@ Root `AGENTS.md` applies.
 - Adopt only completed, bounded, ordered output. Use `output_item.done`, not `output_item.added`; the terminal output array can be empty.
 - Replay the latest checkpoint and its exact output suffix without duplicating the normalized assistant message or dropping later tool results.
 - Keep ordinary response usage on the assistant entry, never duplicate it on the checkpoint.
+- Verify retained output through the public provider payload boundary with transport disabled. Do not resolve physical Pi AI files or import its serializer subpaths; packed-load tests must not install or link host peers.
 - Bound captured and persisted output, honor cancellation, and never log prompts, credentials, headers, or encrypted content.
 - Preserve Pi's standard compactor as a safety net. Do not claim lower cost or latency without measured evidence.
 

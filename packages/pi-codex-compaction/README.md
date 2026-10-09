@@ -33,6 +33,10 @@ Or load it for one run:
 pi -e /path/to/pi-mono/packages/pi-codex-compaction
 ```
 
+Pi supplies the host packages through its extension loader; this package does
+not install or resolve a separate physical copy of Pi AI. No manual dependency
+installation is required. See Pi's [package dependency contract](https://github.com/earendil-works/pi/blob/v1.1.0/packages/coding-agent/docs/packages.md#declare-dependencies).
+
 Select a GPT-5/GPT-6 model on provider `openai`, API `openai-responses`, at
 `https://api.openai.com/v1`. No enable command is needed. A previously saved
 `off` setting on the current session branch remains respected.
@@ -83,6 +87,13 @@ the latest encrypted checkpoint and the exact provider output following it.
 On subsequent requests, it replaces the readable fallback and the retained
 assistant's serialized items with that checkpoint and output suffix. Later
 tool results and messages remain.
+
+Before adopting a checkpoint, the extension verifies the retained assistant
+through the configured provider's public `streamSimple` / `onPayload` boundary.
+This is a local serialization-only operation: it stops before transport, uses no
+real credential, blocks fetch, and adds no model request or usage. It does not
+import Pi's internal serializers or locate host files on disk. A serialization
+failure leaves history intact.
 
 The original transcript stays in the session file. Reload and tree navigation
 use the selected branch, not a global cache. Turning the mode off stops requesting
@@ -171,7 +182,12 @@ incompatible in the public API.
 Tests use real Pi sessions with mocked transport to cover effective loadouts,
 streaming, tool continuations, checkpoint ordering, branches, reloads,
 cancellation, credential changes, context edits, default-on behavior, and
-the standard compaction safety net.
+the standard compaction safety net. The loading regression test packs the actual
+npm tarball and loads it outside the checkout with only declared runtime
+dependencies—no physical Pi peers. It uses the shipped bundled host's embedded
+module mapping, not just the ordinary SDK's filesystem aliases. It checks CLI
+flag registration and checkpoint adoption, tool continuation, and reload in
+print, JSON, and RPC modes.
 
 A small live subscription test with `gpt-6-astra` verified checkpoint adoption,
 replay, and synthetic fact recall. At a deliberately low 1,000-token threshold,
@@ -190,6 +206,12 @@ npm run -w packages/pi-codex-compaction check
 npm test -w packages/pi-codex-compaction
 npm run -w packages/pi-codex-compaction pack:dry-run
 ```
+
+Before releasing, also install the candidate tarball outside the checkout with
+host-peer installation suppressed, then load it through the installed Pi CLI.
+`pi -ne -e /path/to/installed/package --offline --help` must show both
+`--server-compaction` flags without loading errors or host-dependency warnings.
+Never add Pi peers to the candidate directory to make this smoke test pass.
 
 For an approved TUI smoke test, cross the configured threshold in a synthetic
 session, then check facts from earlier turns and a tool continuation. Check replay
