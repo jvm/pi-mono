@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-09
+
+### Fixed
+
+- Keep Pi AI exclusively as a host-supplied peer dependency to avoid extension-loader warnings and duplicate runtime modules.
+
 ## [0.2.1] - 2026-10-09
 
 ### Fixed

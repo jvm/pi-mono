@@ -1,6 +1,6 @@
 {
   "name": "pi-codex-compaction",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Keep Pi sessions flowing with automatic server-side compaction on public OpenAI Responses.",
   "type": "module",
   "license": "MIT",
@@ -65,7 +65,6 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "1.1.0",
     "@mocito/install-telemetry": "0.1.1"
   }
 }
