@@ -60,3 +60,9 @@ Before opening a pull request:
 ## Code of conduct
 
 This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md).
+## Pi 1.1.0 terminal audit
+
+From the monorepo root, run `node --import tsx --test tests/tui-contracts.test.mjs`
+alongside the package tests. `tests/TUI_AUDIT.md` records coverage, known host
+limitations, and the disposable-profile physical-terminal acceptance procedure.
+The startup patch remains isolated; no unreleased cursor API is required.

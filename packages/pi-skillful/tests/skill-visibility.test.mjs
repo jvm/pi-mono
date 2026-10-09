@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import test from "node:test";
 import { formatSkillsForPrompt, initTheme, InteractiveMode } from "@earendil-works/pi-coding-agent";
-import { Container, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, TuiAltScreen, TuiMainScreen, visibleWidth } from "@earendil-works/pi-tui";
 
 const home = await mkdtemp(join(tmpdir(), "pi-skillful-visibility-test-"));
 process.env.HOME = home;
@@ -228,12 +228,14 @@ test("real Pi startup renderer preserves colors through themes, expansion, and r
   await writeSettings(globalSettingsPath, { skillful: { hiddenSkills: ["hidden"] } });
   let { handlers } = registerVisibility();
   let palette = "first";
+  let actualTheme;
   const ctx = {
     cwd,
     mode: "tui",
     isProjectTrusted: () => false,
     ui: {
       get theme() {
+        if (actualTheme) return actualTheme;
         const name = palette;
         return { fg: (color, text) => `<${name}:${color}>${text}</${name}:${color}>` };
       },
@@ -320,6 +322,49 @@ test("real Pi startup renderer preserves colors through themes, expansion, and r
   skillsSection().setExpanded(false);
   assert.ok(render().includes("<second:error>visible</second:error>"));
 
+  // Test-only private theme binding: production reads ctx.ui.theme.
+  const themeModule = await import(new URL("./modes/interactive/theme/theme.js",
+    import.meta.resolve("@earendil-works/pi-coding-agent")));
+  for (const Engine of [TuiMainScreen, TuiAltScreen]) {
+    const terminal = {
+      columns: 80, rows: 30, kittyProtocolActive: false, output: "",
+      start(_input, resize) { this.resize = resize; }, stop() {}, async drainInput() {},
+      write(text) { this.output += text; }, moveBy() {}, hideCursor() {}, showCursor() {},
+      clearLine() {}, clearFromCursor() {}, clearScreen() {}, setTitle() {},
+      setProgress() {}, setProgramStatus() {},
+    };
+    const tui = new Engine(terminal);
+    tui.addChild(instance.loadedResourcesContainer);
+    tui.start();
+    try {
+      for (const name of ["dark", "light", "system"]) {
+        initTheme(name, false);
+        actualTheme = themeModule.theme;
+        for (let reload = 0; reload < 2; reload++) {
+          ({ handlers } = registerVisibility());
+          await handlers.get("session_start")({ reason: "reload" }, ctx);
+          expanded = false;
+          showResources();
+          for (const width of [24, 80, 120, 40]) {
+            terminal.columns = width;
+            terminal.resize();
+            tui.invalidate();
+            for (const line of instance.loadedResourcesContainer.render(width)) {
+              assert.ok(visibleWidth(line) <= width);
+            }
+            tui.renderNow();
+          }
+          const text = render();
+          assert.equal((stripVTControlCharacters(text).match(/\[Skills\]/g) ?? []).length, 1);
+          assert.ok(text.includes(actualTheme.fg("error", "visible")));
+          skillsSection().setExpanded(true);
+          assert.ok(render().includes("native expanded skill paths"));
+          skillsSection().setExpanded(false);
+        }
+      }
+      assert.ok(terminal.output.length > 0);
+    } finally { tui.stop(); }
+  }
   InteractiveMode.prototype.showLoadedResources.call(instance, { force: false });
   assert.equal(instance.loadedResourcesContainer.children.length, 0);
 });

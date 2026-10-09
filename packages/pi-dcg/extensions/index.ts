@@ -101,26 +101,26 @@ function setStatus(
   config: DcgBridgeConfig,
   version?: string,
 ): void {
-  if (!ctx.hasUI) return;
+  if (ctx.mode !== "tui") return;
   try {
     if (health === "active") {
       const label = version ? `dcg ${version}` : "dcg active";
-      ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("success", `shield ${label}`));
+      ctx.ui.setStatus(STATUS_KEY, `shield ${label}`);
       return;
     }
     if (health === "degraded") {
       const behavior = config.onError === "block" ? "blocking" : "fail-open";
-      ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("warning", `shield dcg unavailable (${behavior})`));
+      ctx.ui.setStatus(STATUS_KEY, `shield dcg unavailable (${behavior})`);
       return;
     }
-    ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("muted", "shield dcg checking"));
+    ctx.ui.setStatus(STATUS_KEY, "shield dcg checking");
   } catch {
     // Status rendering is advisory and must never alter a dcg decision.
   }
 }
 
 function clearStatus(ctx: ExtensionContext): void {
-  if (!ctx.hasUI) return;
+  if (ctx.mode !== "tui") return;
   try {
     ctx.ui.setStatus(STATUS_KEY, undefined);
   } catch {

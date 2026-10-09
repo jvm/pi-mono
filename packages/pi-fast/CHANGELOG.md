@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep footer state labels palette-neutral instead of retaining ANSI colors from a previous theme.
+
 ### Documentation
 
 - Add provider/auth/billing and safe-fallback matrix; correct the native OAuth smoke-test explanation for the Pi 1.1.0 baseline.

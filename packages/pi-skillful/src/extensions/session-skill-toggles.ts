@@ -38,7 +38,7 @@ interface SessionToggleState {
   installedEditor: boolean;
   previousEditorFactory: SkillfulEditorFactory | undefined;
   activeTui: TUI | undefined;
-  theme: Theme | undefined;
+  theme: (() => Theme) | undefined;
   notify: (message: string, type?: "info" | "warning" | "error") => void;
 }
 
@@ -77,7 +77,7 @@ export default function sessionSkillToggles(pi: ExtensionAPI) {
       installedEditor: false,
       previousEditorFactory: undefined,
       activeTui: undefined,
-      theme: ctx.ui.theme,
+      theme: () => ctx.ui.theme,
       notify: ctx.ui.notify.bind(ctx.ui),
     };
 
@@ -371,7 +371,7 @@ function renderToggleBorder(width: number, borderColor: (text: string) => string
   const fittedContent = truncateToWidth(renderToggleSegments(available), available, "");
   const used = BORDER_PREFIX_WIDTH + visibleWidth(fittedContent) + BORDER_SUFFIX_WIDTH;
   const fill = borderColor("─".repeat(Math.max(0, width - used)));
-  return `${borderColor(BORDER_PREFIX)}${fittedContent}${BORDER_SUFFIX}${fill}`;
+  return truncateToWidth(`${borderColor(BORDER_PREFIX)}${fittedContent}${BORDER_SUFFIX}${fill}`, width, "");
 }
 
 function renderToggleSegments(availableWidth: number): string {
@@ -394,5 +394,5 @@ function renderToggleSegments(availableWidth: number): string {
 }
 
 function stateThemeFg(color: "accent" | "muted", text: string): string {
-  return state.theme?.fg(color, text) ?? text;
+  return state.theme?.().fg(color, text) ?? text;
 }
