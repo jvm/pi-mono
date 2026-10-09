@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Check } from "typebox/value";
 import { handleGoalCommand, registerGoalTools, GoalContinuationScheduler, filterGoalContextMessages } from "../src/index.ts";
 
 function makeCtx(branch = []) {
@@ -47,6 +48,31 @@ function makeCommandRuntime(initial = null) {
     scheduleContinuation: (_ctx, reason) => schedules.push(reason),
   };
 }
+
+test("goal tools declare and return nullable/optional summaries without private accounting state", async () => {
+  const pi = makePi();
+  const runtime = makeCommandRuntime();
+  registerGoalTools(pi, runtime);
+  const get = pi.tools.get("get_goal");
+  const create = pi.tools.get("create_goal");
+  assert.equal(get.executionMode, "sequential");
+  assert.equal(get.annotations.readOnlyHint, false);
+  const empty = await get.execute("empty", {}, undefined, undefined, makeCtx());
+  assert.deepEqual(empty.structuredContent, { goal: null });
+  assert.ok(Check(get.outputSchema, empty.structuredContent));
+  const created = await create.execute("created", { objective: "fixture" }, undefined, undefined, makeCtx());
+  assert.ok(Check(create.outputSchema, created.structuredContent));
+  assert.equal(created.structuredContent.goal.tokenBudget, undefined);
+  assert.equal(created.structuredContent.goal.accountedUsage, undefined);
+  assert.deepEqual(JSON.parse(created.content[0].text), created.structuredContent);
+  // Legacy oversized goals remain inspectable, not truncated or forced active.
+  runtime.setGoal({ ...runtime.getGoal(), objective: "x".repeat(4001), status: "paused" });
+  const legacy = await get.execute("legacy", {}, undefined, undefined, makeCtx());
+  assert.ok(Check(get.outputSchema, legacy.structuredContent));
+  assert.equal(legacy.structuredContent.goal.objective.length, 4001);
+  assert.equal(pi.tools.get("update_goal").outputSchema, undefined);
+  assert.equal(pi.tools.get("update_goal").exposure, "model-only");
+});
 
 test("/goal creates, pauses, resumes, budgets, and clears", async () => {
   const pi = makePi();

@@ -85,6 +85,7 @@ export async function codexHarness(factories, options = {}) {
     resourceLoader: loader, thinkingLevel: "low",
     sessionStartEvent: options.sessionStartEvent,
     ...(options.tools ? { tools: options.tools } : {}),
+    ...(options.excludeTools ? { excludeTools: options.excludeTools } : {}),
   });
   if (extensionsResult.errors.length) throw new Error("Fixture extension load failed");
   await session.bindExtensions({ mode: "print", ...options.bindings, onError: (error) => errors.push(error) });

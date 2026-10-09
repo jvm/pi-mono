@@ -64,6 +64,36 @@ test("changed session config refreshes provider-tailored tools", () => {
   assert(propNames(fetchTools[1].parameters).includes("method"));
 });
 
+test("session config changes disable retained research definitions when keys disappear", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
+  const configPath = join(cwd, ".pi-web-kit.json");
+  const tools = new Map();
+  let active = [];
+  let sessionStart;
+  extension({
+    registerFlag() {},
+    getFlag() { return undefined; },
+    registerTool(tool) { tools.set(tool.name, tool); if (tool.defaultActive !== false) active.push(tool.name); },
+    getActiveTools() { return active; },
+    setActiveTools(names) { active = names; },
+    on(name, handler) { if (name === "session_start") sessionStart = handler; },
+  });
+  writeFileSync(configPath, JSON.stringify({ apiKeys: { exa: "synthetic", context7: "synthetic" } }));
+  sessionStart({}, { cwd, isProjectTrusted: () => true });
+  assert.ok(active.includes("library_docs") && active.includes("code_search"));
+  writeFileSync(configPath, JSON.stringify({ apiKeys: { exa: "", context7: "" } }));
+  sessionStart({}, { cwd, isProjectTrusted: () => true });
+  assert.ok(tools.has("library_docs"), "the host can retain an inactive definition");
+  assert.ok(!active.includes("library_docs") && !active.includes("code_search"));
+});
+
+test("configuration errors do not publish raw JSON containing credentials", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
+  writeFileSync(join(cwd, ".pi-web-kit.json"), '{"private-configuration-value": not-valid-json}');
+  assert.throws(() => registerWithFlags({}, { cwd, trusted: true }),
+    { message: "Web configuration is invalid. Check provider names, flags and config JSON." });
+});
+
 test("project config controls tool schemas only for trusted projects", () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
   writeFileSync(join(cwd, ".pi-web-kit.json"), JSON.stringify({ provider_fetch: "markdown_new" }));

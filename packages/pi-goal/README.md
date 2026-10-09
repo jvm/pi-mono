@@ -59,6 +59,43 @@ assistant turn. `get_goal` and `create_goal` remain callable from scripts.
 The extension enforces this call boundary, not the truth of the model's
 verification evidence. Trusted extensions still run with the user's permissions.
 
+### Structured script contract
+
+On Pi 1.1.0 or newer, `get_goal` and `create_goal` declare output schemas:
+
+- `get_goal` returns `{ goal: summary | null }`, including a stable `null` when
+  no goal exists. Its direct no-goal text stays `No goal is set.`.
+- `create_goal` returns `{ goal: summary }`. It still requires an explicit
+  creation request; discovery metadata is not permission to create a goal.
+- `summary` contains `goalId`, `objective`, `status`, `tokensUsed`,
+  `timeUsedSeconds`, `createdAt`, `updatedAt`, and optional `tokenBudget`,
+  `remainingTokens`, `activeStartedAt`. Internal accounting ledgers,
+  verification metadata and branch entries are not included.
+
+```js
+const { goal } = await tools.get_goal({});
+text(goal ? { status: goal.status, remainingTokens: goal.remainingTokens } : "No goal");
+```
+
+Remove old `JSON.parse(await tools.get_goal({}))` wrappers. Direct results remain
+readable JSON and the renderers retain their summaries. Invalid requests and
+creation conflicts throw; scripts must catch rejection. Neither tool uses a
+structured success object with `isError: true`. Legacy oversized objectives remain
+inspectable without silent truncation; new objectives retain the 4,000-character
+input limit.
+
+Await `describeNamespace("goal")`, `describeTool("get_goal")`, or
+`searchTools("goal budget", { namespace: "goal" })`, including with zero inline
+budget. No deferred/codemode-only option or default exposure change is added.
+`update_goal` remains absent from nested discovery and has no output schema.
+
+All goal tools run sequentially. `get_goal` is **not** annotated read-only because
+it refreshes and can persist usage accounting; its repeated bookkeeping is
+idempotent. Creation is non-idempotent. Terminal update is destructive and
+non-idempotent. All are local-only, and the annotations are advisory, not
+approval or evidence verification. Pi owns aggregation of nested usage; these
+snapshots do not add a second usage report.
+
 ## Behavior
 
 Goal state is stored as immutable `pi-goal` custom session entries and reconstructed from `ctx.sessionManager.getBranch()`, so state follows Pi session branches, tree navigation, forks, and reloads.

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import { Type, type TSchema } from "typebox";
 import { fetchCache, type CachedPage } from "../src/cache.js";
 import { resolveConfig } from "../src/config.js";
 import { applySearchContextBudget, capSearchResultLimit, DEFAULT_FETCH_LIMIT, DEFAULT_NUM_RESULTS, DEFAULT_SEARCH_CONTEXT_TOKENS, MAX_LIMIT, MAX_NUM_RESULTS, MAX_OFFSET, MAX_QUERY_COUNT, MAX_SEARCH_CONTEXT_TOKENS, MAX_URL_COUNT, MULTI_FETCH_LIMIT, safePrefix, TINYFISH_MAX_PAGE } from "../src/limits.js";
@@ -10,6 +10,9 @@ import { mapFetchResults } from "../src/providers/fallback.js";
 import type { FetchProviderName, SearchProviderName, WebFetchResult } from "../src/types.js";
 import { canonicalWebUrl, normalizeUrlInput } from "../src/urls.js";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
+import { projectOutput, publicPageError, redactOutput, redactText, WEB_OUTPUT_SCHEMAS, WEB_TOOL_METADATA } from "../src/output.js";
+
+const REGISTERED_TOOLS_ENTRY = "pi-web-kit:registered-tools";
 
 export default function (pi: ExtensionAPI) {
   void reportInstallTelemetry();
@@ -23,18 +26,95 @@ export default function (pi: ExtensionAPI) {
   });
 
   let registeredConfig = "";
-  pi.on("session_start", (_event, ctx) => {
+  let rememberedTools: string[] | undefined;
+  pi.on("session_start", (event, ctx) => {
     const startupConfig = runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx));
     const signature = toolConfigSignature(startupConfig);
     if (signature === registeredConfig) return;
-    registerTools(pi, startupConfig);
-    syncOptionalTools(pi, startupConfig);
+    const available = [
+      "web_search", "web_fetch",
+      ...(startupConfig.apiKeys.context7 ? ["library_search", "library_docs"] : []),
+      ...(startupConfig.apiKeys.exa ? ["code_search"] : []),
+    ];
+    const previous = registrationHistory(ctx);
+    // Remember availability, not activation. Pi owns active/pending selection.
+    // Without history (an older session), conservatively preserve inactivity on
+    // the first reload instead of guessing which tools were manually disabled.
+    registerTools(pi, startupConfig, event.reason === "reload" ? new Set(previous ?? available) : undefined);
+    rememberedTools = recordRegisteredTools(pi, ctx, available);
+    // A session change can drop provider credentials without replacing this
+    // extension instance. Retained definitions must not remain active then.
+    if (typeof pi.getActiveTools === "function" && typeof pi.setActiveTools === "function") {
+      const unavailable = new Set([
+        ...(!startupConfig.apiKeys.context7 ? ["library_search", "library_docs"] : []),
+        ...(!startupConfig.apiKeys.exa ? ["code_search"] : []),
+      ]);
+      const active = pi.getActiveTools();
+      if (active.some(name => unavailable.has(name))) pi.setActiveTools(active.filter(name => !unavailable.has(name)));
+    }
     registeredConfig = signature;
+  });
+  pi.on("session_shutdown", (event, ctx) => {
+    // Tree navigation can restore an older branch record while the live
+    // registry still knows newer tools. Save that fact before runtime teardown.
+    if (event.reason === "reload" && rememberedTools) recordRegisteredTools(pi, ctx, rememberedTools);
   });
 }
 
-function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolveConfig>) {
-  pi.registerTool({
+function registrationHistory(ctx: ExtensionContext): string[] | undefined {
+  const entry = ctx.sessionManager?.getBranch().filter(item => item.type === "custom" && item.customType === REGISTERED_TOOLS_ENTRY).at(-1);
+  return entry?.type === "custom" ? registeredToolNames(entry.data) : undefined;
+}
+
+function recordRegisteredTools(pi: ExtensionAPI, ctx: ExtensionContext, tools: readonly string[]): string[] {
+  const previous = registrationHistory(ctx);
+  const remembered = [...new Set([...(previous ?? []), ...tools])].sort();
+  if (!previous || JSON.stringify(previous) !== JSON.stringify(remembered)) {
+    pi.appendEntry?.(REGISTERED_TOOLS_ENTRY, { version: 1, tools: remembered });
+  }
+  return remembered;
+}
+
+function registeredToolNames(data: unknown): string[] | undefined {
+  if (!data || typeof data !== "object" || !("version" in data) || data.version !== 1
+    || !("tools" in data) || !Array.isArray(data.tools)
+    || data.tools.length > Object.keys(WEB_OUTPUT_SCHEMAS).length
+    || !data.tools.every(name => typeof name === "string" && Object.hasOwn(WEB_OUTPUT_SCHEMAS, name))) return undefined;
+  return [...new Set(data.tools)].sort();
+}
+
+function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolveConfig>, previouslyRegistered?: ReadonlySet<string>) {
+  // All five tools stay direct. Metadata must not make excluded/inactive tools callable.
+  type DataTool = Omit<ToolDefinition, "execute"> & {
+    execute(...args: Parameters<ToolDefinition["execute"]>): Promise<unknown>;
+  };
+  const settings = pi.getSettings?.().defaultTools;
+  const disabledByDefault = (name: string) => Array.isArray(settings)
+    && settings.filter(entry => entry === `+${name}` || entry === `-${name}`).at(-1) === `-${name}`;
+  const register = (tool: DataTool) => pi.registerTool({
+    ...WEB_TOOL_METADATA,
+    ...tool,
+    // Late registration must not undo explicit settings or session deactivation.
+    // Pi restores previously active/pending names on reload even when this is false.
+    // Only first availability uses the default; re-registration cannot undo a
+    // manual deactivation, even if settings positively select this tool.
+    defaultActive: !previouslyRegistered?.has(tool.name) && !disabledByDefault(tool.name),
+    outputSchema: WEB_OUTPUT_SCHEMAS[tool.name],
+    async execute(id, args, signal, onUpdate, ctx) {
+      const secrets = Object.values(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)).apiKeys);
+      try {
+        const result = await tool.execute(id, args, signal,
+          onUpdate ? update => onUpdate(redactOutput(update, secrets)) : undefined, ctx);
+        // Some providers represent an aborted fetch as per-page failures.
+        // Cancellation is still a failed call, never a successful data snapshot.
+        if (signal?.aborted) throw new Error("Web tool cancelled.");
+        return jsonToolResult(result, WEB_OUTPUT_SCHEMAS[tool.name], secrets);
+      } catch (error) {
+        throw new Error(redactText(error instanceof Error ? error.message : "Web tool failed.", secrets).slice(0, 1000));
+      }
+    },
+  });
+  register({
     name: "web_search",
     label: "Web Search",
     description: buildSearchDescription(startupConfig.provider_search),
@@ -90,7 +170,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
         emitProgress(onUpdate, progress);
       }
       const result = { provider: config.provider_search, queries: grouped };
-      return jsonToolResult(result);
+      return result;
     },
     renderCall(args, theme) {
       return new Text(renderWebCall("search", args as Record<string, any>, theme), 0, 0);
@@ -100,7 +180,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
     },
   });
 
-  pi.registerTool({
+  register({
     name: "web_fetch",
     label: "Web Fetch",
     description: buildFetchDescription(startupConfig.provider_fetch),
@@ -122,7 +202,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
         updateFetchProgress(progress, event);
         emitProgress(onUpdate, progress);
       });
-      return jsonToolResult(result);
+      return result;
     },
     renderCall(args, theme) {
       return new Text(renderWebCall("fetch", args as Record<string, any>, theme), 0, 0);
@@ -133,7 +213,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
   });
 
   if (startupConfig.apiKeys.context7) {
-    pi.registerTool({
+    register({
       name: "library_search",
       label: "Library Search",
       description: "Resolve library, package, framework, SDK, API, or CLI names to canonical library IDs with version, trust, and snippet metadata. Use when you need to inspect candidate matches (official sources, versions, forks); library_docs resolves names automatically.",
@@ -147,11 +227,11 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
         const limit = parseInteger(params.limit, 10, "limit", 1, MAX_NUM_RESULTS);
         const provider = createContext7Provider(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)));
         const result = await provider.searchLibraries({ libraryName, query, fast: params.fast === true, limit }, signal);
-        return jsonToolResult(result);
+        return result;
       },
     });
 
-    pi.registerTool({
+    register({
       name: "library_docs",
       label: "Library Docs",
       description: "Fetch current, version-aware documentation and code examples for a library. Pass libraryName to resolve it automatically, or a known libraryId.",
@@ -171,13 +251,13 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
           if (!libraryId) throw new Error(`No library found for '${libraryName}'. Try library_search with a more specific name.`);
         }
         const result = await provider.getDocs({ libraryId, query, version: optionalString(params.version, "version"), type: "json", fast: params.fast === true, limit }, signal);
-        return jsonToolResult(result);
+        return result;
       },
     });
   }
 
   if (startupConfig.apiKeys.exa) {
-    pi.registerTool({
+    register({
       name: "code_search",
       label: "Code Search",
       description: "Find practical code examples, usage patterns, setup snippets, migrations, and error context.",
@@ -193,13 +273,11 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
         const tokensNum = parseTokensNum(params.tokensNum);
         const provider = createCodeSearchProvider(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)));
         const result = await provider.searchCode({ query, tokensNum }, signal);
-        return jsonToolResult(result);
+        return result;
       },
     });
   }
 }
-
-const OPTIONAL_TOOLS = ["library_search", "library_docs", "code_search"];
 
 function toolConfigSignature(config: ReturnType<typeof resolveConfig>): string {
   return JSON.stringify({
@@ -208,16 +286,6 @@ function toolConfigSignature(config: ReturnType<typeof resolveConfig>): string {
     context7: !!config.apiKeys.context7,
     exa: !!config.apiKeys.exa,
   });
-}
-
-function syncOptionalTools(pi: ExtensionAPI, config: ReturnType<typeof resolveConfig>) {
-  if (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function") return;
-  const enabled = [
-    ...(config.apiKeys.context7 ? ["library_search", "library_docs"] : []),
-    ...(config.apiKeys.exa ? ["code_search"] : []),
-  ];
-  const active = pi.getActiveTools().filter((name) => !OPTIONAL_TOOLS.includes(name));
-  pi.setActiveTools([...new Set([...active, ...enabled])]);
 }
 
 type ProgressKind = "search" | "fetch";
@@ -379,7 +447,7 @@ export async function fetchWithCache(providerName: FetchProviderName, params: Re
     for (const requestedUrl of missing) {
       const item = mapped.get(requestedUrl);
       if (!item || item.error) {
-        const error = item?.error ?? "No content returned.";
+        const error = publicPageError(item?.error ?? "No content returned.");
         pages.set(requestedUrl, { error, cached: false, refreshed: refresh });
         onProgress?.({ status: "error", url: requestedUrl, error });
         continue;
@@ -440,19 +508,28 @@ function projectIsTrusted(ctx: { isProjectTrusted?: () => boolean }): boolean {
 }
 
 function runtimeConfig(pi: ExtensionAPI, cwd: string, projectTrusted: boolean) {
-  return resolveConfig(
-    { providerSearch: pi.getFlag("web-provider-search"), providerFetch: pi.getFlag("web-provider-fetch") },
-    cwd,
-    process.env,
-    { includeProject: projectTrusted },
-  );
+  try {
+    return resolveConfig(
+      { providerSearch: pi.getFlag("web-provider-search"), providerFetch: pi.getFlag("web-provider-fetch") },
+      cwd,
+      process.env,
+      { includeProject: projectTrusted },
+    );
+  } catch {
+    // JSON parse and invalid-provider errors can echo credential-bearing config.
+    throw new Error("Web configuration is invalid. Check provider names, flags and config JSON.");
+  }
 }
 
 const MAX_OUTPUT_BYTES = 50_000;
 
-export function jsonToolResult(result: unknown) {
-  const bounded = boundStructuredResult(result);
-  return { content: [{ type: "text" as const, text: JSON.stringify(bounded) }], details: boundedDetails(bounded) };
+export function jsonToolResult(result: unknown, schema?: TSchema, secrets: readonly string[] = []) {
+  const publicResult = schema ? projectOutput(schema, result) : result;
+  const bounded = boundStructuredResult(redactOutput(publicResult, secrets));
+  const text = JSON.stringify(bounded);
+  // The model and scripts receive exactly the same bounded, redacted JSON value.
+  const structuredContent = JSON.parse(text);
+  return { content: [{ type: "text" as const, text }], structuredContent, details: boundedDetails(structuredContent) };
 }
 
 function boundStructuredResult(result: unknown): unknown {

@@ -534,7 +534,7 @@ for (const status of statuses) {
     ]) {
       await h.session.setModel(model);
       requests = mockResponses(t, [
-        (request) => toolResponse([codemodeCall(request, 'const {goal} = JSON.parse(await tools.get_goal({})); text({status: goal.status, goalId: goal.goalId});')]),
+        (request) => toolResponse([codemodeCall(request, 'const {goal} = await tools.get_goal({}); text({status: goal.status, goalId: goal.goalId});')]),
         () => textResponse(),
       ]);
       await h.session.prompt("Inspect the reconstructed terminal branch.");
@@ -547,7 +547,7 @@ for (const status of statuses) {
     assert.equal((await h.session.navigateTree(pausedLeaf, { summarize: false })).cancelled, false);
     await h.session.reload();
     requests = mockResponses(t, [
-      (request) => toolResponse([codemodeCall(request, 'const {goal} = JSON.parse(await tools.get_goal({})); text({status: goal.status});')]),
+      (request) => toolResponse([codemodeCall(request, 'const {goal} = await tools.get_goal({}); text({status: goal.status});')]),
       () => textResponse(),
     ]);
     await h.session.prompt("Inspect the independent pre-completion branch.");

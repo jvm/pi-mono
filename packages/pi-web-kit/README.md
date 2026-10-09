@@ -10,6 +10,7 @@ Give [Pi](https://pi.dev) current web knowledge, authoritative library docs, and
 - **Use docs that match the task** — resolve libraries and retrieve focused, version-aware documentation with code examples.
 - **Find proven implementation patterns** — search practical usage, setup, migrations, and error context across real code.
 - **Spend context wisely** — compact search results, chunked page reads, bounded output, and fetch caching keep research useful without overwhelming the model.
+- **Compose research in scripts** — typed results let codemode filter and join data without parsing model-facing text.
 - **Choose your providers** — mix Exa, TinyFish, Brave, Firecrawl, markdown.new, Context7, and Exa Code based on coverage, cost, and credentials.
 
 ## Installation
@@ -39,6 +40,7 @@ pi -e /path/to/pi-mono/packages/pi-web-kit --web-provider-fetch markdown_new --p
 ```
 
 This is an npm-compatible TypeScript Pi package. Bun is not required.
+Use Pi 1.1.0 or newer and Node.js >=22.19.0 for the structured tool contracts.
 
 ## Quick usage
 
@@ -234,11 +236,87 @@ Finds practical code examples, implementation context, setup snippets, migration
 
 Cache keys include the provider, canonical URL, fetch-affecting parameters, relevant provider defaults, and an opaque SHA-256 API-key/account scope. Internal cache keys are never returned in tool output. `refresh: true` bypasses and replaces the cached entry.
 
+## Structured results and discovery
+
+All five tools declare `outputSchema` and return objects through `structuredContent`.
+Codemode receives those objects directly; remove old `JSON.parse(await tools.…())`
+wrappers. Direct calls still return useful JSON text with exactly the same
+bounded, redacted value. Renderer `details` remain compact and are not the
+script API.
+
+| Tool | Script result |
+| --- | --- |
+| `web_search` | `{ provider, queries: [{ query, requestedResultLimit, effectiveResultLimit, requestedContextTokens?, effectiveContextTokens, contextCharacters, omittedContextCharacters?, resultCount, omittedResultCount?, results }] }`. Each result has `url` and optional `title`, `snippet`, `content`, `contentFormat`, `siteName`, `position`. |
+| `web_fetch` | `{ provider, results }`. Each item is either `{ url, error }` or `{ url, fetchedUrl, title?, content, format, cached, refreshed, range }`. `range` has `offset`, `limit`, `returned`, `total`, `truncated`, `hasPrevious`, `hasNext`, and optional `nextOffset`. |
+| `library_search` | `{ provider: "context7", libraryName, query, searchFilterApplied?, results }`. Each candidate has `id`; title, description, branch, dates, state, scores, counts, stars and versions are optional. |
+| `library_docs` | `{ provider: "context7", libraryId, query, codeSnippets, infoSnippets }`. Code snippets expose optional title/description/language/ID/page/source/token fields and `codeList: [{ language, code }]`; info snippets require `content` with optional page/breadcrumb/token fields. |
+| `code_search` | `{ provider: "exa", query, response, resultsCount?, searchTime?, outputTokens?, requestId? }`. Provider token counts are informational, not a second Pi usage report. |
+
+Every result also allows the top-level fallback `{ truncated: true, message }`
+when metadata alone cannot fit. Check this before reading ordinary fields.
+Both text and structured payloads stay within the same 50,000-byte JSON budget.
+Fetch slices retain range continuation; search results report omitted counts.
+Missing/invalid optional provider fields are omitted. Invalid required fields
+fail the call rather than yielding a guessed success object.
+
+```js
+const search = await tools.web_search({ query: "Pi extension API", numResults: 3 });
+if ("truncated" in search) throw new Error(search.message);
+const urls = search.queries.flatMap(q => q.results.map(r => r.url));
+if (urls.length) {
+  const pages = await tools.web_fetch({ urls: urls.slice(0, 10) });
+  if ("truncated" in pages) throw new Error(pages.message);
+  text(pages.results.filter(r => !("error" in r)).map(r => ({
+    url: r.url, excerpt: r.content.slice(0, 500), nextOffset: r.range.nextOffset
+  })));
+}
+```
+
+Validation, whole-request/provider, malformed-output and cancellation failures
+throw: direct calls become Pi tool errors and scripts must use `try`/`catch` or
+`Promise.allSettled`. Individual fetch failures are successful result data with
+an `error` field, not `isError: true`. These tools do not return structured success
+objects alongside `isError: true`. A trusted result hook can replace that contract;
+annotations do not bypass hooks or approvals.
+
+The namespace is `web`, not a name prefix: calls remain `tools.web_fetch(…)`.
+`await describeNamespace("web")`, `await describeTool("web_fetch")`, and
+`await searchTools("page content", { namespace: "web" })` work even with
+`codemode.inlineBudget: 0`. Independent reads can run in parallel. The advisory
+hints are read-only, non-destructive, idempotent, and open-world: repeated reads
+can return different content and incur provider charges.
+
+Direct exposure remains the default, and codemode is optional. No package-level
+deferred/codemode exposure switch is added: it would make inactive direct tools
+nested-callable and change the meaning of disabling them. Use Pi's `codemode.mode`
+(`on` or `only`) and `inlineBudget` to reduce declarations while retaining the
+active-tool boundary. Optional research tools still require their provider keys.
+Explicit `defaultTools` `-name` entries are honored at late registration; reload
+restores Pi's active selection rather than re-enabling manually disabled tools.
+New optional tools activate when credentials first become available on reload,
+including existing positive `defaultTools` selections. Previously registered
+tools are not force-reactivated, even if settings still positively select them.
+The extension records only previously registered tool names in branch-local
+`pi-web-kit:registered-tools` session metadata, outside model context; it does
+not store activation choices or credentials. The record is refreshed before
+reload so navigating to older branch history cannot revive a manually disabled
+tool. Older sessions without this metadata preserve inactivity on their first
+reload, so they may require explicit activation or a restart.
+Malformed/unknown-version metadata uses the same
+conservative fallback.
+CLI exclusions remain host-enforced.
+
 ## Privacy and security
 
 `pi-web-kit` sends search queries and fetched URLs to the configured provider. Developer-search tools send library/doc queries to Context7 and code-context queries to Exa when those tools are enabled. Fetch providers may also receive provider-specific options. API keys are read from environment variables or local config files and are used only for provider requests.
 
-The extension rejects non-HTTP(S) URLs and URLs with embedded username/password credentials. Provider responses are not sandboxed; they are returned to Pi as tool output.
+The extension rejects non-HTTP(S) URLs and URLs with embedded username/password credentials.
+Returned data is projected to declared public fields; raw provider metadata,
+Context7 `rules`, cache keys and HTTP error bodies are not returned. Known API
+keys, URL credential patterns and Basic/Bearer authorization-header values are masked in text, structured data,
+renderer details and progress. This is not a general sensitive-data scanner:
+page content remains untrusted, and Pi retains caller-supplied arguments in its
+own transcript. Do not put credentials in queries or URLs.
 
 Report security issues privately. See [SECURITY.md](SECURITY.md).
 

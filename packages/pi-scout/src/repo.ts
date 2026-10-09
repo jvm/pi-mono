@@ -28,13 +28,19 @@ export async function registerRepo(pi: ExtensionAPI, options: RegisterRepoOption
   if (options.branch?.trim()) args.push("--branch", options.branch.trim());
   const depth = options.depth && Number.isInteger(options.depth) && options.depth > 0 ? options.depth : 1;
   args.push("--depth", String(depth));
-  args.push(source, destination);
+  args.push("--", source, destination);
 
-  const result = await pi.exec("git", args, { signal: options.signal, timeout: 120_000 });
+  let result;
+  try {
+    result = await pi.exec("git", args, { signal: options.signal, timeout: 120_000 });
+  } catch {
+    await rm(destination, { recursive: true, force: true });
+    throw new Error(options.signal?.aborted ? "Git clone cancelled." : "Git clone could not run. Check Git and authentication.");
+  }
   if (result.code !== 0) {
     await rm(destination, { recursive: true, force: true });
-    const stderr = result.stderr?.trim() || result.stdout?.trim() || "git clone failed";
-    throw new Error(stderr);
+    // Git can echo origin URLs, credentials or arbitrary remote output.
+    throw new Error(`Git clone failed (exit code ${result.code}). Check the source and Git authentication.`);
   }
   if (platform() !== "win32") await chmod(destination, 0o700);
 
@@ -106,6 +112,12 @@ function inferName(source: string): string {
   const shorthand = parseGitHubShorthand(source);
   if (shorthand) return shorthand.repo;
 
+  // URL userinfo/query/fragment may contain credentials. Never use them as a
+  // public name or destination basename, including origins without a path.
+  if (source.includes("://")) {
+    try { source = new URL(source).pathname; }
+    catch { return "repo"; }
+  }
   const withoutTrailingSlash = source.replace(/[\\/]+$/, "");
   const last = basename(withoutTrailingSlash).replace(/\.git$/i, "");
   return last || "repo";

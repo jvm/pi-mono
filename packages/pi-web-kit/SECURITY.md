@@ -26,3 +26,25 @@ The maintainer will acknowledge reports as soon as practical and coordinate disc
 On startup, `@mocito/install-telemetry` sends a best-effort install/update telemetry ping to the configured telemetry endpoint once per package version unless Pi telemetry is disabled or offline mode is enabled. The ping includes only the package name, version, and parsed platform/runtime/architecture from its User-Agent; it does not include prompts, queries, fetched URLs, file paths, config values, or API keys.
 
 The extension validates URLs before fetch calls and only accepts `http:` and `https:` URLs without embedded credentials. This validation reduces accidental misuse but does not sandbox provider responses or the local Pi process.
+
+Tool results use an allowlisted output schema before publication. Model text and
+`structuredContent` share the same 50,000-byte JSON budget and credential masking;
+renderer details and progress also mask configured API keys, URL credential
+patterns and Basic/Bearer authorization-header values (not ordinary auth prose).
+Arbitrary provider metadata, Context7 `rules`, cache keys,
+and HTTP failure bodies are excluded. Untrusted per-page error bodies become
+generic diagnostics; controlled HTTP status/timeout messages remain useful.
+This does not classify all private information in fetched content or sanitize
+Pi's stored caller arguments. Do not send secrets in queries or URLs.
+
+The `web` namespace and read-only/idempotent/open-world annotations are advisory.
+They do not approve provider spending, bypass tool hooks, or make an inactive
+direct tool reachable from nested dispatch. Project trust, URL validation,
+provider request limits and cancellation still apply.
+
+Branch-local `pi-web-kit:registered-tools` custom entries remember only this
+package's fixed tool names as they first become available. They contain no
+credentials, configuration values, activation decisions or usage data and do
+not enter model context. This distinguishes a newly available optional tool
+from re-registration of a manually disabled tool; Pi still owns activation
+and exclusions. Missing or invalid history does not force tools active on reload.

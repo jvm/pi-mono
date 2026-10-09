@@ -21,7 +21,7 @@ export class MarkdownNewProvider implements FetchProvider {
           timeoutMs: 45_000,
         });
         const text = await res.text();
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 1000)}`);
+        if (!res.ok) throw new Error(`Provider request failed (HTTP ${res.status}).`);
         return {
           url,
           content: text,

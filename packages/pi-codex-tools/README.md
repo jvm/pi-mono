@@ -42,6 +42,12 @@ These choices are based on the Codex tool specifications in `codex-rs/core/src/t
 
 ## Compatibility notes
 
+The Pi 1.1.0 metadata contract groups `apply_patch` under `codex_files`, without
+renaming it or changing exposure. Its advisory hints are mutating, destructive,
+non-idempotent, and local-only. There is no public output schema: it intentionally
+remains model-only, not discoverable/callable from scripts. Metadata does not
+replace approvals or change native file-tool implementations.
+
 While this package's `apply_patch` is active on Pi 0.99.1 or newer, its public
 `prepareLoadout` hook hides selected native `edit` and `write` declarations from
 model requests. The tools keep their original implementations and `direct`
@@ -107,7 +113,7 @@ Like native Pi tools, normal path-based I/O does not protect against another pro
 
 These behaviors intentionally match Codex `apply_patch`.
 
-The provider contract is runtime-specific: use Pi 0.99.1 or newer for model-only tool exposure and the loadout hook; development and integration tests use Pi 1.0.x.
+The provider contract is runtime-specific: use Pi 0.99.1 or newer for model-only tool exposure and the loadout hook; the metadata contract and development/integration tests use Pi 1.1.0.
 
 For a manual smoke test:
 

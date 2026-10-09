@@ -42,6 +42,12 @@ export default function piCodexTools(pi: ExtensionAPI): void {
 
   registerGrammarTool({
     name: APPLY_PATCH,
+    namespace: {
+      name: "codex_files",
+      description: "Direct model-only grammar-based file patches.",
+      instructions: "apply_patch stays model-only and requires a grammar-capable OpenAI model. Send raw patch text directly; never call it from codemode or replace native file tools to alter visibility. File changes may overwrite or delete local data and remain subject to approval hooks.",
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     exposure: "model-only",
     label: APPLY_PATCH,
     description: APPLY_PATCH_DESCRIPTION,

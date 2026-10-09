@@ -6,6 +6,11 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Declare `{ goal }` structured summaries for `get_goal` and `create_goal`, including `goal: null` for empty state, plus `goal` namespace discovery and behavior annotations. Codemode receives objects without `JSON.parse`; terminal updates remain model-only without a new schema.
+- Mark usage-refreshing queries as stateful and serialize them with goal mutations.
+
 ### Fixed
 
 - Restrict footer/widget updates to TUI mode; print, JSON and RPC retain goal lifecycle behavior without terminal writes.

@@ -6,6 +6,18 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Declare bounded structured results for all five research tools, plus `web` namespace discovery and behavior annotations. Codemode now receives typed objects without `JSON.parse`; direct JSON text remains available.
+
+### Fixed
+
+- Project provider responses to public fields and mask credentials consistently across text, structured data, details and progress. Omit arbitrary metadata, Context7 rules and raw backend error bodies.
+- Restrict Basic/Bearer masking to authorization-header values so ordinary authentication documentation remains readable, while short header credentials stay masked.
+- Honor explicit default-tool exclusions during late registration and retain manual deactivation across reload instead of force-activating optional research tools.
+- Activate newly available optional tools when credentials arrive on reload, including existing positive selections, without reactivating previously disabled tools. Remember only fixed tool names in non-model session metadata; older sessions without that history use a conservative first-reload fallback.
+- Reject cancelled calls even when a provider converts cancellation into per-page failure data.
+
 ### Changed
 
 - Update the shared Pi development and contract-test baseline to 1.1.0; require Node.js >=22.19.0 to match the host runtime. Pi remains a host-supplied peer dependency.
