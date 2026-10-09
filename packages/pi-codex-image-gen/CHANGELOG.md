@@ -8,6 +8,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Documentation
 
+- Record the decision to defer a native Pi image adapter: generic image operations do not preserve the current approval, large-original delivery, save/recovery, and usage contracts.
 - Summarize independent image credentials, absent-only legacy fallback, routing-model semantics, and separately invoked API billing.
 
 ### Added
@@ -18,6 +19,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Fixed
 
+- Block legacy-account fallback when package-owned image authentication is configured but cannot be resolved, including unsupported stored credential types hidden by Pi's OAuth-only provider.
 - Make inline-delivery `codex_generate_image` model-only so nested calls cannot consume image quota while discarding attachments (#158).
 - Preserve recoverable artifacts when persistent saves fail, report post-generation storage failures without retries, and support explicit codemode display through Pi's image reader.
 - Anchor recovery before generation so cancelled commits that finish after tree navigation or session replacement remain recoverable only from the originating branch and its forks.

@@ -152,6 +152,36 @@ been consumed and there is no recoverable artifact**. No generation retry is
 made. A failure to persist session recovery metadata is reported with the
 recoverable file path rather than hiding the completed file.
 
+### Native Pi image models
+
+`codex-images` is an **authentication-only provider**, not an image-model
+catalog entry. Pi's `models.generateImages()` and
+`ctx.modelRegistry.generateImages()` do not expose this package's subscription
+backend. Continue using the direct or artifact tool above. OpenRouter image
+models use their own credentials/billing and are not a subscription fallback.
+
+A native adapter is deferred on the Pi 1.1.0 baseline. The generic image
+context provides text/image blocks, not this package's save modes, routing
+override, output-format control, or branch-aware recent-image selection.
+Generic calls also do not inherit the image tools' approval hooks or exclusions.
+Registering an image operation would add another callable surface, not merely
+another discovery label.
+
+Generic codemode image results are held in memory until explicitly displayed.
+An undisplayed image has no automatically saved original or `/image-artifacts`
+record. VM memory or aggregate output limits can reject display after
+generation finishes. A successful `image()` display saves a temporary copy,
+but that is not this package's pre-generation reservation and branch-recovery
+contract. The artifact tool avoids transporting large originals as base64.
+
+The current tools retain backend numeric counters in `details.usage`; these
+are informational, not Pi ledger entries or verified subscription charges.
+Pi aggregates **reported** native image usage on a codemode result, but a raw
+extension `generateImages()` call does not automatically persist it. Neither
+missing usage nor a zero catalog price proves generation is free. A future
+adapter needs an explicit accounting and unknown-cost policy as well as safe
+delivery, recovery, authentication, and approval contracts.
+
 ### Images 2.5 and API fallback
 
 The optional `skills/imagegen/scripts/image_gen.py` API CLI accepts `--model gpt-image-2.5-flare` or `--model gpt-image-2.5-sunburst`, including their `2026-09-08` snapshots. Both accept `--quality xhigh` and `--quality max` in addition to the existing quality settings. The CLI default remains `gpt-image-2`. Both 2.5 models support `--size auto` and custom dimensions such as `1536x864`, under the [documented size constraints](skills/imagegen/references/image-api.md#flexible-sizes-gpt-image-2-and-25). Resolutions above `2560x1440` are experimental.
@@ -187,7 +217,7 @@ Use Pi 1.1.0 or later. Pi stores the `codex-images` credential in its agent auth
 
 The package implements the Codex-compatible OAuth protocol itself. It neither imports Pi's `openai-codex` OAuth helpers nor requires the Codex app or its credential store. It still depends on OpenAI continuing to accept that public OAuth client and private image endpoint; this is not a new OAuth application registered with OpenAI.
 
-Existing Pi `openai-codex` credentials remain a compatibility fallback when `codex-images` credentials are absent and the legacy provider is available. With both image logins, `codex-images` wins. A selected login that fails to refresh or generate does not switch to another account.
+Existing Pi `openai-codex` credentials remain a compatibility fallback when `codex-images` credentials are absent and the legacy provider is available. With both image logins, `codex-images` wins. A selected login that fails to refresh or generate does not switch to another account. Configured but unusable image credentials also block fallback, including a stored API-key credential that Pi's OAuth-only provider cannot resolve. Re-run `/login codex-images` to repair that login instead of silently using a different account.
 
 Both image logins use `https://chatgpt.com/backend-api/codex/responses`. Pi's new `openai` plan-sharing OAuth grant is different and [does not support image generation](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations). The extension never sends that chat token to the Codex backend. API keys do **not** enable this tool or API-key billing.
 

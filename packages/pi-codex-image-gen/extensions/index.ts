@@ -161,6 +161,13 @@ async function resolveImageAuth(registry: ExtensionContext["modelRegistry"]): Pr
 		try {
 			if (typeof registry.getProviderAuth === "function") {
 				const resolved = await registry.getProviderAuth(provider);
+				// Pi returns undefined for a stored credential whose type this
+				// OAuth-only provider cannot use. That is not an absent login and
+				// must not silently select a different account's legacy OAuth.
+				if (!resolved && provider === IMAGE_AUTH_PROVIDER
+					&& registry.getProviderAuthStatus?.(provider).configured) {
+					throw new Error("Configured image credentials could not be resolved.");
+				}
 				if (resolved && resolved.source !== "OAuth") {
 					throw new Error("Image credentials must use OAuth.");
 				}
