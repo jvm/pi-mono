@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-09
+
+### Fixed
+
+- Resolve Pi AI helpers relative to its root entry to avoid Pi's extension-loader alias rewriting submodule imports into invalid paths. Include Pi AI as a runtime dependency and test loading outside the monorepo.
+
 ## [0.2.0] - 2026-10-09
 
 ### Added
