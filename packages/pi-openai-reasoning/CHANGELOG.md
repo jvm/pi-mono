@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-09
+
 ### Documentation
 
 - Add a provider/auth/model support matrix and evidence-backed migration assessment; retain legacy Astra-only guards and distinguish public reasoning updates from Pi sampling settings.

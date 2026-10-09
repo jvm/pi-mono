@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-09
+
 ### Fixed
 
 - Clear theme-colored patch preview caches on invalidation so existing calls repaint after theme changes without another execution.

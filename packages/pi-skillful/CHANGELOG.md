@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-09
+
 ### Fixed
 
 - Read the current theme when rendering session-toggle borders and fit the complete border at very narrow widths. Extend editor composition coverage for paste, padding, indicators, and disposal.

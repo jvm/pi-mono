@@ -1,6 +1,6 @@
 {
   "name": "pi-codex-compaction",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "description": "Keep Pi sessions flowing with automatic server-side compaction on public OpenAI Responses.",
   "type": "module",
   "license": "MIT",

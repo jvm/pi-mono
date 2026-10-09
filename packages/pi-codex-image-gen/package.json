@@ -1,6 +1,6 @@
 {
   "name": "pi-codex-image-gen",
-  "version": "0.1.15",
+  "version": "0.2.0",
   "description": "Image generation and editing for Pi using your ChatGPT Codex login.",
   "type": "module",
   "license": "Apache-2.0",

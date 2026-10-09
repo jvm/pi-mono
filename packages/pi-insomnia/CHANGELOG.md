@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-09
+
 ### Fixed
 
 - Restrict the footer spinner to TUI mode while preserving sleep-inhibitor lifecycle in other modes.

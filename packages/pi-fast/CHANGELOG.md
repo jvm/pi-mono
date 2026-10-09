@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-09
+
 ### Fixed
 
 - Keep footer state labels palette-neutral instead of retaining ANSI colors from a previous theme.

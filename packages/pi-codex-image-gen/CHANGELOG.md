@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-09
+
 ### Documentation
 
 - Record the decision to defer a native Pi image adapter: generic image operations do not preserve the current approval, large-original delivery, save/recovery, and usage contracts.
