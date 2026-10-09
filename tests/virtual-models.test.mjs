@@ -131,10 +131,47 @@ test("routing state, selected identity and goal totals restore across reload, tr
   assert.equal(goalState(fork).tokensUsed, 33);
   assert.equal(goalState(h).tokensUsed, 22);
   assert.deepEqual(selectedId(fork), ["fixture-router", "auto"]);
+  // Both sessions must retain their own transport queues, including concurrent
+  // requests to the same endpoint after the fork fixture has been created.
+  const parentRequests = h.requests.length;
+  const forkRequests = fork.requests.length;
+  h.target = "public";
+  fork.target = "public";
+  await Promise.all([
+    h.session.prompt("Original branch continues after the fork."),
+    fork.session.prompt("Fork continues independently."),
+  ]);
+  assert.equal(h.requests.length, parentRequests + 1);
+  assert.equal(fork.requests.length, forkRequests + 1);
+  assert.equal(goalState(h).tokensUsed, 33);
+  assert.equal(goalState(fork).tokensUsed, 44);
   assert.equal(accountUsageFromBranch(goalState(fork), fork.sessionManager.getBranch()).addedTokens, 0);
   assert.deepEqual(h.errors, []);
   assert.deepEqual(fork.errors, []);
 });
+
+for (const fixtureCount of [1, 2]) {
+  test(`virtual harness restores original globals after ${fixtureCount} fixture(s)`, async (t) => {
+    const fetch = globalThis.fetch;
+    const WebSocket = globalThis.WebSocket;
+    const keys = ["HOME", "PI_CODING_AGENT_DIR", "CI", "PI_OFFLINE", "PI_TELEMETRY"];
+    const environment = () => Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    const originalEnvironment = environment();
+    await t.test("owned fixture scope", async (scope) => {
+      for (let i = 0; i < fixtureCount; i++) {
+        const h = await virtualHarness(scope, packages);
+        assert.equal(goalState(h).tokensUsed, 0, "fresh sessions do not inherit another fixture's accounting");
+        await h.session.prompt("Synthetic scope restoration check.");
+        assert.equal(h.requests.length, 1);
+        assert.equal(goalState(h).tokensUsed, 11);
+        assert.deepEqual(h.errors, []);
+      }
+    });
+    assert.equal(globalThis.fetch, fetch, "fetch restored to the function present before the scope");
+    assert.equal(globalThis.WebSocket, WebSocket, "WebSocket restored to the function present before the scope");
+    assert.deepEqual(environment(), originalEnvironment);
+  });
+}
 
 test("router sees user, tool continuation, retry, and direct summary calls without changing selected model", async (t) => {
   const action = (pi) => pi.registerTool({

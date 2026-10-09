@@ -59,24 +59,34 @@ export const goalState = (h) => reconstructGoalState(h.sessionManager.getBranch(
 export const lastAssistant = (h) => h.session.messages.findLast((message) => message.role === "assistant");
 export const routingEntries = (h) => h.sessionManager.getBranch().filter((entry) => entry.type === "custom" && entry.customType === "pi.virtual-model-state");
 const scopes = new WeakMap();
+const FIXTURE_HEADER = "x-pi-test-fixture";
 
 /** No live network, real credentials, user configuration, or executable OS tools. */
 export async function virtualHarness(t, factories, options = {}) {
-  t.mock.method(globalThis, "fetch", async () => { throw new Error("Unmocked network blocked"); });
-  t.mock.method(globalThis, "WebSocket", function () { throw new Error("WebSocket network blocked"); });
   const dir = await mkdtemp(join(tmpdir(), "pi-virtual-contract-"));
   const environment = {
     HOME: dir, PI_CODING_AGENT_DIR: dir, CI: "1", PI_OFFLINE: "1", PI_TELEMETRY: "0",
   };
   let scope = scopes.get(t);
   if (!scope) {
-    scope = { sessions: [], directories: [] };
+    scope = { sessions: [], directories: [], handlers: new Map(), nextId: 0 };
     scopes.set(t, scope);
+    // Mock each global only once: repeated MockTracker.method() calls can
+    // restore an earlier mock instead of the function that preceded the scope.
+    t.mock.method(globalThis, "fetch", async (url, init) => {
+      const handler = scope.handlers.get(new Headers(init?.headers).get(FIXTURE_HEADER));
+      if (!handler) throw new Error("Unmocked network blocked");
+      return handler(url, init);
+    });
+    t.mock.method(globalThis, "WebSocket", function () { throw new Error("WebSocket network blocked"); });
     const savedEnvironment = Object.fromEntries(Object.keys(environment).map((key) => [key, process.env[key]]));
     Object.assign(process.env, environment);
     t.after(async () => {
       try {
-        for (const session of scope.sessions.reverse()) session.dispose();
+        for (const session of scope.sessions.reverse()) {
+          await session.abort();
+          session.dispose();
+        }
         for (const directory of scope.directories.reverse()) await rm(directory, { recursive: true, force: true });
       } finally {
         for (const [key, value] of Object.entries(savedEnvironment)) {
@@ -87,6 +97,7 @@ export async function virtualHarness(t, factories, options = {}) {
     });
   }
   scope.directories.push(dir);
+  const fixtureId = `fixture-${++scope.nextId}`;
   const credentials = new InMemoryCredentialStore();
   await credentials.modify("openai", async () => ({ type: "api_key", key: "synthetic-public-key" }));
   await credentials.modify("openai-codex", async () => ({
@@ -136,6 +147,9 @@ export async function virtualHarness(t, factories, options = {}) {
       },
     });
     pi.on("before_provider_request", (_event, ctx) => { h.hooks.push(ctx.model); });
+    // A test-only marker assigns same-endpoint parent/fork requests to their
+    // own response queue without changing auth, model identity or payloads.
+    pi.on("before_provider_headers", (event) => { event.headers[FIXTURE_HEADER] = fixtureId; });
     pi.on("provider_stream_event", (event) => {
       // Record only synthetic identity, not provider stream payloads.
       h.streams.push({ provider: event.provider, api: event.api, model: event.model });
@@ -177,7 +191,7 @@ export async function virtualHarness(t, factories, options = {}) {
     assert.ok(model, "virtual definition registered");
     await session.setModel(model);
   };
-  t.mock.method(globalThis, "fetch", async (url, init) => {
+  scope.handlers.set(fixtureId, async (url, init) => {
     assert.ok(h.requests.length < 30, "bounded synthetic provider calls");
     const target = new URL(String(url));
     assert.ok(["api.openai.com", "chatgpt.com", "fixture.invalid"].includes(target.hostname), "unexpected fixture URL");

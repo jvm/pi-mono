@@ -167,7 +167,14 @@ continuation. Environment variables and owned temporary directories are restored
 or removed on completion. No normal profile, external classifier, live model,
 image generation, release or installation is involved.
 
-The suite has 25 cases. Run it and the five affected package checks/tests on
+Network interception is installed once per test scope. A test-only request
+header selects each session's own mock response queue, including concurrent
+parent/fork requests to the same endpoint. Regression tests verify both
+directions of request ownership and exact fetch/WebSocket/environment restoration
+after one or multiple fixtures. The earlier per-fixture global replacements
+failed these checks; they are not retained as acceptable characterization.
+
+The suite has 29 tests, including teardown subtests. Run it and the five affected package checks/tests on
 the Node 22.19.0 floor and the supported Node 24 runtime. Root validation also
 checks the unaffected packages and packed contents. On Pi upgrades, revisit
 the identity/accounting characterizations rather than weakening their assertions
@@ -175,11 +182,11 @@ to hide changed behavior.
 
 Local verification:
 
-- Node 24.21.0: `npm run validate` passed, including 767 tests, all 13 package
+- Node 24.21.0: `npm run validate` passed, including 771 tests, all 13 package
   checks, package validation, pack dry-runs and zero production dependency
   vulnerabilities.
-- Node 22.19.0: the 25 new contracts and all five affected package checks/suites
-  passed, 336 tests in total.
+- Node 22.19.0: the 29 new tests and all five affected package checks/suites
+  passed, 340 tests in total.
 - Semgrep security-audit/JavaScript rules scanned both new test files with no
   findings. Manual review checked bounded inputs, cancellation, authority
   separation and fixture isolation; a clean pattern scan is not certification
