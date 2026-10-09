@@ -44,6 +44,7 @@ pi -e /path/to/pi-mono/packages/pi-scout --print "list your tools"
 ```
 
 This is an npm-compatible TypeScript Pi package. There is no runtime build step.
+Use Pi 1.1.0 or newer and Node.js >=22.19.0 for the structured tool contracts.
 
 ## Configuration
 
@@ -92,6 +93,52 @@ Pi records section updates in the session transcript. Providers that do not supp
 |---|---|
 | `scout_add` | Clone and register a Git repository as a local reference codebase. Takes only `source`: Git URL, local path, or GitHub `owner/repo` shorthand. |
 | `scout_rm` | Remove a repository from Pi Scout records, optionally deleting the temporary clone. Available to the model only while repos are registered. |
+
+### Script results and discovery
+
+Both tools declare output schemas and return objects, not strings, in codemode:
+
+- `scout_add`: `{ repo }`.
+- `scout_rm`: `{ removed: repo | null, deletedClone: boolean }`.
+- `repo`: `{ id, name, path, branch?, createdAt, lastSeenAt }`. Origin/source
+  metadata is deliberately excluded from text, structured results, and renderer
+  details. Pi still records caller arguments; use Git's credential mechanisms,
+  not credentials embedded in `source`.
+
+After an explicit registration request:
+
+```js
+const { repo } = await tools.scout_add({ source: "owner/repo" });
+text({ id: repo.id, path: repo.path });
+```
+
+The namespace is `scout`; tool names are unchanged. Await
+`describeNamespace("scout")`, `describeTool("scout_add")`, or
+`searchTools("reference repository", { namespace: "scout" })` for discovery,
+including with zero inline budget. When adding the first reference, start a
+**new codemode call** before discovering/calling `scout_rm`: Pi snapshots the
+callable tools at script start.
+
+Clone/process/storage failures throw and reject scripted calls. A missing
+removal target is successful `{ removed: null, deletedClone: false }` data.
+`deletedClone: true` means deletion was requested and the removal completed;
+filesystem errors throw, and state removal may already have happened. These tools
+do not return a structured success object with `isError: true`.
+Human-readable direct results and the `/scout` menu remain available without
+codemode.
+
+Both tools run sequentially within Pi's dispatch queue. Await dependent calls;
+this is not a cross-process transaction. Addition is a non-idempotent local
+mutation that may contact a Git host. Removal is destructive, non-idempotent
+(repeated names can match different records), and local-only. These advisory
+hints do not authorize cloning or deletion; existing approval hooks still run.
+
+No optional deferred/codemode exposure setting is added. Direct activation,
+CLI exclusions, and conditional removal availability remain in force. Explicit
+`defaultTools: ["-scout_rm"]` suppresses automatic removal-tool activation.
+Manually disabling it is retained across prompts and reload, while repos remain.
+If the repo set becomes empty and later gains a reference, the normal availability
+transition can activate it again. Use a CLI exclusion for a lasting prohibition.
 
 ## Notes
 

@@ -12,6 +12,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Added
 
+- Add shared `codex_images` namespace discovery and quota/file-effect annotations without changing either entry point's exposure or the artifact-delivery contract.
 - Add `codex_generate_image_artifact` for codemode and other nested workflows, returning structured original-file metadata instead of base64 image payloads.
 - Add branch-local artifact recovery, recent-artifact edits, and `/image-artifacts`; keep completed private temporary originals through script failures and reload.
 

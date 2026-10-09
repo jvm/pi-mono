@@ -6,10 +6,10 @@ export function normalizeWebUrl(value: string): string {
   try {
     parsed = new URL(value.trim());
   } catch {
-    throw new Error(`Malformed URL: ${value}`);
+    throw new Error("Malformed URL.");
   }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error(`URL scheme must be http or https: ${value}`);
-  if (parsed.username || parsed.password) throw new Error(`URL credentials are not allowed: ${value}`);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("URL scheme must be http or https.");
+  if (parsed.username || parsed.password) throw new Error("URL credentials are not allowed.");
   parsed.hash = "";
   return parsed.toString();
 }

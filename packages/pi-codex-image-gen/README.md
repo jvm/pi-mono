@@ -73,6 +73,15 @@ directly, it still returns paths and metadata rather than an image attachment.
 Both tools use the same generation/editing parameters, image login, backend,
 validation, and quota safeguards.
 
+Both definitions share the `codex_images` namespace and advisory hints:
+mutating, non-destructive (no overwrites), non-idempotent, and open-world.
+Generation can consume quota and write files; these hints never grant approval.
+Await `describeNamespace("codex_images")` or
+`searchTools("image artifact", { namespace: "codex_images" })` for the callable
+artifact tool, including with zero inline budget. The inline tool stays
+model-only and receives no new output schema. The artifact schema, delivery,
+recovery, explicit-request policy, and no-automatic-retry rules are unchanged.
+
 ```js
 const result = await tools.codex_generate_image_artifact({
   prompt: "A red fox in watercolor",

@@ -32,6 +32,13 @@ in its assistant turn, after the model has inspected verification results.
 Older runtimes are unsupported; there is no legacy nested-call fallback.
 `get_goal` and `create_goal` remain callable from scripts.
 
+Those two tools expose a declared `{ goal }` summary through `structuredContent`,
+not the full persisted entry or accounting ledger. The objective is user data,
+not automatically secret-scanned. Direct text and renderer details keep the
+same summary fields. `get_goal` can persist refreshed accounting, so its metadata
+does not claim a pure read; all goal tool calls are sequential. Namespace and
+annotation metadata are advisory and do not grant creation or completion authority.
+
 This is a tool-call boundary, not an independent verifier of completion or
 blocker evidence. The model remains responsible for that evidence. A trusted
 extension can execute arbitrary code with the user's permissions; model-only

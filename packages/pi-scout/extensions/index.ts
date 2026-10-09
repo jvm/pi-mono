@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { Type } from "typebox";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import { buildScoutPrompt, formatRepo, loadPrunedState, registerRepo, removeRepo } from "../src/index.js";
+import { ADD_REPO_OUTPUT, REMOVE_REPO_OUTPUT, SCOUT_NAMESPACE, formatPublicRepo, publicRepo } from "../src/tool-contracts.js";
 
 const RegisterRepoParams = Type.Object({
   source: Type.String({ description: "Git URL/path or owner/repo." }),
@@ -16,6 +17,7 @@ export default function piScout(pi: ExtensionAPI) {
   reportInstallTelemetry();
 
   let scoutRmRegistered = false;
+  let hadRepos = false;
 
   function setToolActive(name: string, active: boolean): void {
     const activeTools = pi.getActiveTools();
@@ -24,11 +26,20 @@ export default function piScout(pi: ExtensionAPI) {
     if (!active && hasTool) pi.setActiveTools(activeTools.filter((tool) => tool !== name));
   }
 
-  async function syncScoutRmTool(): Promise<void> {
+  async function syncScoutRmTool(restoring = false): Promise<void> {
     const hasRepos = (await loadPrunedState()).repos.length > 0;
+    const selection = pi.getSettings?.().defaultTools;
+    const disabled = Array.isArray(selection)
+      && selection.filter(entry => entry === "+scout_rm" || entry === "-scout_rm").at(-1) === "-scout_rm";
     if (hasRepos && !scoutRmRegistered) {
       pi.registerTool({
         name: "scout_rm",
+        namespace: SCOUT_NAMESPACE,
+        outputSchema: REMOVE_REPO_OUTPUT,
+        executionMode: "sequential",
+        defaultActive: !restoring && !disabled,
+        // Repeating a name may remove another clone with that name.
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
         label: "Scout Remove",
         description: "Remove a Scout repo record.",
         promptSnippet: "Remove Scout repo records.",
@@ -40,19 +51,26 @@ export default function piScout(pi: ExtensionAPI) {
           const params = rawParams as { idOrName: string; deleteClone?: boolean };
           const removed = await removeRepo(params.idOrName, { deleteClone: params.deleteClone });
           await syncScoutRmTool();
+          const payload = { removed: removed ? publicRepo(removed) : null, deletedClone: Boolean(params.deleteClone && removed) };
           const text = removed
-            ? `Removed Pi Scout repository from records:\n${formatRepo(removed)}\n\nLocal clone ${params.deleteClone ? "deleted" : "was not deleted"}.`
-            : `No Pi Scout repository matched "${params.idOrName}".`;
-          return { content: [{ type: "text", text }], details: { removed, deletedClone: Boolean(params.deleteClone && removed) } };
+            ? `Removed Pi Scout repository from records:\n${formatPublicRepo(removed)}\n\nLocal clone ${params.deleteClone ? "deleted" : "was not deleted"}.`
+            : "No Pi Scout repository matched.";
+          return { content: [{ type: "text", text }], structuredContent: payload, details: payload };
         },
       });
       scoutRmRegistered = true;
     }
-    if (scoutRmRegistered) setToolActive("scout_rm", hasRepos);
+    if (scoutRmRegistered) {
+      if (!hasRepos) setToolActive("scout_rm", false);
+      // Do not reactivate a manually disabled tool on every prompt. On reload,
+      // Pi restores pending active names; this extension only restores availability.
+      else if (!hadRepos && !restoring && !disabled) setToolActive("scout_rm", true);
+    }
+    hadRepos = hasRepos;
   }
 
-  pi.on("session_start", async () => {
-    await syncScoutRmTool();
+  pi.on("session_start", async (event) => {
+    await syncScoutRmTool(event.reason === "reload");
   });
 
   pi.registerCommand("scout", {
@@ -64,6 +82,10 @@ export default function piScout(pi: ExtensionAPI) {
 
   pi.registerTool({
     name: "scout_add",
+    namespace: SCOUT_NAMESPACE,
+    outputSchema: ADD_REPO_OUTPUT,
+    executionMode: "sequential",
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     label: "Scout Add",
     description: "Clone/register a reference repo.",
     promptSnippet: "Add Scout reference repos.",
@@ -76,8 +98,9 @@ export default function piScout(pi: ExtensionAPI) {
       const repo = await registerRepo(pi, { source: params.source, signal });
       await syncScoutRmTool();
       return {
-        content: [{ type: "text", text: `Registered Pi Scout repository:\n${formatRepo(repo)}` }],
-        details: { repo },
+        content: [{ type: "text", text: `Registered Pi Scout repository:\n${formatPublicRepo(repo)}` }],
+        structuredContent: { repo: publicRepo(repo) },
+        details: { repo: publicRepo(repo) },
       };
     },
   });

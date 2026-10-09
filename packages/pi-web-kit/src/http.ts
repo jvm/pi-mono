@@ -26,9 +26,10 @@ export async function fetchWithTimeout(url: string, init: RequestInit & { timeou
 export async function requestJson<T>(url: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
   const res = await fetchWithTimeout(url, init);
   const text = await res.text();
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 1000)}`);
+  if (!res.ok) throw new Error(`Provider request failed (HTTP ${res.status}).`);
   if (!text) return undefined as T;
-  return JSON.parse(text) as T;
+  try { return JSON.parse(text) as T; }
+  catch { throw new Error("Provider returned invalid JSON."); }
 }
 
 export function asSnippet(value: unknown): string | undefined {

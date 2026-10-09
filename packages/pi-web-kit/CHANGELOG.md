@@ -6,6 +6,16 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Declare bounded structured results for all five research tools, plus `web` namespace discovery and behavior annotations. Codemode now receives typed objects without `JSON.parse`; direct JSON text remains available.
+
+### Fixed
+
+- Project provider responses to public fields and mask credentials consistently across text, structured data, details and progress. Omit arbitrary metadata, Context7 rules and raw backend error bodies.
+- Honor explicit default-tool exclusions during late registration and retain manual deactivation across reload instead of force-activating optional research tools.
+- Reject cancelled calls even when a provider converts cancellation into per-page failure data.
+
 ### Changed
 
 - Update the shared Pi development and contract-test baseline to 1.1.0; require Node.js >=22.19.0 to match the host runtime. Pi remains a host-supplied peer dependency.

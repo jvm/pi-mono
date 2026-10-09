@@ -8,6 +8,7 @@ import { findToolCallContext, transitionMeta } from "./metadata.js";
 import type { BranchEntry, GoalState, GoalStatus } from "./types.js";
 import { goalToSummary, goalUsageSummary, nowIso, realizedTimeUsed, truncateOneLine } from "./utils.js";
 import { validateObjective, validateTokenBudget } from "./validation.js";
+import { CREATE_GOAL_OUTPUT, GET_GOAL_OUTPUT, GOAL_NAMESPACE, goalResult } from "./tool-contracts.js";
 
 export interface ToolRuntime {
   getGoal(): GoalState | null;
@@ -35,6 +36,11 @@ const UpdateGoalParams = Type.Object({
 export function registerGoalTools(pi: ExtensionAPI, runtime: ToolRuntime): void {
   pi.registerTool({
     name: "get_goal",
+    namespace: GOAL_NAMESPACE,
+    outputSchema: GET_GOAL_OUTPUT,
+    executionMode: "sequential",
+    // Querying refreshes/persists usage accounting; it is not a pure read.
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     label: "Get Goal",
     description: "Return the current persistent Pi goal and usage for this session branch.",
     promptSnippet: "Inspect the active persistent goal and token/time budget.",
@@ -44,7 +50,7 @@ export function registerGoalTools(pi: ExtensionAPI, runtime: ToolRuntime): void 
       runtime.refreshUsage?.(ctx);
       const goal = runtime.getGoal();
       const payload = goal ? goalToSummary(goal) : null;
-      return { content: [{ type: "text", text: payload ? JSON.stringify({ goal: payload }, null, 2) : "No goal is set." }], details: { goal: payload } };
+      return goalResult(payload);
     },
     renderCall(_args, theme) {
       return new Text(theme.fg("toolTitle", theme.bold("get_goal")), 0, 0);
@@ -57,6 +63,9 @@ export function registerGoalTools(pi: ExtensionAPI, runtime: ToolRuntime): void 
 
   pi.registerTool({
     name: "create_goal",
+    namespace: GOAL_NAMESPACE,
+    outputSchema: CREATE_GOAL_OUTPUT,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     label: "Create Goal",
     description: "Create a persistent Pi goal only when explicitly requested by user/system/developer instructions. Fails if a goal already exists.",
     promptSnippet: "Create a new persistent goal when explicitly requested.",
@@ -78,7 +87,7 @@ export function registerGoalTools(pi: ExtensionAPI, runtime: ToolRuntime): void 
       runtime.setGoal(goal);
       runtime.afterGoalChanged(ctx, "Goal created.");
       const summary = goalToSummary(goal);
-      return { content: [{ type: "text", text: JSON.stringify({ goal: summary }, null, 2) }], details: { goal: summary } };
+      return goalResult(summary);
     },
     renderCall(args, theme) {
       return new Text(`${theme.fg("toolTitle", theme.bold("create_goal"))} ${theme.fg("accent", truncateOneLine(String((args as any).objective ?? "")))}`, 0, 0);
@@ -91,6 +100,8 @@ export function registerGoalTools(pi: ExtensionAPI, runtime: ToolRuntime): void 
 
   pi.registerTool({
     name: "update_goal",
+    namespace: GOAL_NAMESPACE,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     label: "Update Goal",
     description: "Mark the current Pi goal complete or blocked. Call directly as the only tool call in a separate final assistant turn, after inspecting verification results. Not callable from codemode or other tools.",
     promptSnippet: "Mark the persistent goal complete or blocked after strict verification.",

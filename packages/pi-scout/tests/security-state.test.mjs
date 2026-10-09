@@ -81,3 +81,22 @@ unixOnly("registered clone directory is private", async () => {
   const repo = await registerRepo(pi, { source: "owner/repo" });
   assert.equal((await lstat(repo.path)).mode & 0o777, 0o700);
 });
+
+test("origin credentials never become a public clone name or path; clone options are separated", async () => {
+  const { publicRepo, formatPublicRepo } = await import("../src/tool-contracts.ts");
+  const calls = [];
+  const pi = { exec: async (_name, args) => {
+    calls.push(args);
+    return { code: 0, stdout: "", stderr: "" };
+  } };
+  for (const source of ["https://synthetic-user:synthetic-password@fixture.invalid", "https://fixture.invalid/repo.git?token=synthetic-secret#fragment"]) {
+    const repo = await registerRepo(pi, { source });
+    assert.doesNotMatch(JSON.stringify(publicRepo(repo)) + formatPublicRepo(repo), /synthetic|source|fragment/);
+    assert.equal(calls.at(-1).at(-3), "--");
+    assert.equal(calls.at(-1).at(-2), source);
+  }
+  const before = (await loadState()).repos.length;
+  await assert.rejects(registerRepo({ exec: async () => { throw new Error("private process output"); } }, { source: "owner/failure" }),
+    { message: "Git clone could not run. Check Git and authentication." });
+  assert.equal((await loadState()).repos.length, before);
+});

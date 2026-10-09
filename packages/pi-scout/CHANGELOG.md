@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Return declared `{ repo }` / `{ removed, deletedClone }` structured results with public repo fields, `scout` namespace discovery, behavior annotations and sequential tool dispatch.
+
 ### Changed
 
 - Store reference context in the named `scout_repos` prompt section using Pi's structured API. Remove empty sections, preserve unrelated prompt changes, and leave deliberate full-prompt overrides intact.
@@ -14,6 +18,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Fixed
 
+- Keep origin credentials out of tool text/details/results, inferred URL-based names and Git failure diagnostics; terminate Git options before source arguments.
+- Preserve removal-tool deactivation across prompts/reload and respect explicit default-tool exclusions during conditional registration.
 - Let `enableInstallTelemetry: false` override an enabled `PI_TELEMETRY` environment flag.
 
 ## [0.1.4] - 2026-07-17

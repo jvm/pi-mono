@@ -693,7 +693,16 @@ export default function codexImageGen(pi: ExtensionAPI) {
 	}
 
 	const description = "Generate or edit an image with the OpenAI Codex ChatGPT backend built-in image_generation tool. The backend selects the image model. Accepts up to five local or recent conversation images (20 MiB each, 50 MiB total). Requires /login codex-images or existing legacy Pi OAuth credentials; works with openai OAuth chat and does not require the Codex app or an API key. Network deadline: 5 minutes; output image limit: 32 MiB; backend text is limited to 4,000 characters.";
+	const metadata = {
+		namespace: {
+			name: "codex_images",
+			description: "Quota-consuming image generation and private original artifacts.",
+			instructions: "Generate only on an explicit image request. codex_generate_image is model-only and returns an inline image. Scripts use codex_generate_image_artifact and receive metadata with artifact.path, never base64; read that path and use image(block) only for requested display. Completed originals survive script failures/reload; save=none still creates temporary originals. Calls consume quota and may write files, so do not automatically retry failures. Await each artifact before using it for an edit. Existing OAuth, approval and exposure rules still apply.",
+		},
+		annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+	};
 	pi.registerTool({
+		...metadata,
 		name: "codex_generate_image",
 		label: "Codex Image",
 		exposure: "model-only",
@@ -705,6 +714,7 @@ export default function codexImageGen(pi: ExtensionAPI) {
 		execute: (id, params, signal, update, ctx) => executeImage(false, id, params, signal, update, ctx),
 	});
 	pi.registerTool({
+		...metadata,
 		name: "codex_generate_image_artifact",
 		label: "Codex Image Artifact",
 		exposure: "codemode",
