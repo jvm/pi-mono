@@ -84,6 +84,13 @@ GPT-6.1 Sol was not listed in that account's model catalog despite successful
 inference. No API key was available for live API-key checks; automated tests
 cover its Pi transport, and the API `fast` parameter follows the official docs.
 
+Virtual-model selections are not eligible for this extension's Fast tier, even
+if their current physical dispatch is an allowlisted OpenAI model. On Pi 1.1.0,
+request hooks still see the virtual selection, not an authenticated physical
+request identity. The extension leaves the tier unchanged rather than guessing
+from the payload or the previous response. Select a supported physical model
+to use this feature.
+
 ### Charges and effective processing
 
 Fast mode can increase API charges or subscription usage. API-key requests use

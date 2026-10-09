@@ -81,6 +81,12 @@ is active.
 
 ### GPT-6 Astra
 
+A Pi 1.1.0 virtual-model selection does not advertise the physical request's
+grammar capability to this extension. `apply_patch` stays unavailable even when
+the router chooses Astra; selected native `edit` and `write` declarations remain
+available, subject to other loadout hooks. The extension does not infer support
+from a virtual model name or reactivate excluded tools.
+
 Pi 0.85.1's model catalog advertises grammar-tool support for `gpt-6-astra` on both `openai-responses` and `openai-codex-responses`. The extension uses that capability directly, with no model-name allowlist or JSON wrapper. Tests cover the pinned Pi transports, streamed raw calls, execution, and result replay using mocked HTTP responses; they do not certify live account access.
 
 The [GPT-6 guide](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6-astra) also describes async tool calls, mid-turn steering, and reasoning updates. Those belong to the provider/session runtime and are not enabled by this extension. Patch execution remains sequential; provider-side parallel tool calling remains enabled.

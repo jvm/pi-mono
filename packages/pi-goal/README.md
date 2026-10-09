@@ -145,6 +145,15 @@ Nested tool usage is already aggregated by Pi onto the parent tool result and
 is counted once, not by walking nested calls. Cached input tokens count too.
 This is a token budget, not a currency or provider-quota budget.
 
+Virtual-model selections do not change that rule: Pi records the physical
+assistant's usage, and codemode classifier usage is aggregated onto its parent
+tool result. However, a raw `ctx.modelRegistry.classify()` call inside a router
+does **not** automatically create a session usage entry in Pi 1.1.0. The goal
+cannot charge an unrecorded result. Paid automatic routers need an explicit,
+single-count attribution contract before they can be treated as budget-safe;
+do not infer free classification from an unchanged goal total. Classifier
+judgments are not completion evidence or permission to bypass approvals.
+
 The accounting interval starts at the goal's creation/replacement entry and
 ends when it is replaced or cleared on that branch. Earlier work is excluded,
 including entries before creation with the same timestamp. Entries need valid
