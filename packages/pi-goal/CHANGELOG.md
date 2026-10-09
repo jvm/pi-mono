@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-09
+
 ### Added
 
 - Declare `{ goal }` structured summaries for `get_goal` and `create_goal`, including `goal: null` for empty state, plus `goal` namespace discovery and behavior annotations. Codemode receives objects without `JSON.parse`; terminal updates remain model-only without a new schema.

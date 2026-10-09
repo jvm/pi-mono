@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-09
+
 ### Added
 
 - Return declared `{ repo }` / `{ removed, deletedClone }` structured results with public repo fields, `scout` namespace discovery, behavior annotations and sequential tool dispatch.

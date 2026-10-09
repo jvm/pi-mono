@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-09
+
 ### Added
 
 - Declare bounded structured results for all five research tools, plus `web` namespace discovery and behavior annotations. Codemode now receives typed objects without `JSON.parse`; direct JSON text remains available.

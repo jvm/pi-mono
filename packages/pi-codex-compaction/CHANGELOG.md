@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-09
+
 ### Added
 
 - Default-on automatic server-side compaction for eligible public OpenAI Responses requests, including ChatGPT subscription authentication. Keep `/server-compaction off`, persisted overrides, and optional thresholds.
