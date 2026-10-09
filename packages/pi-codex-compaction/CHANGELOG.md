@@ -16,6 +16,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Changed
 
+- Clarify provider/auth billing boundaries and distinguish automatic public compaction from standalone `/responses/compact` and removed RemoteCompactionV2.
+
 - Require Pi 1.1.0 or later for the public turn-end boundary and normalized-transcript APIs.
 - Scope cache-warming interception to the actual automatic-compaction request instead of a global enabled toggle.
 - Update the shared Pi development and contract-test baseline to 1.1.0; require Node.js >=22.19.0 to match the host runtime. Pi remains a host-supplied peer dependency.

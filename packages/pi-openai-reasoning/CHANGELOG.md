@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Documentation
+
+- Add a provider/auth/model support matrix and evidence-backed migration assessment; retain legacy Astra-only guards and distinguish public reasoning updates from Pi sampling settings.
+
 ### Changed
 
 - Remove the legacy direct-compaction event-bus adapter and update integration/smoke tests to use Pi's standard summarizer. `pi-codex-compaction` now targets the public OpenAI route; this package's legacy-provider scope is unchanged.

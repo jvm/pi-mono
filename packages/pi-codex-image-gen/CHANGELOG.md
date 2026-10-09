@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Documentation
+
+- Summarize independent image credentials, absent-only legacy fallback, routing-model semantics, and separately invoked API billing.
+
 ### Added
 
 - Add `codex_generate_image_artifact` for codemode and other nested workflows, returning structured original-file metadata instead of base64 image payloads.
