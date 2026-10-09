@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Read the current theme when rendering session-toggle borders and fit the complete border at very narrow widths. Extend editor composition coverage for paste, padding, indicators, and disposal.
+
 ### Changed
 
 - Update skill visibility and session toggles through Pi's structured prompt API instead of replacing the rendered system prompt. Preserve unrelated sections and deliberate full-prompt overrides.

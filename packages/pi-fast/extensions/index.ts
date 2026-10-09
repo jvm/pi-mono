@@ -23,8 +23,9 @@ export default function piFast(pi: ExtensionAPI): void {
 
     const supported = supportsFastMode(ctx.model);
     const text = !supported ? "Fast n/a" : enabled ? "Fast on" : "Fast off";
-    const color = enabled && supported ? "warning" : "muted";
-    ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg(color, text));
+    // Pi stores status strings, not render callbacks. Avoid retaining ANSI from
+    // a previous theme; the explicit state remains readable in every palette.
+    ctx.ui.setStatus(STATUS_KEY, text);
   }
 
   function notify(ctx: ExtensionContext, message: string, type: "info" | "warning"): void {

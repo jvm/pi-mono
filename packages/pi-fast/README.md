@@ -13,6 +13,9 @@ Use provider fast modes in Pi when you need lower latency, while keeping the pai
 - **Configurable default** — opt in once to start Fast mode on for every supported model.
 - **Session-local overrides** — command and shortcut changes reset to the configured default for each session.
 
+Footer labels use the terminal's current default text color, not stored ANSI
+colors. Theme changes therefore cannot leave an old warning/muted palette behind.
+
 ## Supported models
 
 Fast requests are enabled for these models on `openai` (`openai-responses`)

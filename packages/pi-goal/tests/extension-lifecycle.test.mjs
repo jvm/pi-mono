@@ -34,6 +34,7 @@ function makePi() {
 
 function makeCtx(branch = []) {
   return {
+    mode: "tui",
     hasUI: true,
     isIdle: () => true,
     hasPendingMessages: () => false,

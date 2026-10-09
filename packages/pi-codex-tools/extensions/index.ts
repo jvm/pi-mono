@@ -12,6 +12,11 @@ class ApplyPatchCallComponent extends Text {
   constructor() {
     super("", 0, 0);
   }
+
+  override invalidate(): void {
+    this.cache = undefined;
+    super.invalidate();
+  }
 }
 
 function readPatchArg(args: unknown): string {

@@ -12,12 +12,12 @@ let spinnerTimer: ReturnType<typeof setInterval> | undefined;
 let spinnerFrame = 0;
 
 function setStatus(ctx: ExtensionContext, text: string | undefined): void {
-  if (!ctx.hasUI) return;
+  if (ctx.mode !== "tui") return;
   ctx.ui.setStatus(STATUS_KEY, text);
 }
 
 function startSpinner(ctx: ExtensionContext): void {
-  if (!ctx.hasUI || spinnerTimer) return;
+  if (ctx.mode !== "tui" || spinnerTimer) return;
   spinnerFrame = 0;
   setStatus(ctx, `${SPINNER_FRAMES[0]} sleep inhibited`);
   spinnerTimer = setInterval(() => {

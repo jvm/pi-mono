@@ -94,7 +94,8 @@ it can be false after a normal assistant reply. The goal's custom-message draft
 makes that preview runnable; Pi checks the final preview after all handlers.
 Declining goal continuation does not veto another extension's continuation.
 
-The footer and optional editor widget show status, elapsed active time, token usage, and budget.
+The TUI footer and optional editor widget show status, elapsed active time, token usage, and budget.
+Print, JSON and RPC retain the goal lifecycle without terminal footer/widget updates.
 
 Provider usage-limit handling pauses active goals when Pi exposes HTTP 429 responses or assistant error messages that indicate subscription, quota, billing, balance, or repeated provider failures. This prevents automatic continuation from retrying indefinitely after provider limits such as 5-hour subscription caps. When the budget is exhausted or a provider limit is detected, a visible `pi-goal-event` notice is saved to model context without requesting a wrap-up turn. The model can act on that notice during a request independently started by Pi, the user, or another extension; the notice itself does not spend more tokens.
 

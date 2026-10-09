@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Clear theme-colored patch preview caches on invalidation so existing calls repaint after theme changes without another execution.
+
 ### Changed
 
 - Remove the obsolete direct-compaction grammar event-bus adapter. Public server-side compaction preserves the ordinary request's grammar declarations.

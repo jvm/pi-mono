@@ -78,6 +78,17 @@ test("recognizes only allowlisted models on supported OpenAI provider/API pairs"
   assert.equal(supportsFastMode({ provider: "openai", api: "openai-responses", id: "gpt-6-unknown" }), false);
 });
 
+test("footer state never retains theme ANSI across a palette switch", async () => {
+  const pi = makePi();
+  piFast(pi);
+  const ctx = makeContext({ provider: "openai-codex", id: "gpt-6-astra" });
+  ctx.ui.theme.fg = () => { throw new Error("status must not capture theme colors"); };
+  await pi.handlers.get("session_start")[0]({}, ctx);
+  assert.equal(ctx.statuses.at(-1).value, "Fast off");
+  await pi.commands.get("fast").handler("on", ctx);
+  assert.equal(ctx.statuses.at(-1).value, "Fast on");
+});
+
 test("adds Codex priority processing without mutating the original payload", () => {
   const payload = { model: "gpt-5.4", input: [] };
   const updated = applyFastMode(payload, { provider: "openai-codex", id: "gpt-5.4" });

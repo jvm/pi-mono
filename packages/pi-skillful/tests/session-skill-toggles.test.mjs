@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { CURSOR_MARKER } from "@earendil-works/pi-tui";
+import { CURSOR_MARKER, visibleWidth } from "@earendil-works/pi-tui";
 
 const home = await mkdtemp(join(tmpdir(), "pi-skillful-toggles-test-"));
 process.env.HOME = home;
@@ -278,6 +278,53 @@ test("prompt toggles change only owned structured visibility and never clear an 
   } finally {
     await shutdown(harness, ctx);
   }
+});
+
+test("existing toggle border reads the current theme and fits tiny/wide resize widths", async () => {
+  await writeGlobal({ toggleSlots: { 1: "界-🦊" } });
+  const inner = createEditor({ focusable: true });
+  const harness = createHarness({ commands: [skillCommand("界-🦊")], previousEditor: inner });
+  let color = 31;
+  Object.defineProperty(harness.ui, "theme", {
+    get: () => ({ fg: (_token, text) => `\x1b[${color}m${text}\x1b[0m` }),
+  });
+  const ctx = await start(harness, home, false);
+  const editor = harness.createInstalledEditor();
+  try {
+    const before = editor.render(80)[0];
+    color = 32;
+    editor.invalidate();
+    assert.notEqual(editor.render(80)[0], before);
+    for (const width of [0, 1, 2, 4, 12, 40, 120, 3]) {
+      assert.ok(visibleWidth(editor.render(width)[0]) <= width);
+    }
+  } finally { await shutdown(harness, ctx); }
+});
+
+test("wrapper preserves indicator lines, paste, padding, invalidation and disposal", async () => {
+  await writeGlobal({ toggleSlots: { 1: "one" } });
+  const inner = createEditor({ focusable: true, customHooks: true });
+  const calls = [];
+  inner.render = width => ["─".repeat(width), "⠋ working", "compacting", "retrying", CURSOR_MARKER];
+  for (const name of ["insertTextAtCursor", "setPaddingX", "invalidate", "dispose"]) {
+    inner[name] = (...args) => calls.push([name, ...args]);
+  }
+  const harness = createHarness({ commands: [skillCommand("one")], previousEditor: inner });
+  const ctx = await start(harness, home, false);
+  const editor = harness.createInstalledEditor();
+  try {
+    assert.deepEqual(editor.render(40).slice(1), inner.render(40).slice(1));
+    const paste = () => {};
+    editor.onPasteImage = paste;
+    assert.equal(inner.onPasteImage, paste);
+    editor.handleInput("\x1b[200~界 pasted\x1b[201~");
+    assert.equal(inner.delegated.at(-1), "\x1b[200~界 pasted\x1b[201~");
+    editor.insertTextAtCursor("界");
+    editor.setPaddingX(2);
+    editor.invalidate();
+    editor.dispose();
+    assert.deepEqual(calls, [["insertTextAtCursor", "界"], ["setPaddingX", 2], ["invalidate"], ["dispose"]]);
+  } finally { await shutdown(harness, ctx); }
 });
 
 test.after(async () => {

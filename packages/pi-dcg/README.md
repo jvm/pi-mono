@@ -14,6 +14,10 @@ Stop destructive shell commands before they damage your system.
 
 `pi-dcg` is a Pi extension bridge. It does not bundle dcg, replace dcg policy, or provide a sandbox.
 
+The TUI footer uses palette-neutral health labels, including the configured
+blocking/fail-open state when unavailable. It does not retain colors from an old
+theme. RPC confirmations and notifications remain separate from this terminal-only status.
+
 ## Requirements
 
 - Node.js 22.19.0 or newer

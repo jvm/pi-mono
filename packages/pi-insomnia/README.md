@@ -12,8 +12,11 @@ Keep long-running [Pi](https://pi.dev) tasks alive when you step away from your 
 - **Automatic protection** — inhibit idle sleep only while Pi has active work.
 - **Full-run awareness** — stay awake through retries, compaction, and queued follow-up work, then release when Pi settles.
 - **Zero setup** — use macOS built-in `caffeinate`; no commands, configuration, or third-party runtime dependency.
-- **Visible state** — show a small `☕ sleep inhibited` footer status while active.
+- **Visible state** — show a small braille spinner with `sleep inhibited` in the TUI footer while active.
 - **Safe cleanup** — release assertions on session shutdown, reload, and quit.
+
+The spinner uses palette-neutral text and does not run in print, JSON or RPC
+mode. Sleep inhibition itself follows the same active-work lifecycle in all modes.
 
 ## Platform support
 
