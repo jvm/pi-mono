@@ -21,7 +21,7 @@ The maintainer will acknowledge reports as soon as practical and coordinate disc
 
 `pi-codex-image-gen` is a Pi package. Pi extensions execute with the same permissions as the local user running Pi. Users should review installed Pi packages and only install packages from sources they trust.
 
-The extension implements image-capable ChatGPT OAuth under the provider ID `codex-images`, using the Codex-compatible public OAuth client ID (not a client secret). Pi stores access/refresh tokens in its agent credential store, normally `~/.pi/agent/auth.json`, and coordinates refresh. This is local credential persistence, not encrypted secret storage; protect the agent directory and do not commit it. The extension does not write its own credential files or access the Codex app's credential store. `/logout codex-images` removes only the image login. Existing legacy Pi `openai-codex` OAuth remains a fallback when package-owned credentials are absent; refresh or request failure does not switch accounts.
+The extension implements image-capable ChatGPT OAuth under the provider ID `codex-images`, using the Codex-compatible public OAuth client ID (not a client secret). Pi stores access/refresh tokens in its agent credential store, normally `~/.pi/agent/auth.json`, and coordinates refresh. This is local credential persistence, not encrypted secret storage; protect the agent directory and do not commit it. The extension does not write its own credential files or access the Codex app's credential store. `/logout codex-images` removes only the image login. Existing legacy Pi `openai-codex` OAuth remains a fallback when package-owned credentials are absent; refresh or request failure does not switch accounts. An unresolved owned login also checks Pi's provider-auth configuration status: a configured but unusable credential is an error, not permission to try a different account. This includes a stored API-key credential unsupported by the OAuth-only provider; no credential file is read directly by the extension.
 
 Browser login uses random OAuth state and S256 PKCE. Its callback listener binds only to `127.0.0.1:1455`; the registered redirect URI is `http://localhost:1455/auth/callback`. Loopback HTTP is limited to this local callback. Automatic and pasted callbacks must have the expected origin, path, and state. Pasted input must be the full redirect URL, never a bare authorization code. Invalid callbacks cannot finish login. Listener cleanup runs on success, failure, and cancellation. Login has a ten-minute limit; token requests have a 30-second limit and 64 KiB response bound, with no retries or redirects. Do not paste login URLs into chat or log them.
 
@@ -36,6 +36,13 @@ The artifact tool uses `codemode` exposure, not an exclusive codemode permission
 other nested tools and explicitly activated direct calls can use it. Tool
 discovery does not initiate generation or credential resolution. Both entry
 points preserve the same OAuth and backend limits.
+
+The provider exposes no native image models. A native image operation would
+be separately callable through `models.generateImages()`, without inheriting
+the named tools' approval hooks or exclusions. Such an adapter is deferred;
+the generic API is not an alternate route around these tools' restrictions.
+Backend counters in `details.usage` are informational and do not establish
+metered session usage, remaining quota, or a verified subscription price.
 
 Artifact generation reserves a private random OS temporary directory (`0700`)
 and an exclusively created original file (`0600`) before requesting generation.
