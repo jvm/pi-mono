@@ -6,6 +6,11 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Load managed npm installations without a physical Pi AI dependency. Remove host filesystem resolution and internal serializer imports; verify retained output through the configured provider's public serialization boundary with transport disabled.
+- Test the actual packed entry outside the checkout without installing or linking Pi peers, including CLI startup and checkpoint/tool continuation/reload in print, JSON, and RPC modes.
+
 ## [0.2.2] - 2026-10-09
 
 ### Fixed

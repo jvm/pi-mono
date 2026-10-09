@@ -577,6 +577,67 @@ test("message_end redaction prevents adopting an unredacted raw suffix", async (
   } finally { await h.close(); }
 });
 
+test("checkpoint verification uses only the public provider payload boundary and no real credential", async (t) => {
+  const requests = mockResponses(t, [[checkpoint(), text("msg_1", "answer")], [text("msg_2", "next")]]);
+  const h = await harness();
+  const provider = h.runtime.getProvider("openai");
+  let serializations = 0;
+  t.mock.method(h.runtime, "getProvider", () => ({ ...provider,
+    streamSimple(model, context, options) {
+      serializations++;
+      assert.equal(options.apiKey, "serialization-only");
+      assert.equal(options.maxRetries, 0);
+      assert.equal(options.cacheRetention, "none");
+      assert.equal(options.signal.aborted, false);
+      return provider.streamSimple(model, context, { ...options,
+        onPayload(payload, selectedModel) {
+          assert.equal(serializations, 1);
+          assert.ok(payload.input.some((item) => item.id === "msg_1"));
+          assert.throws(() => options.onPayload(payload, selectedModel), /Serialization only/);
+          assert.equal(options.signal.aborted, true);
+          throw new Error("Stopped before inference");
+        },
+        fetch() { assert.fail("Serialization must stop before fetch"); },
+      });
+    },
+  }));
+  try {
+    await h.session.prompt("old");
+    assert.equal(serializations, 1);
+    await h.session.prompt("new");
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests[1].input.find((item) => item.type === "compaction"), checkpoint());
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
+for (const fault of ["missing-provider", "missing-payload-hook", "serialization-error"]) {
+  test(`serialization ${fault} fails closed without extra inference`, async (t) => {
+    const requests = mockResponses(t, [[checkpoint(), text("msg_1", "answer")], [text("msg_2", "next")]]);
+    const h = await harness();
+    const provider = h.runtime.getProvider("openai");
+    let blockedFetches = 0;
+    t.mock.method(h.runtime, "getProvider", () => fault === "missing-provider" ? undefined : ({ ...provider,
+      streamSimple(model, context, options) {
+        if (fault === "serialization-error") throw new Error("Synthetic serialization failure");
+        return provider.streamSimple(model, context, { ...options, onPayload: undefined,
+          fetch(...args) { blockedFetches++; return options.fetch(...args); },
+        });
+      },
+    }));
+    try {
+      await h.session.prompt("preserve history");
+      assert.equal(blockedFetches, fault === "missing-payload-hook" ? 1 : 0);
+      assert.equal(h.manager.getBranch().some((item) => item.type === "compaction"), false);
+      await h.session.prompt("new");
+      assert.equal(requests.length, 2);
+      assert.match(JSON.stringify(requests[1].input), /preserve history/);
+      assert.equal(requests[1].input.some((item) => item.type === "compaction"), false);
+      assert.deepEqual(h.errors, []);
+    } finally { await h.close(); }
+  });
+}
+
 test("cancellation after receiving a checkpoint does not commit it", async (t) => {
   mockResponses(t, [[checkpoint(), text("msg_1", "answer")]]);
   const h = await harness({ factories: [(pi) => pi.on("provider_stream_event", (event, ctx) => {

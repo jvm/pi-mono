@@ -49,8 +49,13 @@ a bounded transcript excerpt, not a complete summary. The original history and
 fallback remain subject to the user's Pi session-file permissions and retention.
 
 Replay checks the canonical retained assistant and serialized output
-fingerprints. Omitted, edited, or transformed messages fall back rather than
-restoring stale raw content. As with Pi text summaries, edits to already-compacted
+fingerprints. Before adoption, serialization uses the configured provider's
+public payload hook and aborts before transport. It uses a non-credential
+placeholder, a fetch function that always throws, and zero retries; it does not
+resolve real authentication or send an additional inference request. Missing
+hooks, serialization errors, or an attempted fetch prevent adoption. No host
+filesystem lookup or private serializer imports are required. Omitted, edited,
+or transformed messages fall back rather than restoring stale raw content. As with Pi text summaries, edits to already-compacted
 source history cannot alter an opaque checkpoint. Legacy checkpoint details are
 not migrated or replayed across provider/authentication boundaries.
 

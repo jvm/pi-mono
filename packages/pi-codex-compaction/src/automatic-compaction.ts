@@ -1,10 +1,5 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
-import type { Model } from "@earendil-works/pi-ai";
-// Resolve before importing: Pi's jiti root alias also matches subpaths.
-const aiEntry = import.meta.resolve("@earendil-works/pi-ai");
-const { convertResponsesMessages } = await import(new URL("./api/openai-responses-shared.js", aiEntry).href) as typeof import("@earendil-works/pi-ai/api/openai-responses-shared");
-const { createGrammarToolInputProperties } = await import(new URL("./api/constrained-sampling.js", aiEntry).href) as typeof import("@earendil-works/pi-ai/api/constrained-sampling");
-const { getCurrentSystemMessage, normalizeContext } = await import(new URL("./utils/transcript.js", aiEntry).href) as typeof import("@earendil-works/pi-ai/utils/transcript");
+import { getCurrentSystemMessage, normalizeContext, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
 import {
   convertToLlm,
   serializeConversation,
@@ -185,6 +180,41 @@ function fallbackSummary(entries: SessionEntry[], ctx: ExtensionContext): string
   return `[${KIND}:${randomUUID()}]\nProvider checkpoint; the following is only a bounded readable fallback, not a full summary.\n${excerpt}`;
 }
 
+/**
+ * Ask the configured provider to serialize, then stop at its public onPayload
+ * boundary. Never resolve host files or reproduce its private serializer.
+ * The dummy credential, throwing fetch and zero retries prohibit inference,
+ * even if a future host accidentally continues past the payload callback.
+ */
+async function serializedAssistant(ctx: ExtensionContext, message: AssistantMessage): Promise<unknown[] | undefined> {
+  if (!supports(ctx.model) || ctx.signal?.aborted) return;
+  const provider = ctx.modelRegistry.getProvider(ctx.model.provider);
+  if (!provider) return;
+  const system = getCurrentSystemMessage(ctx.sessionManager.buildSessionProjection().messages);
+  const controller = new AbortController();
+  const stop = new Error("Serialization only; no provider request allowed");
+  let input: unknown[] | undefined;
+  let fetchAttempted = false;
+  const result = await provider.streamSimple(ctx.model, normalizeContext({
+    messages: [...(system ? [system] : []), message],
+  }), {
+    // Not an API key. No real credential is resolved or sent by this dry run.
+    apiKey: "serialization-only",
+    signal: controller.signal,
+    cacheRetention: "none",
+    maxRetries: 0,
+    fetch: async () => { fetchAttempted = true; throw stop; },
+    onPayload: (payload) => {
+      if (record(payload) && Array.isArray(payload.input) && bytes(payload.input) <= MAX_BYTES) {
+        input = structuredClone(payload.input);
+      }
+      controller.abort();
+      throw stop;
+    },
+  }).result();
+  return result.stopReason === "aborted" && !fetchAttempted && !ctx.signal?.aborted ? input : undefined;
+}
+
 /** Public Pi hooks only. No provider replacement, synthetic model turn, or private registry access. */
 export function registerAutomaticCompaction(pi: ExtensionAPI): void {
   pi.registerFlag("server-compaction", { type: "boolean", default: true,
@@ -332,7 +362,7 @@ export function registerAutomaticCompaction(pi: ExtensionAPI): void {
     attempt.items.clear();
   });
 
-  pi.on("turn_end", (event, ctx) => {
+  pi.on("turn_end", async (event, ctx) => {
     const current = attempt;
     attempt = undefined;
     inTurn = false;
@@ -364,13 +394,8 @@ export function registerAutomaticCompaction(pi: ExtensionAPI): void {
     // output before discarding any history. In particular, message_end redaction
     // must not later be undone by replaying an unredacted raw suffix.
     try {
-      const system = getCurrentSystemMessage(ctx.sessionManager.buildSessionProjection().messages);
-      const normalized = convertResponsesMessages(ctx.model,
-        normalizeContext({ messages: [...(system ? [system] : []), event.message] }), new Set(["openai"]), {
-          includeSystemPrompt: false,
-          grammarToolInputProperties: createGrammarToolInputProperties(
-            system?.toolsAdded ?? [], ctx.model.compat?.supportsOpenAIGrammarTools ?? false),
-        });
+      const normalized = await serializedAssistant(ctx, event.message);
+      if (!normalized) return;
       const actualHashes = normalized.map(outputHash).filter((value) => value !== undefined);
       if (hash(actualHashes) !== hash(hashes)) return;
     } catch { return; }
