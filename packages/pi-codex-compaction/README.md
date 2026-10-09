@@ -108,6 +108,13 @@ RemoteCompactionV2 protocol.
 | Same route with an API key | Mocked contract coverage; no live billing test |
 | Legacy `openai-codex`, custom endpoints, other providers, routed model mismatch | Left unchanged; no compaction or auth hooks for those routes |
 
+Virtual-model selections are also ineligible, including when their physical
+dispatch returns to the same public OpenAI model. Pi 1.1.0 request hooks expose
+the selected virtual model, not a complete physical request/auth identity.
+Existing checkpoints use their bounded readable fallback rather than opaque
+replay. Pi's ordinary routed context-limit checks and standard compaction remain
+available; no checkpoint identity is inferred from the payload's model name.
+
 GPT-6.1 Sol matches the GPT-6 candidate guard, but the existing live replay
 evidence is Astra-only. Model eligibility is not proof of account availability.
 No default model is changed. See the [provider migration assessment](../pi-openai-reasoning/README.md#provider-migration-assessment)

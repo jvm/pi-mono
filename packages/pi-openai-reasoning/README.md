@@ -44,6 +44,12 @@ Pro mode, backend multi-agent requests, server auto-compaction/truncation, store
 conversation references and requests already containing configuration updates are
 left unchanged. This package does not add async tools or mid-turn steering.
 
+Virtual-model selections are ineligible even when they dispatch to legacy
+Astra. On Pi 1.1.0, request hooks still see the virtual selection; this extension
+does not infer physical protocol support from a display name, payload, or prior
+response. Pi uses the router's ordinary physical thinking level without this
+extension's cache-preserving updates.
+
 The first request pins the effort for its current context window. Later changes
 use `configuration_update` input items before new user input, or after tool
 history when no new user input exists. All other request fields remain intact.
