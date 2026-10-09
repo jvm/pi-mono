@@ -293,8 +293,17 @@ nested-callable and change the meaning of disabling them. Use Pi's `codemode.mod
 active-tool boundary. Optional research tools still require their provider keys.
 Explicit `defaultTools` `-name` entries are honored at late registration; reload
 restores Pi's active selection rather than re-enabling manually disabled tools.
-Newly available tools after a reload may need explicit activation (for example,
-add `+library_docs` to `defaultTools`) or a restart.
+New optional tools activate when credentials first become available on reload,
+including existing positive `defaultTools` selections. Previously registered
+tools are not force-reactivated, even if settings still positively select them.
+The extension records only previously registered tool names in branch-local
+`pi-web-kit:registered-tools` session metadata, outside model context; it does
+not store activation choices or credentials. The record is refreshed before
+reload so navigating to older branch history cannot revive a manually disabled
+tool. Older sessions without this metadata preserve inactivity on their first
+reload, so they may require explicit activation or a restart.
+Malformed/unknown-version metadata uses the same
+conservative fallback.
 CLI exclusions remain host-enforced.
 
 ## Privacy and security

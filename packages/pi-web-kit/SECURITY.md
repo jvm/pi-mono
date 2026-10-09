@@ -41,3 +41,10 @@ The `web` namespace and read-only/idempotent/open-world annotations are advisory
 They do not approve provider spending, bypass tool hooks, or make an inactive
 direct tool reachable from nested dispatch. Project trust, URL validation,
 provider request limits and cancellation still apply.
+
+Branch-local `pi-web-kit:registered-tools` custom entries remember only this
+package's fixed tool names as they first become available. They contain no
+credentials, configuration values, activation decisions or usage data and do
+not enter model context. This distinguishes a newly available optional tool
+from re-registration of a manually disabled tool; Pi still owns activation
+and exclusions. Missing or invalid history does not force tools active on reload.

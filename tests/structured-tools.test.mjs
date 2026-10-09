@@ -52,7 +52,7 @@ function responseFor(request, name, args) {
 }
 
 const json = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
-async function fixture(t, { mode = "only", inlineBudget = 0, defaultTools, excludeTools, deferred, extra = [], git } = {}) {
+async function fixture(t, { mode = "only", inlineBudget = 0, defaultTools, excludeTools, deferred, withoutWebHistory = false, extra = [], git } = {}) {
   t.mock.method(globalThis, "fetch", async () => { throw new Error("Unmocked network blocked"); });
   await mkdir(process.env.PI_SCOUT_TMPDIR, { recursive: true });
   await saveState({ repos: [] });
@@ -64,6 +64,10 @@ async function fixture(t, { mode = "only", inlineBudget = 0, defaultTools, exclu
   let gitCalls = 0;
   const capture = extension => pi => extension({
     ...pi,
+    appendEntry(customType, data) {
+      // Simulate sessions made before registration history was introduced.
+      if (!withoutWebHistory || customType !== "pi-web-kit:registered-tools") pi.appendEntry(customType, data);
+    },
     registerTool(tool) {
       // Explicit opt-in adapter only in this test: production exposure remains direct.
       const definition = tool.name === deferred ? { ...tool, exposure: "deferred" } : tool;
@@ -285,6 +289,90 @@ test("defaultTools exclusions remain effective for late-registered optional rese
       text("default exclusions");
     `));
   }
+});
+
+for (const explicitlySelected of [false, true]) {
+  test(`new optional tools activate when credentials arrive on reload (selected=${explicitlySelected})`, async t => {
+    const previous = process.env.CONTEXT7_API_KEY;
+    delete process.env.CONTEXT7_API_KEY;
+    t.after(() => restoreEnv({ CONTEXT7_API_KEY: previous }));
+    const h = await fixture(t, {
+      defaultTools: ["+codemode", "-library_docs", ...(explicitlySelected ? ["+library_search"] : [])],
+    });
+    succeeds(await h.script(`
+      if (await describeTool("library_search")) throw new Error("Registered without credentials");
+    `));
+    process.env.CONTEXT7_API_KEY = previous;
+    await h.session.reload();
+    for (const reload of [false, true]) {
+      if (reload) await h.session.reload();
+      succeeds(await h.script(`
+        const r = await tools.library_search({libraryName:"fixture"});
+        if (r.results[0].id !== "/fixture/library") throw new Error("Missing newly available tool");
+        if (await describeTool("library_docs")) throw new Error("Lost defaultTools exclusion");
+        text(r.results[0].id);
+      `));
+    }
+    const history = h.sessionManager.getBranch().filter(e => e.type === "custom" && e.customType === "pi-web-kit:registered-tools");
+    assert.equal(history.length, 2, "record only first availability, not every reload");
+    assert.deepEqual(history.at(-1).data, { version: 1, tools: ["code_search", "library_docs", "library_search", "web_fetch", "web_search"] });
+    assert.ok(h.requests.every(r => !JSON.stringify(r.input).includes("pi-web-kit:registered-tools")), "metadata stays outside model context");
+  });
+}
+
+test("positive default selection does not reactivate a manually disabled research tool", async t => {
+  const h = await fixture(t, { defaultTools: ["+codemode", "+library_search"] });
+  h.api.setActiveTools(h.api.getActiveTools().filter(name => name !== "library_search"));
+  for (let reload = 0; reload < 2; reload++) {
+    await h.session.reload();
+    succeeds(await h.script(`
+      if (await describeTool("library_search")) throw new Error("Reactivated manual deactivation");
+      text("inactive");
+    `));
+  }
+});
+
+test("returning to older branch history does not revive a manually disabled tool on reload", async t => {
+  const previous = process.env.CONTEXT7_API_KEY;
+  delete process.env.CONTEXT7_API_KEY;
+  t.after(() => restoreEnv({ CONTEXT7_API_KEY: previous }));
+  const h = await fixture(t);
+  const original = h.sessionManager.getBranch().find(e => e.type === "custom" && e.customType === "pi-web-kit:registered-tools");
+  process.env.CONTEXT7_API_KEY = previous;
+  await h.session.reload();
+  await h.session.navigateTree(original.id, { summarize: false });
+  h.session.setActiveToolsByName([...new Set([...h.session.getActiveToolNames().filter(name => name !== "library_search"), "codemode"])]);
+  await h.session.reload();
+  succeeds(await h.script(`
+    if (await describeTool("library_search")) throw new Error("Revived tool after tree navigation");
+    text("inactive");
+  `));
+});
+
+for (const [label, data] of [["missing", undefined], ["unknown version", { version: 2, tools: [] }], ["invalid names", { version: 1, tools: ["not-a-web-tool"] }]]) {
+  test(`${label} registration history preserves manual deactivation on reload`, async t => {
+    const h = await fixture(t, { defaultTools: ["+codemode", "+library_search"], withoutWebHistory: true });
+    if (data) h.sessionManager.appendCustomEntry("pi-web-kit:registered-tools", data);
+    h.api.setActiveTools(h.api.getActiveTools().filter(name => name !== "library_search"));
+    await h.session.reload();
+    succeeds(await h.script(`
+      if (await describeTool("library_search")) throw new Error("Guessed activation from unknown history");
+      text("inactive");
+    `));
+  });
+}
+
+test("CLI exclusions still win when a positively selected tool first becomes available", async t => {
+  const previous = process.env.CONTEXT7_API_KEY;
+  delete process.env.CONTEXT7_API_KEY;
+  t.after(() => restoreEnv({ CONTEXT7_API_KEY: previous }));
+  const h = await fixture(t, { defaultTools: ["+codemode", "+library_search"], excludeTools: ["library_search"] });
+  process.env.CONTEXT7_API_KEY = previous;
+  await h.session.reload();
+  succeeds(await h.script(`
+    if (await describeTool("library_search")) throw new Error("Lost CLI exclusion");
+    text("excluded");
+  `));
 });
 
 test("inactive Scout removal stays inactive across prompts and reload", async t => {

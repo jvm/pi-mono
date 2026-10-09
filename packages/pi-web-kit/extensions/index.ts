@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { type ExtensionAPI, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type, type TSchema } from "typebox";
 import { fetchCache, type CachedPage } from "../src/cache.js";
@@ -11,6 +11,8 @@ import type { FetchProviderName, SearchProviderName, WebFetchResult } from "../s
 import { canonicalWebUrl, normalizeUrlInput } from "../src/urls.js";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import { projectOutput, publicPageError, redactOutput, redactText, WEB_OUTPUT_SCHEMAS, WEB_TOOL_METADATA } from "../src/output.js";
+
+const REGISTERED_TOOLS_ENTRY = "pi-web-kit:registered-tools";
 
 export default function (pi: ExtensionAPI) {
   void reportInstallTelemetry();
@@ -24,11 +26,22 @@ export default function (pi: ExtensionAPI) {
   });
 
   let registeredConfig = "";
+  let rememberedTools: string[] | undefined;
   pi.on("session_start", (event, ctx) => {
     const startupConfig = runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx));
     const signature = toolConfigSignature(startupConfig);
     if (signature === registeredConfig) return;
-    registerTools(pi, startupConfig, event.reason === "reload");
+    const available = [
+      "web_search", "web_fetch",
+      ...(startupConfig.apiKeys.context7 ? ["library_search", "library_docs"] : []),
+      ...(startupConfig.apiKeys.exa ? ["code_search"] : []),
+    ];
+    const previous = registrationHistory(ctx);
+    // Remember availability, not activation. Pi owns active/pending selection.
+    // Without history (an older session), conservatively preserve inactivity on
+    // the first reload instead of guessing which tools were manually disabled.
+    registerTools(pi, startupConfig, event.reason === "reload" ? new Set(previous ?? available) : undefined);
+    rememberedTools = recordRegisteredTools(pi, ctx, available);
     // A session change can drop provider credentials without replacing this
     // extension instance. Retained definitions must not remain active then.
     if (typeof pi.getActiveTools === "function" && typeof pi.setActiveTools === "function") {
@@ -41,9 +54,36 @@ export default function (pi: ExtensionAPI) {
     }
     registeredConfig = signature;
   });
+  pi.on("session_shutdown", (event, ctx) => {
+    // Tree navigation can restore an older branch record while the live
+    // registry still knows newer tools. Save that fact before runtime teardown.
+    if (event.reason === "reload" && rememberedTools) recordRegisteredTools(pi, ctx, rememberedTools);
+  });
 }
 
-function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolveConfig>, reloading = false) {
+function registrationHistory(ctx: ExtensionContext): string[] | undefined {
+  const entry = ctx.sessionManager?.getBranch().filter(item => item.type === "custom" && item.customType === REGISTERED_TOOLS_ENTRY).at(-1);
+  return entry?.type === "custom" ? registeredToolNames(entry.data) : undefined;
+}
+
+function recordRegisteredTools(pi: ExtensionAPI, ctx: ExtensionContext, tools: readonly string[]): string[] {
+  const previous = registrationHistory(ctx);
+  const remembered = [...new Set([...(previous ?? []), ...tools])].sort();
+  if (!previous || JSON.stringify(previous) !== JSON.stringify(remembered)) {
+    pi.appendEntry?.(REGISTERED_TOOLS_ENTRY, { version: 1, tools: remembered });
+  }
+  return remembered;
+}
+
+function registeredToolNames(data: unknown): string[] | undefined {
+  if (!data || typeof data !== "object" || !("version" in data) || data.version !== 1
+    || !("tools" in data) || !Array.isArray(data.tools)
+    || data.tools.length > Object.keys(WEB_OUTPUT_SCHEMAS).length
+    || !data.tools.every(name => typeof name === "string" && Object.hasOwn(WEB_OUTPUT_SCHEMAS, name))) return undefined;
+  return [...new Set(data.tools)].sort();
+}
+
+function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolveConfig>, previouslyRegistered?: ReadonlySet<string>) {
   // All five tools stay direct. Metadata must not make excluded/inactive tools callable.
   type DataTool = Omit<ToolDefinition, "execute"> & {
     execute(...args: Parameters<ToolDefinition["execute"]>): Promise<unknown>;
@@ -56,7 +96,9 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
     ...tool,
     // Late registration must not undo explicit settings or session deactivation.
     // Pi restores previously active/pending names on reload even when this is false.
-    defaultActive: !reloading && !disabledByDefault(tool.name),
+    // Only first availability uses the default; re-registration cannot undo a
+    // manual deactivation, even if settings positively select this tool.
+    defaultActive: !previouslyRegistered?.has(tool.name) && !disabledByDefault(tool.name),
     outputSchema: WEB_OUTPUT_SCHEMAS[tool.name],
     async execute(id, args, signal, onUpdate, ctx) {
       const secrets = Object.values(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)).apiKeys);
