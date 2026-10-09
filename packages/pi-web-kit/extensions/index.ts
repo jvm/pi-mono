@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { type ExtensionAPI, type ToolDefinition, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type, type TSchema } from "typebox";
 import { fetchCache, type CachedPage } from "../src/cache.js";

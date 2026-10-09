@@ -304,7 +304,7 @@ CLI exclusions remain host-enforced.
 The extension rejects non-HTTP(S) URLs and URLs with embedded username/password credentials.
 Returned data is projected to declared public fields; raw provider metadata,
 Context7 `rules`, cache keys and HTTP error bodies are not returned. Known API
-keys and common URL/auth credential patterns are masked in text, structured data,
+keys, URL credential patterns and Basic/Bearer authorization-header values are masked in text, structured data,
 renderer details and progress. This is not a general sensitive-data scanner:
 page content remains untrusted, and Pi retains caller-supplied arguments in its
 own transcript. Do not put credentials in queries or URLs.

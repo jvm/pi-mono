@@ -69,11 +69,26 @@ test("search omitted-count fields and top-level truncation fallback validate", (
 
 test("known credentials and transport patterns are redacted before output bounding", () => {
   const secret = "synthetic-api-key";
-  const text = `${secret} https://user:password@fixture.invalid/p?token=secret-token Basic YWJj Omitting this is safe.`;
+  const text = `${secret} https://user:password@fixture.invalid/p?token=secret-token Authorization: Basic YWJj Omitting this is safe.`;
   const result = validates("code_search", { provider: "exa", query: secret, response: text.repeat(5000) }, [secret]);
   assert.doesNotMatch(JSON.stringify(result), /synthetic-api-key|password|secret-token|YWJj/);
   assert.deepEqual(redactOutput({ nested: [secret], count: 1 }, [secret]), { nested: ["*".repeat(secret.length)], count: 1 });
   assert.equal(publicPageError("private unrestricted backend body"), "Provider could not fetch this page.");
+});
+
+test("auth documentation stays readable while short and quoted header credentials are masked", () => {
+  const prose = "Basic authentication and Bearer token examples.";
+  const headers = [
+    "Authorization: Basic YWJj",
+    '"authorization": "Bearer x"',
+    "'Proxy-Authorization': 'bAsIc dTpw'",
+    "authorization = `Bearer token-value`",
+  ];
+  const response = [prose, ...headers].join("\n");
+  const result = validates("code_search", { provider: "exa", query: "authentication", response });
+  assert.ok(result.structuredContent.response.startsWith(prose));
+  assert.equal(result.structuredContent.response.length, response.length, "masking retains character offsets");
+  assert.doesNotMatch(JSON.stringify(result), /YWJj|Bearer x|dTpw|token-value/);
 });
 
 test("HTTP and JSON parse failures do not echo backend bodies", async t => {

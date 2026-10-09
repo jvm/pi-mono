@@ -13,6 +13,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 ### Fixed
 
 - Project provider responses to public fields and mask credentials consistently across text, structured data, details and progress. Omit arbitrary metadata, Context7 rules and raw backend error bodies.
+- Restrict Basic/Bearer masking to authorization-header values so ordinary authentication documentation remains readable, while short header credentials stay masked.
 - Honor explicit default-tool exclusions during late registration and retain manual deactivation across reload instead of force-activating optional research tools.
 - Reject cancelled calls even when a provider converts cancellation into per-page failure data.
 

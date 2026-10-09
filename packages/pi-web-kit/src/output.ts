@@ -113,7 +113,9 @@ export function redactText(text: string, secrets: readonly string[] = []): strin
   }
   return redacted
     .replace(/(https?:\/\/)([^\s/@"<>]+)@/gi, (_match, prefix, secret) => `${prefix}${"*".repeat(secret.length)}@`)
-    .replace(/\b(Bearer|Basic)(\s+)([A-Za-z0-9._~+/=-]+)/gi, (_match, prefix, space, secret) => `${prefix}${space}${"*".repeat(secret.length)}`)
+    // Header context distinguishes credentials from prose such as "Basic
+    // authentication" or "Bearer token", without exempting short credentials.
+    .replace(/(\b(?:proxy-)?authorization\b["']?\s*[:=]\s*["'`]?(?:Bearer|Basic)[ \t]+)([A-Za-z0-9._~+/=-]+)/gi, (_match, prefix, secret) => `${prefix}${"*".repeat(secret.length)}`)
     .replace(/([?&](?:api[-_]?key|access[-_]?token|token|secret|password)=)([^&#\s"'<>]+)/gi, (_match, prefix, secret) => `${prefix}${"*".repeat(secret.length)}`);
 }
 

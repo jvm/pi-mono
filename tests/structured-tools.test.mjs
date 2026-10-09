@@ -9,16 +9,21 @@ import { codexHarness, requestBody, textResponse } from "./codex-harness.mjs";
 
 // No user profiles, credentials, Git remotes or provider requests.
 const root = await mkdtemp(join(tmpdir(), "pi-structured-tools-"));
-process.env.HOME = root;
-process.env.PI_CODING_AGENT_DIR = join(root, "agent");
-process.env.PI_SCOUT_TMPDIR = join(root, "clones");
-process.env.CI = "1";
-process.env.PI_OFFLINE = "1";
-process.env.PI_TELEMETRY = "0";
-process.env.PI_WEB_KIT_PROVIDER_SEARCH = "exa";
-process.env.PI_WEB_KIT_PROVIDER_FETCH = "markdown_new";
-for (const key of ["EXA_API_KEY", "CONTEXT7_API_KEY", "TINYFISH_API_KEY", "FIRECRAWL_API_KEY", "BRAVE_SEARCH_API_KEY"]) {
-  process.env[key] = `synthetic-${key}-secret`;
+const envOverrides = {
+  HOME: root, PI_CODING_AGENT_DIR: join(root, "agent"), PI_SCOUT_TMPDIR: join(root, "clones"),
+  CI: "1", PI_OFFLINE: "1", PI_TELEMETRY: "0",
+  PI_WEB_KIT_PROVIDER_SEARCH: "exa", PI_WEB_KIT_PROVIDER_FETCH: "markdown_new",
+  ...Object.fromEntries(["EXA_API_KEY", "CONTEXT7_API_KEY", "TINYFISH_API_KEY", "FIRECRAWL_API_KEY", "BRAVE_SEARCH_API_KEY"]
+    .map(key => [key, `synthetic-${key}-secret`])),
+};
+const savedEnv = Object.fromEntries(Object.keys(envOverrides).map(key => [key, process.env[key]]));
+Object.assign(process.env, envOverrides);
+
+function restoreEnv(values) {
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
 }
 
 const { default: web } = await import("../packages/pi-web-kit/extensions/index.ts");
@@ -316,7 +321,7 @@ test("errors reject, fetch failures remain data, and all output surfaces exclude
     if (String(url) === "https://api.exa.ai/search") return json({ results: [{
       title: "synthetic-EXA_API_KEY-secret",
       url: "https://origin-user:origin-password@fixture.invalid/page?token=origin-token",
-      text: "Bearer auth-header-secret",
+      text: "Authorization: Bearer auth-header-secret",
       arbitrary: { cacheKey: "private-cache", responseBody: "private-body" },
     }] });
     return new Response("raw-backend-secret synthetic-CONTEXT7_API_KEY-secret", { status: 401 });
@@ -342,7 +347,7 @@ test("errors reject, fetch failures remain data, and all output surfaces exclude
 test("progress and per-page backend errors are sanitized through the registered tool", async t => {
   const previous = process.env.PI_WEB_KIT_PROVIDER_FETCH;
   process.env.PI_WEB_KIT_PROVIDER_FETCH = "tinyfish";
-  t.after(() => { process.env.PI_WEB_KIT_PROVIDER_FETCH = previous; });
+  t.after(() => restoreEnv({ PI_WEB_KIT_PROVIDER_FETCH: previous }));
   const h = await fixture(t);
   h.setProvider(async () => json({ errors: [{ url: "https://fixture.invalid/?token=private-url-secret",
     error: "private-backend-body", status: "private-status" }] }));
@@ -352,6 +357,22 @@ test("progress and per-page backend errors are sanitized through the registered 
   assert.ok(h.progress.length > 0);
   assert.doesNotMatch(outputSurfaces(h) + JSON.stringify(h.progress), /private-url-secret|private-backend-body|private-status/);
   validates(h, h.events.findLast(e => e.toolName === "web_fetch"));
+});
+
+test("nested research keeps auth prose but masks real header values in every result surface", async t => {
+  const h = await fixture(t);
+  h.setProvider(async () => json({
+    response: 'Basic authentication uses a Bearer token.\nAuthorization: Basic YWJj\n"authorization": "Bearer x"',
+  }));
+  succeeds(await h.script(`
+    const r = await tools.code_search({query:"HTTP authentication"});
+    if (!r.response.includes("Basic authentication uses a Bearer token.")) throw new Error("Redacted ordinary prose");
+    if (r.response.includes("YWJj") || r.response.includes("Bearer x")) throw new Error("Leaked header credential");
+    text(r.response);
+  `));
+  assert.match(outputSurfaces(h), /Basic authentication uses a Bearer token/);
+  assert.doesNotMatch(outputSurfaces(h), /YWJj|Bearer x/);
+  validates(h, h.events.findLast(e => e.toolName === "code_search"));
 });
 
 test("cancellation aborts the provider and never publishes a structured success", { timeout: 10_000 }, async t => {
@@ -453,4 +474,7 @@ test("failed Scout clones expose bounded diagnostics, not Git stderr", async t =
   assert.ok(resultText(result).length < 200);
 });
 
-test.after(async () => { await rm(root, { recursive: true, force: true }); });
+test.after(async () => {
+  try { await rm(root, { recursive: true, force: true }); }
+  finally { restoreEnv(savedEnv); }
+});
