@@ -1,8 +1,10 @@
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import type { Model } from "@earendil-works/pi-ai";
-import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
-import { createGrammarToolInputProperties } from "@earendil-works/pi-ai/api/constrained-sampling";
-import { getCurrentSystemMessage, normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
+// Resolve before importing: Pi's jiti root alias also matches subpaths.
+const aiEntry = import.meta.resolve("@earendil-works/pi-ai");
+const { convertResponsesMessages } = await import(new URL("./api/openai-responses-shared.js", aiEntry).href) as typeof import("@earendil-works/pi-ai/api/openai-responses-shared");
+const { createGrammarToolInputProperties } = await import(new URL("./api/constrained-sampling.js", aiEntry).href) as typeof import("@earendil-works/pi-ai/api/constrained-sampling");
+const { getCurrentSystemMessage, normalizeContext } = await import(new URL("./utils/transcript.js", aiEntry).href) as typeof import("@earendil-works/pi-ai/utils/transcript");
 import {
   convertToLlm,
   serializeConversation,
