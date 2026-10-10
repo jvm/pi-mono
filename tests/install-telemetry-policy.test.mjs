@@ -17,6 +17,7 @@ const packageNames = [
   "pi-openai-reasoning",
   "pi-scout",
   "pi-skillful",
+  "pi-subs-usage",
   "pi-web-kit",
 ];
 
