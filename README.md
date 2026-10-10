@@ -21,6 +21,7 @@ Each package installs independently. Pick the capability you need, then follow i
 | Need | Package | What it adds |
 | --- | --- | --- |
 | Use supported provider fast modes on demand | [pi-fast](./packages/pi-fast) | Session-local Fast toggles for provider/model pairs that advertise faster processing. |
+| Watch the active subscription's limits | [pi-subs-usage](./packages/pi-subs-usage) | Provider-aware quota bars, reset times, and credit usage using Pi's credentials. |
 | Give grammar-capable Codex models their native patch tool | [pi-codex-tools](./packages/pi-codex-tools) | Raw `apply_patch` grammar tooling with Pi-style filesystem access and model-aware activation. |
 | Keep long OpenAI sessions flowing | [pi-codex-compaction](./packages/pi-codex-compaction) | Default-on automatic compaction on public OpenAI Responses, including ChatGPT subscriptions. |
 | Change legacy Codex Astra thinking effort without rewriting the prefix | [pi-openai-reasoning](./packages/pi-openai-reasoning) | Branch-aware reasoning updates for verified legacy Astra requests; inactive on public OpenAI. |

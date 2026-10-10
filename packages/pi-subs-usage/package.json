@@ -1,0 +1,52 @@
+{
+  "name": "pi-subs-usage",
+  "version": "0.1.0",
+  "description": "Show active AI subscription quotas and credit usage in Pi's status bar.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Jose Mocito",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jvm/pi-mono.git",
+    "directory": "packages/pi-subs-usage"
+  },
+  "bugs": {
+    "url": "https://github.com/jvm/pi-mono/issues"
+  },
+  "homepage": "https://github.com/jvm/pi-mono/tree/main/packages/pi-subs-usage#readme",
+  "keywords": ["pi-package", "pi-extension", "pi", "subscription", "usage", "quota", "codex", "claude", "copilot"],
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "files": [
+    "index.ts", "extensions", "src", "README.md", "LICENSE", "CHANGELOG.md",
+    "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.mjs",
+    "smoke": "node --import tsx tests/runtime-smoke.mjs",
+    "pack:dry-run": "npm pack --dry-run"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-coding-agent": "1.1.0",
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@mocito/install-telemetry": "0.1.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
