@@ -2,11 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Prevent background usage polls from freezing Pi when configured API keys or headers use `!command`. Affected models now show `[command auth unsupported]` without resolving auth or querying quota, including manual refreshes and the Codex fallback. Non-command credentials and per-model authorization overrides remain supported.
-- Fail closed with `[background auth unavailable]` when Pi's command-safety metadata is unavailable, rather than calling a potentially blocking resolver.
-
 ## [0.1.0] - 2026-10-10
 
 ### Added
@@ -20,3 +15,8 @@
 - Temporary native `openai` quota fallback to Pi's `openai-codex` OAuth login, with Pi-managed refresh. Inference authentication remains unchanged; the Codex login may use a different account. Without an eligible fallback, native SIWC shows an explicit unavailable status.
 - Exact Pi credential resolution, fixed HTTPS endpoints, official-origin validation, bounded responses, ten-second polling cycles, and cancellation on reload, shutdown, monitoring off, or offline checks.
 - Synthetic parser, credential-boundary, background-cache, lifecycle, rendering, and real Pi runtime contract tests.
+
+### Fixed
+
+- Prevent background usage polls from freezing Pi when configured API keys or headers use `!command`. Affected models now show `[command auth unsupported]` without resolving auth or querying quota, including manual refreshes and the Codex fallback. Non-command credentials and per-model authorization overrides remain supported.
+- Fail closed with `[background auth unavailable]` when Pi's command-safety metadata is unavailable, rather than calling a potentially blocking resolver.
