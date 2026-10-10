@@ -7,7 +7,7 @@ import subsUsage from "../index.ts";
 import { ENDPOINTS } from "../src/auth.ts";
 import { STATUS_KEY, POLL_MS, TICK_MS } from "../src/monitor.ts";
 import { REQUEST_TIMEOUT_MS } from "../src/http.ts";
-import { cases, model, NOW, legacyToken } from "./fixtures.mjs";
+import { backgroundAuthMetadata, cases, model, NOW, legacyToken } from "./fixtures.mjs";
 
 let dir;
 const originalEnv = { ...process.env };
@@ -51,6 +51,7 @@ function harness(t, { mode = "tui", configured = cases, selected = configured[0]
   const ctx = {
     mode, model: selected && model(selected), isProjectTrusted: () => false,
     modelRegistry: {
+      ...backgroundAuthMetadata(),
       getAvailable: () => { availableReads++; return models; },
       getApiKeyAndHeaders: async m => {
         authReads.push(authKey(m));
@@ -448,6 +449,31 @@ test("idle polling refreshes every provider on the original clock, not on turns 
   h.emit("session_shutdown");
   t.mock.timers.tick(POLL_MS * 10);
   assert.equal(fetch.mock.callCount(), cases.length * 2);
+});
+
+test("automatic polls skip command auth, clear earlier readings, and recover without changing the cadence", async t => {
+  t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"], now: NOW });
+  const h = harness(t, { configured: [cases[4]] });
+  const fetch = mockUsage(t);
+  let commandAuth = false;
+  h.ctx.modelRegistry.runtime.config.getProvider = () => ({ apiKey: commandAuth ? "!never-run-secret-command" : cases[4].token });
+  h.emit("session_start");
+  await flush();
+  assert.match(h.status(), /^\[5h/);
+  commandAuth = true;
+  for (let cycle = 0; cycle < 2; cycle++) {
+    t.mock.timers.tick(POLL_MS);
+    await flush();
+    assert.equal(h.status(), "[command auth unsupported]");
+    assert.equal(fetch.mock.callCount(), 1);
+    assert.equal(h.authReads.length, 1);
+  }
+  commandAuth = false;
+  t.mock.timers.tick(POLL_MS);
+  await flush();
+  assert.match(h.status(), /^\[5h/);
+  assert.equal(fetch.mock.callCount(), 2);
+  assert.equal(h.authReads.length, 2);
 });
 
 test("usage drained by another session updates an inactive provider's cache", async t => {

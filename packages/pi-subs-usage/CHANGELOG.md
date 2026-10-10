@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Prevent background usage polls from freezing Pi when configured API keys or headers use `!command`. Affected models now show `[command auth unsupported]` without resolving auth or querying quota, including manual refreshes and the Codex fallback. Non-command credentials and per-model authorization overrides remain supported.
+- Fail closed with `[background auth unavailable]` when Pi's command-safety metadata is unavailable, rather than calling a potentially blocking resolver.
+
 ## [0.1.0] - 2026-10-10
 
 ### Added

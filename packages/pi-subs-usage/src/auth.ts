@@ -1,5 +1,6 @@
 import type { Api, Credential, Model } from "@earendil-works/pi-ai";
 import { readStoredCredential, type ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { assertBackgroundAuthSafe, type BackgroundAuthRegistry } from "./background-auth.js";
 import { object } from "./parse.js";
 import { UsageError, type UsageProvider } from "./types.js";
 
@@ -34,7 +35,7 @@ export interface UsageRequest {
   headers: Record<string, string>;
 }
 
-type UsageRegistry = Pick<ModelRegistry, "getApiKeyAndHeaders" | "getProvider" | "getProviderAuth">;
+type UsageRegistry = BackgroundAuthRegistry & Pick<ModelRegistry, "getApiKeyAndHeaders" | "getProvider" | "getProviderAuth">;
 interface ResolvedUsageAuth {
   apiKey?: string;
   headers?: Record<string, string | null>;
@@ -99,12 +100,13 @@ function codexRequest(resolved: ResolvedUsageAuth): UsageRequest {
   };
 }
 
-async function resolveCodexFallback(registry: UsageRegistry): Promise<UsageRequest | undefined> {
+async function resolveCodexFallback(registry: UsageRegistry, signal?: AbortSignal): Promise<UsageRequest | undefined> {
   const provider = registry.getProvider("openai-codex");
   if (!provider) return undefined;
   validateOrigin("openai-codex", provider.baseUrl ?? "");
   // Pi owns credential selection and locked OAuth refresh, including custom stores.
   // Never read a stale access token directly or bypass a failed refresh.
+  await assertBackgroundAuthSafe(registry, "openai-codex", signal);
   const resolved = await registry.getProviderAuth("openai-codex");
   if (resolved?.source !== "OAuth") return undefined;
   return codexRequest(resolved.auth);
@@ -115,13 +117,15 @@ export async function resolveUsageRequest(
   model: Model<Api>,
   registry: UsageRegistry,
   readCredential: (provider: string) => Credential | undefined = readStoredCredential,
+  signal?: AbortSignal,
 ): Promise<UsageRequest> {
   validateOrigin(provider, model.baseUrl);
   if (provider === "openai") {
     // Temporary, documented exception: the Codex login may be another account.
-    const fallback = await resolveCodexFallback(registry);
+    const fallback = await resolveCodexFallback(registry, signal);
     if (fallback) return fallback;
   }
+  await assertBackgroundAuthSafe(registry, model, signal);
   const resolved = await registry.getApiKeyAndHeaders(model);
   if (!resolved.ok) throw new UsageError("auth required");
   if (resolved.baseUrl !== undefined) validateOrigin(provider, resolved.baseUrl);

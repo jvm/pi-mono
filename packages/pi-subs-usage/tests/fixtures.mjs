@@ -52,3 +52,15 @@ export function model(fixture) {
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   };
 }
+
+// Mirror only the private metadata contract; real-host coverage lives in the
+// background-auth integration tests and runtime smoke test.
+export function backgroundAuthMetadata() {
+  return {
+    runtime: {
+      config: { getProvider: () => undefined },
+      credentials: { overrides: new Map(), store: { read: async () => undefined } },
+    },
+    getRegisteredProviderConfig: () => undefined,
+  };
+}
