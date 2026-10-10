@@ -165,7 +165,7 @@ export class UsageMonitor {
           if (!current()) return;
           try {
             signal.throwIfAborted();
-            const request = await abortable(resolveUsageRequest(provider, model, ctx.modelRegistry), signal);
+            const request = await abortable(resolveUsageRequest(provider, model, ctx.modelRegistry, undefined, signal), signal);
             if (!current()) return;
             signal.throwIfAborted();
             const identity = digest(request);

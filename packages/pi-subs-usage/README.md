@@ -25,7 +25,7 @@ From this repository:
 pi -e ./packages/pi-subs-usage/index.ts
 ```
 
-Developed and contract-tested with Pi **1.1.0** and Node.js **>=22.19.0**. Earlier Pi versions are not verified.
+Developed and contract-tested with Pi **1.1.0** and Node.js **>=22.19.0**. The command-safety adapter supports Pi 1.1's internal metadata shape; other Pi release lines or incompatible metadata show `[background auth unavailable]` instead of attempting unsafe auth resolution.
 
 Use Pi's normal `/login` or provider API-key setup, then select a supported model. This package does not add model providers or change inference settings.
 
@@ -76,7 +76,7 @@ Check [ChatGPT Settings → Usage](https://chatgpt.com/settings/usage) for nativ
 
 Monitoring starts automatically in **TUI mode**. Print, JSON, and RPC modes do not resolve quota credentials, fetch usage, or create status timers. There is no agent-callable tool and no quota output is appended to the conversation.
 
-At startup, the extension preloads all supported models in Pi's **configured/available model list**, without blocking the editor. Each provider refreshes every two minutes, even while inactive or while the session is idle, so usage from competing sessions is picked up too. A provider with no configured model is not queried. Newly configured models are discovered on the next poll or manual refresh; removed models are evicted then.
+At startup, the extension preloads supported models with non-command credentials in Pi's **configured/available model list**, without executing credential commands. Each provider refreshes every two minutes, even while inactive or while the session is idle, so usage from competing sessions is picked up too. A provider with no configured model is not queried. Newly configured models are discovered on the next poll or manual refresh; removed models are evicted then.
 
 Provider/model changes only select a cached reading. They do not query usage, resolve quota credentials, cancel background work, or reset the polling clock. Agent turns do not trigger extra queries. Countdown text updates every 15 seconds without another HTTP request. Initial loading can appear until the first response arrives; a model not yet in the cache shows `[usage unavailable]`. Normal background refreshes keep the last reading visible while awaiting the next response.
 
@@ -90,6 +90,14 @@ Reset times use the local timezone. Resets within 24 hours use a countdown; rese
 
 The extension keeps its text on the existing extension-status line and groups it in square brackets to separate it from adjacent packages' content. It shows only usage, without a subscription-name or fallback prefix. Loading, offline, and error states also omit that prefix. It sets only its own status item and preserves the existing footer and other extension statuses, without patching Pi's renderer. Pi or a custom footer may truncate long lines in narrow terminals.
 
+### Command-backed credentials
+
+Pi 1.1 resolves `!command` API keys and headers synchronously, which can freeze the editor during background polling. This package therefore skips affected models and shows `[command auth unsupported]`. This applies to startup, automatic polls, and manual refreshes; `/subs-usage` does not override it.
+
+The check covers configured provider keys and headers, hidden model-specific headers and overrides, extension-registered configuration, and stored API-key commands. A command header on one model does not disable other models with safe auth. Provider-level commands disable monitoring for that provider's models, conservatively including a configured key command that another credential could supersede. The native OpenAI fallback checks the Codex quota source, not unused native credentials.
+
+Use Pi `/login`, an environment variable, or a literal key in Pi's normal private credential store for usage monitoring. Remove command-backed header overrides too. The extension does not change inference configuration, run commands to warm a cache, or reuse a different model's credentials. Pi's own inference and startup authentication can still execute commands outside this extension.
+
 ## Limitations
 
 - Usage endpoints are provider-owned but mostly undocumented and may change without notice.
@@ -101,7 +109,7 @@ The extension keeps its text on the existing extension-status line and groups it
 
 ## Security and telemetry
 
-Only fixed HTTPS usage endpoints receive the quota source's credentials: each configured supported provider, except for the explicit `openai` → `openai-codex` fallback. **Inactive providers are queried too.** Pi may resolve configured credential commands or refresh OAuth logins during these background polls. Redirects are rejected; responses are limited to 512 KiB. No prompts, files, model responses, or conversations are sent. The extension does not persist credentials or quota snapshots, or log them. Pi may update its own credential store during normal OAuth refresh. No project settings are read directly.
+Only fixed HTTPS usage endpoints receive the quota source's credentials: each eligible configured supported provider, except for the explicit `openai` → `openai-codex` fallback. **Inactive providers are queried too.** Command-backed configurations are skipped before resolving quota auth; Pi may refresh non-command OAuth logins during these polls. A read-only compatibility adapter inspects Pi's already-loaded configuration and raw credential-store metadata because the public resolver does not expose a command-safety check. Unknown host shapes fail closed. Third-party credential stores must honor Pi's raw-read contract; arbitrary blocking code inside third-party auth implementations is outside this check. Redirects are rejected; responses are limited to 512 KiB. No prompts, files, model responses, or conversations are sent. The extension does not persist credentials or quota snapshots, or log them. Pi may update its own credential store during normal OAuth refresh. No project settings are read directly.
 
 `PI_OFFLINE=1` disables usage reads. Standard repository install/update telemetry is best-effort, once per package version, with a five-second timeout. It sends the package name, version, and platform/runtime/architecture to `https://mocito.dev/api/report-install`, never credentials or usage data. It respects CI, `PI_OFFLINE`, `PI_TELEMETRY=0`, and global Pi `enableInstallTelemetry: false`. Its version marker is the package's only persistent state.
 
@@ -138,7 +146,7 @@ npm run -w packages/pi-subs-usage smoke
 npm run -w packages/pi-subs-usage pack:dry-run
 ```
 
-The automated smoke test runs Pi's real loader, auth resolver, TUI lifecycle, provider switches, and command dispatcher with **synthetic credentials and mocked HTTP**. It verifies startup preloading, query-free cached switches, hidden per-model auth overrides, and the Codex fallback with an expired login, Pi-managed token refresh, a custom credential store, and logout. It also renders Pi's default footer with adjacent package statuses at narrow and wide widths in dark and light themes. It makes no inference calls and does not establish live access for every provider.
+The automated smoke test runs Pi's real loader, auth resolver, TUI lifecycle, provider switches, and command dispatcher with **synthetic credentials and mocked HTTP**. It verifies startup preloading, query-free cached switches, hidden per-model auth overrides, command-auth rejection, and the Codex fallback with an expired login, Pi-managed token refresh, a custom credential store, and logout. It also renders Pi's default footer with adjacent package statuses and the unsupported-auth status at narrow and wide widths in dark and light themes. Regression tests use seven inactive models with a slow command fixture, verify zero command executions on repeated polls, and check auth-file changes and private metadata compatibility. It makes no inference calls and does not establish live access for every provider.
 
 For a visual/live smoke test:
 
@@ -149,6 +157,7 @@ For a visual/live smoke test:
 5. Run `/subs-usage off`, then `/subs-usage on`; verify that unrelated statuses remain.
 6. Select native `openai`; with a Pi `openai-codex` login, compare the unprefixed usage with that Codex account's quota. Without that login, verify the unavailable status. Confirm that the selected inference provider stays `openai`.
 7. Run `/reload` and exit; verify that no duplicate status or polling remains.
+8. With a harmless `!command` credential or header on a supported test model, verify `[command auth unsupported]` after startup and `/subs-usage refresh`, with no execution caused by polling. Verify that a non-command model of the same provider still shows its own account's reading. Pi itself may execute a provider key command during its startup checks, so distinguish those from extension polls.
 
 ## License
 

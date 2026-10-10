@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ENDPOINTS, resolveUsageRequest } from "../src/auth.ts";
-import { cases, model, legacyToken } from "./fixtures.mjs";
+import { backgroundAuthMetadata, cases, model, legacyToken } from "./fixtures.mjs";
 
 function registry(auth, codex) {
   return {
+    ...backgroundAuthMetadata(),
     getApiKeyAndHeaders: async () => ({ ok: true, ...auth }),
     getProvider: provider => provider === "openai-codex" ? { baseUrl: cases[0].baseUrl } : undefined,
     getProviderAuth: async provider => {

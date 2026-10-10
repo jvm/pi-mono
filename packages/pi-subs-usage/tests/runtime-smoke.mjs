@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -47,13 +47,21 @@ export async function runtimeSmoke() {
     await writeFile(join(dir, "auth.json"), JSON.stringify(stored), { mode: 0o600 });
     const otherGoId = "fixture-go-other-account";
     const otherGoToken = "unused-other-go-account";
+    const commandGoId = "fixture-go-command-auth";
+    const commandCount = join(dir, "command-count");
+    const commandScript = join(dir, "command-key.cjs");
+    await writeFile(commandCount, "");
+    await writeFile(commandScript, `require("node:fs").appendFileSync(${JSON.stringify(commandCount)}, "x"); process.stdout.write("unused-command-fixture");`);
     const modelsPath = join(dir, "models.json");
     // Pi hides configured model headers from the model catalog. Sharing quota
     // merely by provider would silently display the wrong account for this model.
     await writeFile(modelsPath, JSON.stringify({ providers: {
       "opencode-go": {
         baseUrl: cases[4].baseUrl, api: "openai-completions",
-        models: [{ id: otherGoId, headers: { Authorization: `Bearer ${otherGoToken}` } }],
+        models: [
+          { id: otherGoId, headers: { Authorization: `Bearer ${otherGoToken}` } },
+          { id: commandGoId, headers: { Authorization: `!${JSON.stringify(process.execPath)} ${JSON.stringify(commandScript)}` } },
+        ],
       },
     } }), { mode: 0o600 });
     const requests = [];
@@ -178,6 +186,21 @@ export async function runtimeSmoke() {
     assert.equal(otherGo.headers, undefined);
     await session.setModel(otherGo);
     assert.equal(statuses.get(STATUS_KEY), "[5h █████░ 75%]");
+    const commandGo = registry.find("opencode-go", commandGoId);
+    assert.ok(commandGo);
+    assert.equal(commandGo.headers, undefined);
+    await session.setModel(commandGo);
+    assert.equal(statuses.get(STATUS_KEY), "[command auth unsupported]");
+    for (const theme of ["dark", "light"]) {
+      initTheme(theme, false);
+      for (const width of [28, 100, 240]) {
+        const lines = renderFooter(width);
+        assert.equal(lines.length, 3);
+        assert.ok(lines.every(line => line.length <= width));
+        if (width === 240) assert.equal(lines[2], "Fast on [command auth unsupported] sleep inhibited");
+      }
+    }
+    assert.equal(await readFile(commandCount, "utf8"), "");
     await session.setModel(pick("github-copilot"));
     assert.match(statuses.get(STATUS_KEY), /^\[premium.*\]$/);
     assert.equal(requests.length, 4); // All switches read the initial cache.
@@ -231,6 +254,7 @@ export async function runtimeSmoke() {
     assert.equal(requests.length, count + 4);
     await session.prompt("/subs-usage off");
     assert.deepEqual(errors, []);
+    assert.equal(await readFile(commandCount, "utf8"), "", "no startup, manual, or resumed poll may run credential commands");
   } finally {
     await session?.extensionRunner.emit({ type: "session_shutdown" });
     session?.dispose();
@@ -242,5 +266,5 @@ export async function runtimeSmoke() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await runtimeSmoke();
-  console.log("PASS: Pi 1.1.0 background preload, cached provider/model switches, per-model auth isolation, Codex OAuth refresh/logout, footer rendering and commands (synthetic credentials, mocked HTTP).");
+  console.log("PASS: Pi 1.1.0 background preload, cached provider/model switches, per-model auth isolation, command-auth rejection, Codex OAuth refresh/logout, footer rendering and commands (synthetic credentials, mocked HTTP).");
 }

@@ -36,6 +36,8 @@ export class UsageError extends Error {
       | "custom endpoint unsupported"
       | "enterprise quota unsupported"
       | "native quota unavailable"
+      | "command auth unsupported"
+      | "background auth unavailable"
       | "invalid quota data"
       | "quota unavailable"
       | "access denied"
