@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-11
+
+### Changed
+
+- Replace footer text labels with Nerd Font lightning icons as the only display: filled for on, outlined for off, and crossed out for unavailable. Require a Nerd Font 3 or later in the terminal; keep icons palette-neutral and toggle/billing notifications in text.
+
 ## [0.3.0] - 2026-10-09
 
 ### Fixed

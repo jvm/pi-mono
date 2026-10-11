@@ -5,6 +5,12 @@ import { isFastModeEnabledByDefault } from "../src/config.js";
 import { applyFastMode, supportsFastMode } from "../src/fast-mode.js";
 
 const STATUS_KEY = "pi-fast";
+// Nerd Fonts 3 Material Design glyphs. Shapes distinguish states without color.
+const STATUS_ICONS = {
+  on: "\u{f0241}", // nf-md-flash: filled bolt
+  off: "\u{f06d5}", // nf-md-flash_outline: outline bolt
+  unavailable: "\u{f0243}", // nf-md-flash_off: crossed-out bolt
+} as const;
 
 type Toggle = "on" | "off" | "toggle";
 
@@ -22,10 +28,10 @@ export default function piFast(pi: ExtensionAPI): void {
     if (ctx.mode !== "tui") return;
 
     const supported = supportsFastMode(ctx.model);
-    const text = !supported ? "Fast n/a" : enabled ? "Fast on" : "Fast off";
+    const icon = !supported ? STATUS_ICONS.unavailable : enabled ? STATUS_ICONS.on : STATUS_ICONS.off;
     // Pi stores status strings, not render callbacks. Avoid retaining ANSI from
-    // a previous theme; the explicit state remains readable in every palette.
-    ctx.ui.setStatus(STATUS_KEY, text);
+    // a previous theme; the icon shape carries the state in every palette.
+    ctx.ui.setStatus(STATUS_KEY, icon);
   }
 
   function notify(ctx: ExtensionContext, message: string, type: "info" | "warning"): void {

@@ -11,6 +11,7 @@ Root `AGENTS.md` applies.
 - Support legacy `openai-codex` and `openai` on `openai-responses` with API keys or ChatGPT OAuth.
 - Fast requests can increase API charges or subscription usage; an enabled toggle does not guarantee the server delivers Fast processing.
 - The status indicator must reflect the current model: on, off, or unavailable.
+- Render footer state only as palette-neutral Nerd Font icons; distinguish all three states by shape, not color.
 - The extension must not read, log, or persist prompts, credentials, or provider response data.
 
 ## Validation

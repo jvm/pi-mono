@@ -9,12 +9,27 @@ Use provider fast modes in Pi when you need lower latency, while keeping the pai
 - **On-demand toggle** — use `/fast`, `/fast on`, `/fast off`, or `Ctrl+Shift+R`.
 - **API and subscription support** — use `openai` with either authentication method, or keep a legacy `openai-codex` login.
 - **Safe model guard** — only allowlisted models on supported provider/API pairs receive the Fast request field.
-- **Visible state** — the Pi footer shows `Fast on`, `Fast off`, or `Fast n/a`.
+- **Compact state** — the Pi footer uses Nerd Font lightning icons for on, off, and unavailable.
 - **Configurable default** — opt in once to start Fast mode on for every supported model.
 - **Session-local overrides** — command and shortcut changes reset to the configured default for each session.
 
-Footer labels use the terminal's current default text color, not stored ANSI
-colors. Theme changes therefore cannot leave an old warning/muted palette behind.
+### Footer icons
+
+The footer always uses icons, with no text display option or fallback. Configure
+your terminal to use a **Nerd Font 3 or later**, preferably its **Mono** variant
+for single-cell alignment. Pi does not install fonts or detect missing glyphs;
+without a suitable font, the icons may appear as boxes.
+
+| Icon | Shape | State | Nerd Font glyph |
+| --- | --- | --- | --- |
+| 󰉁 | Filled lightning bolt | Fast on | `nf-md-flash` (`U+F0241`) |
+| 󰛕 | Outline lightning bolt | Fast off | `nf-md-flash_outline` (`U+F06D5`) |
+| 󰉃 | Crossed-out lightning bolt | Fast unavailable for the current model | `nf-md-flash_off` (`U+F0243`) |
+
+Icons use the terminal's current default text color, not stored ANSI colors.
+Their shapes distinguish states without relying on color. Theme changes cannot
+leave an old warning/muted palette behind. Toggle notifications and billing
+warnings remain in text.
 
 ## Supported models
 
@@ -54,7 +69,7 @@ remains `https://chatgpt.com/backend-api/codex/responses`.
 | `openai` / `openai-responses` | API key; allowlisted models above | `fast`; API charges, no subscription fallback |
 | `openai` / `openai-responses` | `/login openai`, Sign in with ChatGPT; same allowlist | `priority`; plan usage, no API-key fallback |
 | Legacy `openai-codex` | Existing Codex OAuth; same allowlist | `priority`; subscription usage |
-| Other providers/APIs or non-allowlisted models | Any | Payload unchanged; footer shows `Fast n/a` |
+| Other providers/APIs or non-allowlisted models | Any | Payload unchanged; footer shows the crossed-out bolt |
 
 GPT-6.1 Sol is already allowlisted here. That does not enable it in
 `pi-openai-reasoning`, whose private protocol remains verified only for Astra.
@@ -101,7 +116,7 @@ Public API dollar prices and Pi's token-cost estimates are not your ChatGPT cred
 for rates and availability. The new ChatGPT plan-sharing route does not establish
 that its Fast usage multiplier matches legacy Codex.
 
-`Fast on` means the extension requests Fast processing. It does not certify the
+The filled bolt means the extension requests Fast processing. It does not certify the
 tier delivered by the server. OpenAI may return `default` even when `fast` or
 `priority` was requested. No latency or billing multiplier guarantee is made.
 
@@ -188,11 +203,14 @@ changing the pinned Pi 1.1.0 baseline, which already includes native OpenAI OAut
 
 Smoke test (Pi 0.99.1 or later): sign in with ChatGPT on `openai`, then
 select `openai/gpt-6.1-sol`, enable `/fast on`, and send a short prompt.
-Check `Fast on`. Repeat with a legacy `openai-codex/gpt-6.1-sol` login,
+Check the filled bolt. Repeat with a legacy `openai-codex/gpt-6.1-sol` login,
 and with GPT-6 Astra, Sol, and Luna on both providers.
 Switch to an OpenAI API-key session or a different provider and check
-`Fast on` for supported OpenAI Responses models and `Fast n/a` for
-unsupported provider/API/model pairs. Run `/fast off` and check `Fast off`.
+the filled bolt for supported OpenAI Responses models and the crossed-out bolt for
+unsupported provider/API/model pairs. Run `/fast off` and check the outline bolt.
+With a Nerd Font Mono selected in the terminal, check all three icons at narrow
+and wide terminal widths and after switching between light and dark Pi themes.
+The icons should remain aligned, distinct, and free of stale colors.
 When inspecting responses, distinguish the requested tier from the returned
 `service_tier`; a successful request alone does not prove Fast processing.
 Check the outgoing request for `fast` with API keys and `priority` with OAuth

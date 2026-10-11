@@ -4,8 +4,11 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
+import { stripVTControlCharacters } from "node:util";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { FooterComponent, initTheme, ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { codexHarness, requestBody, testToken, textResponse } from "../../../tests/codex-harness.mjs";
 
 process.env.CI = "1";
@@ -14,6 +17,9 @@ process.env.PI_CODING_AGENT_DIR = agentDir;
 
 const { default: piFast } = await import("../extensions/index.ts");
 const { FAST_SERVICE_TIER, PRIORITY_SERVICE_TIER, applyFastMode, supportsFastMode } = await import("../src/fast-mode.ts");
+const FAST_ON = "\u{f0241}";
+const FAST_OFF = "\u{f06d5}";
+const FAST_UNAVAILABLE = "\u{f0243}";
 
 function makePi() {
   const handlers = new Map();
@@ -84,9 +90,70 @@ test("footer state never retains theme ANSI across a palette switch", async () =
   const ctx = makeContext({ provider: "openai-codex", id: "gpt-6-astra" });
   ctx.ui.theme.fg = () => { throw new Error("status must not capture theme colors"); };
   await pi.handlers.get("session_start")[0]({}, ctx);
-  assert.equal(ctx.statuses.at(-1).value, "Fast off");
+  assert.equal(ctx.statuses.at(-1).value, FAST_OFF);
   await pi.commands.get("fast").handler("on", ctx);
-  assert.equal(ctx.statuses.at(-1).value, "Fast on");
+  assert.equal(ctx.statuses.at(-1).value, FAST_ON);
+});
+
+test("Nerd Font states reach Pi's real footer through session and command events", async () => {
+  const statuses = new Map();
+  const notifications = [];
+  const h = await codexHarness([piFast], {
+    bindings: {
+      mode: "tui",
+      uiContext: {
+        setStatus: (key, value) => value === undefined ? statuses.delete(key) : statuses.set(key, value),
+        notify: (message, type) => notifications.push({ message, type }),
+      },
+    },
+  });
+  try {
+    // Pi starts session_start asynchronously; bound the wait for the initial icon.
+    for (let attempt = 0; !statuses.has("pi-fast") && attempt < 100; attempt++) await delay(10);
+    const footer = new FooterComponent(h.session, {
+      getGitBranch: () => null,
+      getExtensionStatuses: () => statuses,
+      getAvailableProviderCount: () => 1,
+    });
+    function checkIcon(expected) {
+      assert.equal(statuses.get("pi-fast"), expected);
+      assert.equal(Array.from(expected).length, 1);
+      assert.equal(visibleWidth(expected), 1);
+      for (const theme of ["dark", "light"]) {
+        initTheme(theme, false);
+        for (const width of [1, 2, 8, 28, 100]) {
+          const lines = footer.render(width);
+          assert.equal(lines.length, 3);
+          assert.equal(stripVTControlCharacters(lines[2]), expected);
+          assert.equal(lines[2], expected); // No stored ANSI or text fallback.
+          assert.ok(visibleWidth(lines[2]) <= width);
+        }
+      }
+      statuses.set("z-other", "other status");
+      assert.equal(stripVTControlCharacters(footer.render(28)[2]), `${expected} other status`);
+      statuses.delete("z-other");
+    }
+
+    checkIcon(FAST_OFF);
+    await h.session.prompt("/fast on");
+    checkIcon(FAST_ON);
+    assert.equal(notifications.at(-1).type, "warning");
+    assert.match(notifications.at(-1).message, /increase API charges or subscription usage/);
+
+    await h.session.setModel({ ...h.model, id: "gpt-5.4-mini" });
+    checkIcon(FAST_UNAVAILABLE);
+    await h.session.prompt("/fast on");
+    checkIcon(FAST_UNAVAILABLE);
+    assert.match(notifications.at(-1).message, /unavailable/);
+    await h.session.setModel(h.model);
+    checkIcon(FAST_ON);
+    await h.session.prompt("/fast off");
+    checkIcon(FAST_OFF);
+    assert.equal(notifications.at(-1).message, "Fast mode disabled.");
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.close();
+  }
 });
 
 test("adds Codex priority processing without mutating the original payload", () => {
@@ -123,21 +190,21 @@ test("keeps Fast off by default and rewrites supported provider requests after t
 
   assert.deepEqual(await beforeRequest({ payload: { model: "gpt-5.4" } }, context), undefined);
   await pi.handlers.get("session_start")[0]({}, context);
-  assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast off" });
+  assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: FAST_OFF });
 
   await pi.commands.get("fast").handler("on", context);
-  assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast on" });
+  assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: FAST_ON });
   assert.deepEqual(
     await beforeRequest({ payload: { model: "gpt-5.4" } }, context),
     { model: "gpt-5.4", service_tier: "priority" },
   );
 
   await pi.shortcuts.get("ctrl+shift+r").handler(context);
-  assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast off" });
+  assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: FAST_OFF });
 
   await pi.commands.get("fast").handler("on", context);
   await pi.handlers.get("session_start")[0]({}, context);
-  assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast off" });
+  assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: FAST_OFF });
   assert.deepEqual(await beforeRequest({ payload: { model: "gpt-5.4" } }, context), undefined);
 });
 
@@ -156,11 +223,11 @@ test("enables Fast by default for supported models when configured", async () =>
     const beforeRequest = pi.handlers.get("before_provider_request")[0];
 
     await pi.handlers.get("session_start")[0]({}, context);
-    assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast n/a" });
+    assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: FAST_UNAVAILABLE });
 
     context.model = { provider: "openai-codex", id: "gpt-5.4" };
     await pi.handlers.get("model_select")[0]({}, context);
-    assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast on" });
+    assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: FAST_ON });
     assert.deepEqual(
       await beforeRequest({ payload: { model: "gpt-5.4" } }, context),
       { model: "gpt-5.4", service_tier: "priority" },
@@ -181,7 +248,7 @@ test("keeps Fast off when global settings contain malformed JSON", async () => {
 
     await pi.handlers.get("session_start")[0]({}, context);
 
-    assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast off" });
+    assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: FAST_OFF });
     assert.equal(
       await pi.handlers.get("before_provider_request")[0]({ payload: {} }, context),
       undefined,
@@ -191,15 +258,20 @@ test("keeps Fast off when global settings contain malformed JSON", async () => {
   }
 });
 
-test("does not render footer status outside TUI", async () => {
-  const pi = makePi();
-  piFast(pi);
-  const context = makeContext({ provider: "openai-codex", id: "gpt-5.4" }, true, "print");
+for (const mode of ["print", "json", "rpc"]) {
+  test(`does not render footer icons in ${mode} mode`, async () => {
+    const pi = makePi();
+    piFast(pi);
+    const context = makeContext({ provider: "openai-codex", id: "gpt-5.4" }, mode === "rpc", mode);
 
-  await pi.handlers.get("session_start")[0]({}, context);
+    await pi.handlers.get("session_start")[0]({}, context);
+    await pi.commands.get("fast").handler("on", context);
+    context.model = undefined;
+    await pi.handlers.get("model_select")[0]({}, context);
 
-  assert.deepEqual(context.statuses, []);
-});
+    assert.deepEqual(context.statuses, []);
+  });
+}
 
 test("does not enable Fast for unsupported models", async () => {
   const pi = makePi();
@@ -209,7 +281,7 @@ test("does not enable Fast for unsupported models", async () => {
   await pi.handlers.get("session_start")[0]({}, context);
   await pi.commands.get("fast").handler("on", context);
 
-  assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: "Fast n/a" });
+  assert.deepEqual(context.statuses.at(-1), { key: "pi-fast", value: FAST_UNAVAILABLE });
   assert.equal(context.notifications.at(-1).type, "warning");
   assert.equal(await pi.handlers.get("before_provider_request")[0]({ payload: {} }, context), undefined);
 });
@@ -248,10 +320,10 @@ for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
     const request = pi.handlers.get("before_provider_request")[0];
     const payload = { input: [], reasoning: { effort: "max" }, service_tier: "default" };
     await pi.handlers.get("session_start")[0]({}, context);
-    assert.equal(context.statuses.at(-1).value, "Fast off");
+    assert.equal(context.statuses.at(-1).value, FAST_OFF);
     assert.equal(await request({ payload }, context), undefined);
     await pi.commands.get("fast").handler("on", context);
-    assert.equal(context.statuses.at(-1).value, "Fast on");
+    assert.equal(context.statuses.at(-1).value, FAST_ON);
     assert.deepEqual(await request({ payload }, context), { ...payload, service_tier: "priority" });
     assert.equal(payload.service_tier, "default");
     for (const model of [
@@ -262,14 +334,14 @@ for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
     ]) {
       context.model = model;
       await pi.handlers.get("model_select")[0]({}, context);
-      assert.equal(context.statuses.at(-1).value, "Fast n/a");
+      assert.equal(context.statuses.at(-1).value, FAST_UNAVAILABLE);
       assert.equal(await request({ payload }, context), undefined);
     }
     context.model = { provider: "openai-codex", id };
     await pi.handlers.get("model_select")[0]({}, context);
-    assert.equal(context.statuses.at(-1).value, "Fast on");
+    assert.equal(context.statuses.at(-1).value, FAST_ON);
     await pi.commands.get("fast").handler("off", context);
-    assert.equal(context.statuses.at(-1).value, "Fast off");
+    assert.equal(context.statuses.at(-1).value, FAST_OFF);
     assert.equal(await request({ payload }, context), undefined);
     for (const malformed of [undefined, null, [], "payload"]) {
       assert.equal(applyFastMode(malformed, context.model), malformed);
@@ -363,10 +435,10 @@ for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-
       const payload = { model: id, input: [], service_tier: "default" };
       assert.equal(supportsFastMode(model), true);
       await pi.handlers.get("session_start")[0]({}, context);
-      assert.equal(context.statuses.at(-1).value, "Fast off");
+      assert.equal(context.statuses.at(-1).value, FAST_OFF);
       assert.equal(await request({ payload }, context), undefined);
       await pi.commands.get("fast").handler("on", context);
-      assert.equal(context.statuses.at(-1).value, "Fast on");
+      assert.equal(context.statuses.at(-1).value, FAST_ON);
       assert.deepEqual(await request({ payload }, context), { ...payload, service_tier: tier });
       assert.equal(payload.service_tier, "default");
 
@@ -381,16 +453,16 @@ for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-
         makeContext({ ...model, provider: "anthropic" }, true, "tui", true),
       ]) {
         await pi.handlers.get("model_select")[0]({}, ctx);
-        assert.equal(ctx.statuses.at(-1).value, "Fast n/a");
+        assert.equal(ctx.statuses.at(-1).value, FAST_UNAVAILABLE);
         assert.equal(await request({ payload }, ctx), undefined);
         await pi.commands.get("fast").handler("on", ctx);
         assert.equal(ctx.notifications.at(-1).type, "warning");
       }
 
       await pi.handlers.get("model_select")[0]({}, context);
-      assert.equal(context.statuses.at(-1).value, "Fast on");
+      assert.equal(context.statuses.at(-1).value, FAST_ON);
       await pi.commands.get("fast").handler("off", context);
-      assert.equal(context.statuses.at(-1).value, "Fast off");
+      assert.equal(context.statuses.at(-1).value, FAST_OFF);
       assert.equal(await request({ payload }, context), undefined);
     });
   }
