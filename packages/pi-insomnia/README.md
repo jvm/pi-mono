@@ -11,12 +11,23 @@ Keep long-running [Pi](https://pi.dev) tasks alive when you step away from your 
 
 - **Automatic protection** — inhibit idle sleep only while Pi has active work.
 - **Full-run awareness** — stay awake through retries, compaction, and queued follow-up work, then release when Pi settles.
-- **Zero setup** — use macOS built-in `caffeinate`; no commands, configuration, or third-party runtime dependency.
-- **Visible state** — show a small braille spinner with `sleep inhibited` in the TUI footer while active.
+- **Automatic setup** — use macOS built-in `caffeinate`; no commands, behavior configuration, or third-party runtime dependency.
+- **Compact state** — show one coffee-cup icon in the TUI footer while sleep inhibition is active.
 - **Safe cleanup** — release assertions on session shutdown, reload, and quit.
 
-The spinner uses palette-neutral text and does not run in print, JSON or RPC
+The icon is palette-neutral and is absent in print, JSON or RPC
 mode. Sleep inhibition itself follows the same active-work lifecycle in all modes.
+
+### Footer icon
+
+The footer uses **󰅶** (`nf-md-coffee`, `U+F0176`) only while sleep inhibition
+is active, and clears it when the agent settles or the session shuts down.
+There is no spinner, animation timer, or text fallback.
+
+Configure the terminal to use **Nerd Font 3 or later**, preferably its **Mono**
+variant for single-cell alignment. Pi does not install fonts or detect missing
+glyphs; an unsupported font may display a box. Font support affects only the
+indicator, not sleep inhibition.
 
 ## Platform support
 
@@ -80,3 +91,8 @@ npm install
 npm run check
 npm run pack:dry-run
 ```
+
+Footer smoke test on macOS: select a Nerd Font Mono, start an agent request,
+and check that the coffee cup appears while work is active and disappears when
+the agent settles. Repeat at narrow and wide terminal widths and in light and
+dark Pi themes. Shutdown during active work must release sleep inhibition.

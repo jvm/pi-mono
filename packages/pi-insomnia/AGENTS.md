@@ -8,6 +8,7 @@ Root `AGENTS.md` applies.
 - Spawn `/usr/bin/caffeinate` directly with fixed arguments; never use shell interpolation.
 - Inhibit only during active agent work; release on settle, reload, shutdown, and quit.
 - Non-macOS behavior remains a silent no-op.
+- Show one palette-neutral Nerd Font coffee-cup icon only while inhibition is active; do not create an animation timer.
 
 ## Validation
 

@@ -106,7 +106,7 @@ test("idle usage enforces a budget, updates get_goal/UI, and shutdown stops poll
   assert.equal(result.details.goal.tokensUsed, 500);
   assert.equal(result.details.goal.remainingTokens, 0);
   assert.equal(result.details.goal.status, "budget_limited");
-  assert.equal(ctx.ui.statuses.get("pi-goal"), "Goal unmet (500/100)");
+  assert.equal(ctx.ui.statuses.get("pi-goal"), "\u{f08c9} \u{f0199} 500/100");
   assert.equal(pi.messages.at(-1).options.triggerTurn, false);
   await pi.handlers.get("session_shutdown")[0]({}, ctx);
   const count = pi.entries.length;
@@ -151,7 +151,7 @@ test("session_start reconstructs branch goal and context handler prunes stale co
   const branch = [{ type: "custom", customType: "pi-goal", id: "c1", timestamp: create.at, data: create }];
   const ctx = makeCtx(branch);
   await pi.handlers.get("session_start")[0]({ type: "session_start", reason: "startup" }, ctx);
-  assert.equal(ctx.ui.statuses.get("pi-goal"), "Pursuing goal");
+  assert.equal(ctx.ui.statuses.get("pi-goal"), "\u{f08c9} \u{f040a}");
 
   const contextEvent = {
     type: "context",
@@ -173,7 +173,7 @@ test("provider 429 transitions active goal to usage_limited", async () => {
   await pi.commands.get("goal").handler("ship", ctx);
   await pi.handlers.get("after_provider_response")[0]({ type: "after_provider_response", status: 429, headers: {} }, ctx);
   assert.equal(pi.entries.at(-1).data.status, "usage_limited");
-  assert.match(ctx.ui.statuses.get("pi-goal"), /usage limits/);
+  assert.equal(ctx.ui.statuses.get("pi-goal"), "\u{f08c9} \u{f051f}");
 });
 
 test("provider 429 appends a notice without requesting another turn", async () => {
@@ -247,7 +247,7 @@ test("budget exceeded transitions active goal to budget_limited and notifies the
   assert.equal(sent.details.tokensUsed, 250);
   assert.equal(sent.details.tokenBudget, 100);
   assert.equal(pi.messages.at(-1).options.triggerTurn, false, "exhausting a budget must not buy a notification turn");
-  assert.equal(ctx.ui.statuses.get("pi-goal"), "Goal unmet (250/100)");
+  assert.equal(ctx.ui.statuses.get("pi-goal"), "\u{f08c9} \u{f0199} 250/100");
 });
 
 test("budget exceeded at turn_end and agent_end also notifies the agent", async () => {

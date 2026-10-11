@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-11
+
+### Changed
+
+- Replace the animated `sleep inhibited` footer label with one palette-neutral Nerd Font coffee-cup icon. Remove the animation timer; require Nerd Font 3 or later for the indicator, without changing sleep-inhibitor behavior.
+
 ## [0.2.0] - 2026-10-09
 
 ### Fixed

@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-11
+
+### Changed
+
+- Compact the footer into palette-neutral Nerd Font shield variants for healthy, checking, and unavailable states. Keep `fail-open`/`blocking` in text when unavailable and keep version diagnostics in `/dcg`. Require Nerd Font 3 or later for icons; command guarding is unchanged.
+
 ## [0.2.0] - 2026-10-09
 
 ### Fixed

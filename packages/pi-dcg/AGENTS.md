@@ -10,6 +10,7 @@ Root `AGENTS.md` applies.
 - Seal approved command against later handler mutation.
 - Never log commands, dcg stderr, environment, or policy files.
 - Keep `DCG_NO_SELF_HEAL=1` child-scoped.
+- Use palette-neutral Nerd Font health icons; always retain `fail-open`/`blocking` text in degraded footer states.
 
 ## Validation
 

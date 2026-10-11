@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import { initTheme, SessionManager, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
+import { FooterComponent, initTheme, SessionManager, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
 import { Text, TuiAltScreen, TuiMainScreen, visibleWidth, getCapabilities, setCapabilities } from "@earendil-works/pi-tui";
 import patchExtension from "../packages/pi-codex-tools/extensions/index.ts";
 import { formatApplyPatchCallText } from "../packages/pi-codex-tools/src/patch-preview.ts";
@@ -13,9 +13,11 @@ import { registerGoalRenderers } from "../packages/pi-goal/src/rendering.ts";
 import { updateGoalUi, clearGoalUi } from "../packages/pi-goal/src/ui.ts";
 import dcgExtension from "../packages/pi-dcg/extensions/index.ts";
 import insomniaExtension from "../packages/pi-insomnia/extensions/index.ts";
-import { codexHarness } from "./codex-harness.mjs";
+import goalExtension from "../packages/pi-goal/extensions/index.ts";
+import { createGoalMutation } from "../packages/pi-goal/src/state.ts";
+import { codexHarness, textResponse } from "./codex-harness.mjs";
 
-// Real Pi render shells and both terminal engines. No executor or provider calls.
+// Real Pi render shells and both terminal engines. No live executor or provider calls.
 process.env.CI = "1";
 process.env.PI_OFFLINE = "1";
 const profile = await mkdtemp(join(tmpdir(), "pi-tui-contract-"));
@@ -267,7 +269,7 @@ test("DCG footer is palette-neutral while RPC approval and notifications remain 
       setStatus: (_name, text) => statuses.push(text), notify() {} },
   };
   await handlers.get("session_start")({}, ctx);
-  assert.equal(statuses.at(-1), "shield dcg 0.6.8");
+  assert.equal(statuses.at(-1), "\u{f0565}");
   ctx.mode = "rpc";
   ctx.ui.setStatus = () => assert.fail("terminal status in RPC");
   await handlers.get("session_start")({}, ctx);
@@ -297,6 +299,139 @@ test("insomnia terminal surfaces are absent in print, JSON and RPC modes", async
     await handlers.get("agent_start")({}, ctx);
     await handlers.get("agent_settled")({}, ctx);
     await handlers.get("session_shutdown")({}, ctx);
+  }
+});
+
+function footerBindings(statuses, notifications = []) {
+  return { mode: "tui", uiContext: {
+    setStatus: (key, value) => value === undefined ? statuses.delete(key) : statuses.set(key, value),
+    setWidget() {},
+    notify: (message, type) => notifications.push({ message, type }),
+  } };
+}
+
+function checkNativeFooter(h, statuses, key, expected) {
+  assert.equal(statuses.get(key), expected);
+  const footer = new FooterComponent(h.session, {
+    getGitBranch: () => null,
+    getExtensionStatuses: () => statuses,
+    getAvailableProviderCount: () => 1,
+  });
+  for (const palette of ["dark", "light", "system"]) {
+    initTheme(palette, false);
+    for (const width of [1, 3, 12, 40, 100]) {
+      const lines = footer.render(width);
+      assert.equal(lines.length, expected === undefined ? 2 : 3);
+      if (expected !== undefined) {
+        assert.ok(visibleWidth(lines[2]) <= width);
+        if (width >= visibleWidth(expected)) assert.equal(lines[2], expected);
+      }
+    }
+  }
+  if (expected !== undefined) {
+    statuses.set("a-neighbor", "before");
+    statuses.set("z-neighbor", "after");
+    assert.equal(stripVTControlCharacters(footer.render(100)[2]), `before ${expected} after`);
+    statuses.delete("a-neighbor");
+    statuses.delete("z-neighbor");
+  }
+}
+
+test("real Pi insomnia lifecycle publishes one coffee icon and clears it on settle/shutdown", async (t) => {
+  const statuses = new Map();
+  let inhibiting = false;
+  const inhibitor = {
+    acquire() { inhibiting = true; return true; },
+    release() { inhibiting = false; },
+    forceStop() { inhibiting = false; },
+    get isInhibiting() { return inhibiting; },
+  };
+  const h = await codexHarness([pi => insomniaExtension(pi, inhibitor)], {
+    bindings: footerBindings(statuses),
+  });
+  try {
+    t.mock.method(globalThis, "fetch", async () => {
+      assert.equal(inhibiting, true);
+      checkNativeFooter(h, statuses, "pi-insomnia", "\u{f0176}");
+      return textResponse();
+    });
+    await h.session.prompt("Synthetic insomnia footer smoke test");
+    assert.equal(inhibiting, false);
+    checkNativeFooter(h, statuses, "pi-insomnia", undefined);
+    await h.session.extensionRunner.emit({ type: "agent_start" });
+    checkNativeFooter(h, statuses, "pi-insomnia", "\u{f0176}");
+    await h.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    assert.equal(inhibiting, false);
+    checkNativeFooter(h, statuses, "pi-insomnia", undefined);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
+for (const [onError, policy] of [["allow", "fail-open"], ["block", "blocking"]]) {
+  test(`real Pi DCG health footer retains ${policy} and recovers through /dcg`, async () => {
+    const statuses = new Map();
+    const notifications = [];
+    let failed = false;
+    let h;
+    const client = {
+      async probe() {
+        if (h) checkNativeFooter(h, statuses, "pi-dcg", "\u{f0d9a}");
+        if (failed) throw new Error("Synthetic unavailable DCG");
+        return { version: "0.6.8" };
+      },
+    };
+    h = await codexHarness([pi => dcgExtension(pi, { client, config: { onError, guardUserBash: false } })], {
+      bindings: footerBindings(statuses, notifications),
+    });
+    try {
+      await h.session.extensionRunner.emit({ type: "session_start", reason: "startup" });
+      checkNativeFooter(h, statuses, "pi-dcg", "\u{f0565}");
+      failed = true;
+      await h.session.extensionRunner.emit({ type: "session_start", reason: "startup" });
+      checkNativeFooter(h, statuses, "pi-dcg", `\u{f099e} ${policy}`);
+      assert.match(notifications.at(-1).message, onError === "allow" ? /allowed \(fail-open\)/ : /blocked/);
+      failed = false;
+      // /dcg probes directly without first publishing the startup checking state.
+      client.probe = async () => ({ version: "0.6.8" });
+      await h.session.prompt("/dcg");
+      checkNativeFooter(h, statuses, "pi-dcg", "\u{f0565}");
+      assert.match(notifications.at(-1).message, /Version: 0\.6\.8/);
+      await h.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+      checkNativeFooter(h, statuses, "pi-dcg", undefined);
+      assert.deepEqual(h.errors, []);
+    } finally { await h.close(); }
+  });
+}
+
+test("real Pi goal restoration renders all six states with budgets and clears through /goal", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("Unexpected provider request"); });
+  const statuses = new Map();
+  const h = await codexHarness([goalExtension], { bindings: footerBindings(statuses) });
+  // Do not launch automatic activation turns while inspecting restored UI state.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const create = createGoalMutation("Synthetic footer fixture", 50_000);
+    h.sessionManager.appendCustomEntry("pi-goal", create);
+    h.sessionManager.appendCustomEntry("pi-goal", {
+      schemaVersion: 1, kind: "account", goalId: create.goalId, at: create.at,
+      tokens: 12_000, entryIds: ["synthetic-usage"],
+    });
+    for (const [status, icon] of Object.entries({
+      active: "\u{f040a}", paused: "\u{f03e4}", blocked: "\u{f033e}",
+      usage_limited: "\u{f051f}", budget_limited: "\u{f0199}", complete: "\u{f012c}",
+    })) {
+      h.sessionManager.appendCustomEntry("pi-goal", {
+        schemaVersion: 1, kind: "status", goalId: create.goalId, at: create.at, status,
+      });
+      await h.session.extensionRunner.emit({ type: "session_start", reason: "startup" });
+      checkNativeFooter(h, statuses, "pi-goal", `\u{f08c9} ${icon} 12k/50k`);
+    }
+    await h.session.prompt("/goal clear");
+    checkNativeFooter(h, statuses, "pi-goal", undefined);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    await h.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    await h.close();
   }
 });
 

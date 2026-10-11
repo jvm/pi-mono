@@ -16,6 +16,12 @@ import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import { formatDcgDecision, getDcgAllowOnceCommand } from "../src/protocol.js";
 
 const STATUS_KEY = "pi-dcg";
+// Nerd Fonts 3 shield variants carry health without stored theme colors.
+const HEALTH_ICONS = {
+  active: "\u{f0565}", // nf-md-shield_check
+  unknown: "\u{f0d9a}", // nf-md-shield_search
+  degraded: "\u{f099e}", // nf-md-shield_off
+} as const;
 const MAX_COMMAND_PREVIEW_CHARS = 4_000;
 const CHECKED_BASH_SEAL = Symbol.for("pi-dcg.checked-bash-seal");
 
@@ -99,21 +105,19 @@ function setStatus(
   ctx: ExtensionContext,
   health: Health,
   config: DcgBridgeConfig,
-  version?: string,
 ): void {
   if (ctx.mode !== "tui") return;
   try {
     if (health === "active") {
-      const label = version ? `dcg ${version}` : "dcg active";
-      ctx.ui.setStatus(STATUS_KEY, `shield ${label}`);
+      ctx.ui.setStatus(STATUS_KEY, HEALTH_ICONS.active);
       return;
     }
     if (health === "degraded") {
       const behavior = config.onError === "block" ? "blocking" : "fail-open";
-      ctx.ui.setStatus(STATUS_KEY, `shield dcg unavailable (${behavior})`);
+      ctx.ui.setStatus(STATUS_KEY, `${HEALTH_ICONS.degraded} ${behavior}`);
       return;
     }
-    ctx.ui.setStatus(STATUS_KEY, "shield dcg checking");
+    ctx.ui.setStatus(STATUS_KEY, HEALTH_ICONS.unknown);
   } catch {
     // Status rendering is advisory and must never alter a dcg decision.
   }
@@ -145,12 +149,12 @@ export default function piDcg(
   const markHealthy = (ctx: ExtensionContext, detectedVersion = version): void => {
     version = detectedVersion;
     lastNotifiedError = undefined;
-    setStatus(ctx, "active", config, version);
+    setStatus(ctx, "active", config);
   };
 
   const markDegraded = (ctx: ExtensionContext, error: unknown): void => {
     const message = errorMessage(error);
-    setStatus(ctx, "degraded", config, version);
+    setStatus(ctx, "degraded", config);
     if (ctx.hasUI && message !== lastNotifiedError) {
       lastNotifiedError = message;
       const behavior = config.onError === "block" ? "Commands will be blocked." : "Commands will be allowed (fail-open).";

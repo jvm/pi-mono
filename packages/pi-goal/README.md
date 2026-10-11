@@ -131,8 +131,37 @@ it can be false after a normal assistant reply. The goal's custom-message draft
 makes that preview runnable; Pi checks the final preview after all handlers.
 Declining goal continuation does not veto another extension's continuation.
 
-The TUI footer and optional editor widget show status, elapsed active time, token usage, and budget.
+The TUI footer shows a goal icon, a distinct state icon, and compact used/budget
+token counts when a budget exists. The editor widget and `/goal status` retain
+text details, including elapsed active time and token usage.
 Print, JSON and RPC retain the goal lifecycle without terminal footer/widget updates.
+
+### Footer icons
+
+The footer starts with **󰣉** (`nf-md-bullseye_arrow`, `U+F08C9`), followed by:
+
+| Icon | State | Nerd Font glyph |
+| --- | --- | --- |
+| 󰐊 | Active | `nf-md-play` (`U+F040A`) |
+| 󰏤 | Paused | `nf-md-pause` (`U+F03E4`) |
+| 󰌾 | Blocked | `nf-md-lock` (`U+F033E`) |
+| 󰔟 | Provider usage-limited | `nf-md-timer_sand` (`U+F051F`) |
+| 󰆙 | Token budget-limited | `nf-md-counter` (`U+F0199`) |
+| 󰄬 | Complete | `nf-md-check` (`U+F012C`) |
+
+For example, `󰣉 󰐊 12k/50k` is an active goal with about 12,000 tokens used
+against a 50,000-token budget. Budget counts remain visible in every retained
+state, including paused and limited states. Without a budget, only the icons
+appear. Clearing the goal clears the footer.
+
+The footer omits repeated labels and resume instructions; use `/goal status`
+for details and `/goal resume` to resume. Notifications and the active-goal
+widget remain in text. Icons use the terminal's default text color and carry
+state by shape, not stored ANSI colors.
+
+Configure the terminal to use **Nerd Font 3 or later**, preferably its **Mono**
+variant. There is no text footer option or missing-glyph detection; unsupported
+fonts may display boxes. Goal storage, accounting, and continuation are unchanged.
 
 Provider usage-limit handling pauses active goals when Pi exposes HTTP 429 responses or assistant error messages that indicate subscription, quota, billing, balance, or repeated provider failures. This prevents automatic continuation from retrying indefinitely after provider limits such as 5-hour subscription caps. When the budget is exhausted or a provider limit is detected, a visible `pi-goal-event` notice is saved to model context without requesting a wrap-up turn. The model can act on that notice during a request independently started by Pi, the user, or another extension; the notice itself does not spend more tokens.
 
@@ -279,6 +308,13 @@ Run the focused lifecycle smoke test from the monorepo root:
 ```bash
 node --import tsx --test packages/pi-goal/tests/settlement-contract.test.mjs
 ```
+
+Footer smoke test with a Nerd Font Mono: create a budgeted goal, pause it, and
+resume it. Check the distinct play/pause icons and retained budget numbers.
+Check blocked, usage-limited, budget-limited, and complete icons in retained
+sessions, then clear the goal and check that its status disappears. Repeat at
+narrow/wide widths and after light/dark theme changes; `/goal status` must still
+show text details.
 
 Before publishing, also run the root validation loop:
 

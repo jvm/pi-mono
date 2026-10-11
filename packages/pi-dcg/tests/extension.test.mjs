@@ -250,12 +250,15 @@ test("fails open visibly by default and can fail closed", async () => {
   const openContext = makeContext({ hasUI: true });
   assert.equal(await openPi.handlers.get("tool_call")[0](bashEvent(), openContext), undefined);
   assert.match(openContext.notifications[0].message, /allowed \(fail-open\)/);
+  assert.equal(openContext.statuses.at(-1).value, "\u{f099e} fail-open");
 
   const closedPi = makePi();
   piDcg(closedPi, { client: makeClient({ error }), config: makeConfig({ onError: "block" }) });
-  const closed = await closedPi.handlers.get("tool_call")[0](bashEvent(), makeContext());
+  const closedContext = makeContext({ hasUI: true });
+  const closed = await closedPi.handlers.get("tool_call")[0](bashEvent(), closedContext);
   assert.equal(closed.block, true);
   assert.match(closed.reason, /PI_DCG_ON_ERROR=block/);
+  assert.equal(closedContext.statuses.at(-1).value, "\u{f099e} blocking");
 });
 
 test("a cancelled check blocks even in fail-open mode", async () => {
@@ -307,9 +310,10 @@ test("probes on UI session start, exposes diagnostics, and clears status", async
 
   await pi.handlers.get("session_start")[0]({ type: "session_start", reason: "startup" }, context);
   assert.deepEqual(client.probes, ["/work/project"]);
-  assert.match(context.statuses.at(-1).value, /dcg 0\.6\.8/);
+  assert.deepEqual(context.statuses.map(status => status.value), ["\u{f0d9a}", "\u{f0565}"]);
 
   await pi.commands.get("dcg").handler("", context);
+  assert.match(context.notifications.at(-1).message, /Version: 0\.6\.8/);
   assert.match(context.notifications.at(-1).message, /Coverage: agent bash and user !\/!! commands \(RPC bash excluded\)/);
 
   await pi.handlers.get("session_shutdown")[0]({ type: "session_shutdown", reason: "quit" }, context);

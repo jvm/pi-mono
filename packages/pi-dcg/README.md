@@ -14,9 +14,29 @@ Stop destructive shell commands before they damage your system.
 
 `pi-dcg` is a Pi extension bridge. It does not bundle dcg, replace dcg policy, or provide a sandbox.
 
-The TUI footer uses palette-neutral health labels, including the configured
-blocking/fail-open state when unavailable. It does not retain colors from an old
-theme. RPC confirmations and notifications remain separate from this terminal-only status.
+The TUI footer uses palette-neutral shield icons, with the configured
+`blocking`/`fail-open` policy kept in text when unavailable. It does not retain
+colors from an old theme. RPC confirmations and notifications remain separate
+from this terminal-only status.
+
+### Footer icons
+
+| Display | State | Nerd Font glyph |
+| --- | --- | --- |
+| 󰕥 | DCG is available | `nf-md-shield_check` (`U+F0565`) |
+| 󰶚 | Startup health probe is pending | `nf-md-shield_search` (`U+F0D9A`) |
+| 󰦞 fail-open | DCG is unavailable; bridge failures allow commands | `nf-md-shield_off` (`U+F099E`) |
+| 󰦞 blocking | DCG is unavailable; bridge failures block commands | `nf-md-shield_off` (`U+F099E`) |
+
+Icons are the only display for healthy/checking states; the version remains
+available through `/dcg`. Degraded states always retain the failure policy in
+text, rather than relying on shape or color alone. Health is not a guarantee
+that a specific command is safe or that dcg provides a sandbox.
+
+Configure the terminal to use **Nerd Font 3 or later**, preferably its **Mono**
+variant. There is no text fallback for icons and Pi cannot detect missing glyphs;
+an unsupported font may display boxes. Guard decisions do not depend on the
+terminal font.
 
 ## Requirements
 

@@ -109,3 +109,37 @@ test("forces cleanup on session shutdown", async () => {
   assert.equal(inhibitor.forceStopCalls, 1);
   assert.equal(inhibitor.isInhibiting, false);
 });
+
+test("shows only the static coffee icon during TUI inhibition without animation timers", async (t) => {
+  t.mock.method(globalThis, "setInterval", () => assert.fail("insomnia must not animate"));
+  const pi = makePi();
+  const inhibitor = makeInhibitor();
+  const statuses = [];
+  const context = {
+    mode: "tui", hasUI: true,
+    ui: { setStatus: (key, value) => statuses.push({ key, value }) },
+  };
+  piInsomnia(pi, inhibitor);
+  await emit(pi, "agent_start", context);
+  assert.deepEqual(statuses.at(-1), { key: "pi-insomnia", value: "\u{f0176}" });
+  await emit(pi, "agent_start", context);
+  assert.equal(statuses.at(-1).value, "\u{f0176}");
+  assert.equal(inhibitor.releaseCalls, 0);
+  await emit(pi, "agent_settled", context);
+  assert.equal(statuses.at(-1).value, undefined);
+  await emit(pi, "agent_start", context);
+  await emit(pi, "session_shutdown", context);
+  assert.equal(statuses.at(-1).value, undefined);
+  assert.equal(inhibitor.forceStopCalls, 1);
+});
+
+test("does not show an awake icon when inhibition cannot be acquired", async () => {
+  const pi = makePi();
+  const inhibitor = makeInhibitor();
+  inhibitor.acquire = () => false;
+  piInsomnia(pi, inhibitor);
+  await emit(pi, "agent_start", {
+    mode: "tui", hasUI: true,
+    ui: { setStatus: () => assert.fail("no icon without inhibition") },
+  });
+});

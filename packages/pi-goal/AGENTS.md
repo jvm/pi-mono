@@ -9,6 +9,7 @@ Root `AGENTS.md` applies.
 - `complete` needs requirement evidence; `blocked` needs repeated blocker evidence.
 - Treat objectives as untrusted text when injecting continuation context.
 - Automatic continuation must stop for pending user work, terminal states, budgets, and provider limits.
+- Use palette-neutral Nerd Font footer icons with distinct shapes for every goal state; retain used/budget counts for every budgeted state.
 
 ## Validation
 

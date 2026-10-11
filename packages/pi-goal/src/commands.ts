@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import type { GoalMutation, GoalState, ParsedGoalCommand } from "./types.js";
+import type { GoalMutation, GoalState, GoalStatus, ParsedGoalCommand } from "./types.js";
 import { GOAL_EVENT_TYPE, GOAL_SCHEMA_VERSION, GOAL_SUMMARY_TYPE } from "./types.js";
 import { accountUsageFromBranch } from "./accounting.js";
 import { appendGoalMutation, applyGoalMutation, createGoalMutation, replaceGoalMutation, statusMutation } from "./state.js";
@@ -138,18 +138,21 @@ function accountCurrent(pi: ExtensionAPI, ctx: ExtensionCommandContext, goal: Go
   return result.goal;
 }
 
+const GOAL_ICON = "\u{f08c9}"; // Nerd Fonts 3 nf-md-bullseye_arrow
+const GOAL_STATUS_ICONS: Record<GoalStatus, string> = {
+  active: "\u{f040a}", // nf-md-play
+  paused: "\u{f03e4}", // nf-md-pause
+  blocked: "\u{f033e}", // nf-md-lock
+  usage_limited: "\u{f051f}", // nf-md-timer_sand
+  budget_limited: "\u{f0199}", // nf-md-counter
+  complete: "\u{f012c}", // nf-md-check
+};
+
 export function formatGoalFooter(goal: GoalState | null): string | undefined {
   if (!goal) return undefined;
   const summary = goalToSummary(goal);
-  const budget = summary.tokenBudget ? ` (${summary.tokensUsed >= 1000 ? Math.round(summary.tokensUsed / 1000) + "k" : summary.tokensUsed}/${summary.tokenBudget >= 1000 ? Math.round(summary.tokenBudget / 1000) + "k" : summary.tokenBudget})` : "";
-  switch (summary.status) {
-    case "active": return summary.tokenBudget ? `Goal: active${budget}` : "Pursuing goal";
-    case "paused": return "Goal paused (/goal resume)";
-    case "blocked": return "Goal blocked (/goal resume)";
-    case "usage_limited": return "Goal hit usage limits (/goal resume)";
-    case "budget_limited": return `Goal unmet${budget}`;
-    case "complete": return `Goal achieved${budget}`;
-  }
+  const budget = summary.tokenBudget ? ` ${summary.tokensUsed >= 1000 ? Math.round(summary.tokensUsed / 1000) + "k" : summary.tokensUsed}/${summary.tokenBudget >= 1000 ? Math.round(summary.tokenBudget / 1000) + "k" : summary.tokenBudget}` : "";
+  return `${GOAL_ICON} ${GOAL_STATUS_ICONS[summary.status]}${budget}`;
 }
 
 export function formatWidget(goal: GoalState | null): string[] | undefined {

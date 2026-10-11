@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-11
+
+### Changed
+
+- Compact the footer into a palette-neutral Nerd Font goal icon plus distinct active, paused, blocked, usage-limited, budget-limited, and complete icons. Retain used/budget token counts in every budgeted state; leave command output, notifications, and widget text unchanged. Require Nerd Font 3 or later for footer icons.
+
 ## [0.2.0] - 2026-10-09
 
 ### Added
