@@ -314,7 +314,7 @@ test("probes on UI session start, exposes diagnostics, and clears status", async
 
   await pi.commands.get("dcg").handler("", context);
   assert.match(context.notifications.at(-1).message, /Version: 0\.6\.8/);
-  assert.match(context.notifications.at(-1).message, /Coverage: agent bash and user !\/!! commands \(RPC bash excluded\)/);
+  assert.match(context.notifications.at(-1).message, /Coverage: agent bash\/exec_command and user !\/!! commands \(RPC bash excluded\)/);
 
   await pi.handlers.get("session_shutdown")[0]({ type: "session_shutdown", reason: "quit" }, context);
   assert.equal(context.statuses.at(-1).value, undefined);

@@ -14,6 +14,8 @@ import {
 } from "../src/dcg-client.js";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import { formatDcgDecision, getDcgAllowOnceCommand } from "../src/protocol.js";
+import { realpath, stat } from "node:fs/promises";
+import { resolve } from "node:path";
 
 const STATUS_KEY = "pi-dcg";
 // Nerd Fonts 3 shield variants carry health without stored theme colors.
@@ -245,6 +247,32 @@ export default function piDcg(
   });
 
   pi.on("tool_call", async (event, ctx) => {
+    if (event.toolName === "exec_command") {
+      const input = event.input;
+      if (typeof input.cmd !== "string" || (input.workdir !== undefined && typeof input.workdir !== "string")) {
+        return { block: true, reason: "dcg received invalid process command arguments" };
+      }
+      // Resolve in the same directory as pi-processes, not the parent session cwd.
+      // Snapshot before async filesystem/policy work and seal every spawn option.
+      const snapshot = { ...input };
+      const command = input.cmd;
+      const cwd = await realpath(resolve(ctx.cwd, input.workdir as string | undefined ?? "."));
+      if (!(await stat(cwd)).isDirectory()) return { block: true, reason: "Process workdir is not a directory" };
+      const outcome = await guard(command, cwd, ctx);
+      if (outcome.block) return { block: true, reason: outcome.reason };
+      // Detect any mutation while the policy check was pending.
+      if (Object.keys(input).length !== Object.keys(snapshot).length ||
+        Object.keys(snapshot).some(key => input[key] !== snapshot[key])) {
+        return { block: true, reason: "dcg blocked process arguments changed during the safety check" };
+      }
+      input.workdir = cwd;
+      Object.freeze(input);
+      Object.defineProperty(event, "input", {
+        configurable: false, enumerable: true, get: () => input,
+        set: () => { throw new Error("pi-dcg blocked process arguments replacement after its safety check"); },
+      });
+      return undefined;
+    }
     if (!isToolCallEventType("bash", event)) return undefined;
     const command = event.input.command;
     const outcome = await guard(command, ctx.cwd, ctx);
@@ -282,8 +310,8 @@ export default function piDcg(
         const probe = await client.probe(ctx.cwd);
         markHealthy(ctx, probe.version);
         const coverage = config.guardUserBash
-          ? "agent bash and user !/!! commands (RPC bash excluded)"
-          : "agent bash commands";
+          ? "agent bash/exec_command and user !/!! commands (RPC bash excluded)"
+          : "agent bash/exec_command commands";
         notify(
           ctx,
           `pi-dcg is active\nBinary: ${config.binary}\nVersion: ${probe.version}\nCoverage: ${coverage}\nBridge errors: ${config.onError}`,

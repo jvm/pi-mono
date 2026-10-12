@@ -15,9 +15,10 @@ Do not open a public issue for a suspected vulnerability. Report privately throu
 The bridge:
 
 - intercepts Pi's built-in agent `bash` calls, including codemode and other `ctx.executeTool()` calls, and, by default, user `!`/`!!` commands;
+- intercepts `exec_command` startup, checks `cmd` in the canonical `workdir`, and freezes all startup arguments after approval;
 - starts the configured dcg executable directly without a shell;
 - sends command text to that local child process on stdin;
-- sets the child cwd to Pi's current working directory;
+- sets the DCG child cwd to Pi's current working directory for bash, or the resolved command directory for `exec_command`;
 - validates dcg's structured stdout decision;
 - seals an approved agent `bash` command and its input reference so later `tool_call` handlers cannot replace them unchecked;
 - keeps allow-once commands out of model-visible denial results and shows them only through user-facing UI notifications;
@@ -49,7 +50,8 @@ The real-session tests record these host limitations explicitly. They are not pa
 
 The extension cannot intercept arbitrary process creation. Important bypasses include:
 
-- custom tools with other names;
+- custom tools with names other than `bash` or `exec_command`;
+- incremental `write_stdin` input (the separate human approval in `pi-processes` is not a DCG safety decision);
 - Pi's RPC control-channel `{"type":"bash"}` command, which does not emit a `user_bash` event;
 - `pi.exec()` and child processes started inside another extension;
 - non-shell file, database, cloud, or API operations;

@@ -7,7 +7,7 @@ Stop destructive shell commands before they damage your system.
 ## Features
 
 - **Pre-execution protection** — block dangerous commands before Pi runs them.
-- **Guard agent and user commands** — cover built-in `bash` tool calls plus `!command` and `!!command` invocations.
+- **Guard agent and user commands** — cover `bash` and `exec_command` startup calls plus `!command` and `!!command` invocations.
 - **Actionable decisions** — surface matched rules and remediation while keeping hard denials non-overridable by the agent.
 - **Your policy stays yours** — honor dcg's Pi-specific profiles, packs, allowlists, exceptions, and audit history.
 - **Configurable failure posture** — choose fail-open convenience or fail-closed protection when dcg is unavailable.
@@ -75,6 +75,7 @@ pi -e /path/to/pi-mono/packages/pi-dcg
 By default, the extension checks both Pi shell events available to extensions:
 
 - agent calls to Pi's built-in `bash` tool, including nested calls through codemode (`on` and `only`) or `ctx.executeTool()`;
+- `exec_command` startup calls, including the monorepo's `pi-processes`, checked in their resolved `workdir`;
 - user `!command` and `!!command` invocations.
 
 Pi's separate RPC control-channel `{"type":"bash"}` command does not emit either event in current Pi releases and cannot be intercepted by `pi-dcg`; see [Limitations](#limitations).
@@ -84,6 +85,8 @@ For every non-empty command, the extension starts dcg directly without a shell, 
 Pi allows `tool_call` handlers to rewrite tool arguments in sequence. `pi-dcg` checks **in-place** mutations made by earlier handlers, then seals both the approved `command` value and its input reference. If a later handler attempts to replace either one, Pi blocks the tool call. Pi 1.1.0 has a separate argument-identity limitation when an earlier handler replaces the entire input object; see [Limitations](#limitations).
 
 DCG does not replace the bash executor, activate excluded tools, or bypass another extension's approval hooks.
+
+For `exec_command`, DCG canonicalizes `workdir`, checks `cmd` there, and seals all startup arguments against later changes. Interactive `write_stdin` is not DCG-validated: partial input can combine into commands that cannot be safely checked in isolation. `pi-processes` instead requires explicit human approval for every non-empty write. The earlier-input-object replacement limitation below also applies to `exec_command`.
 
 | dcg response | Pi behavior |
 | --- | --- |
@@ -150,7 +153,7 @@ Use real pack or category IDs reported by `dcg packs`.
 
 - The command is sent only to the local dcg child process over stdin.
 - The extension never invokes a shell to start dcg.
-- dcg runs with Pi's current working directory, preserving project policy and allow-once scope.
+- dcg runs with Pi's current working directory for `bash`, or the resolved command `workdir` for `exec_command`, preserving project policy and allow-once scope.
 - Captured stdout and stderr share a 512 KiB limit.
 - dcg's human stderr output is captured rather than copied into Pi logs or model context.
 - Denial text sent back to Pi is bounded to prevent context flooding.
@@ -161,7 +164,8 @@ On startup, this package also sends the monorepo-standard best-effort install/up
 
 This extension intercepts Pi events, not operating-system process execution. It cannot see:
 
-- custom tools that execute commands under another tool name;
+- custom tools that execute commands under names other than `bash` or `exec_command`;
+- interactive stdin sent to an already-running command;
 - Pi's RPC control-channel `{"type":"bash"}` command, which does not emit a `user_bash` event;
 - `pi.exec()` or child processes started internally by another extension;
 - destructive behavior performed directly through non-shell tools;

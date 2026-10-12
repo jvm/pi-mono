@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-12
+
+### Added
+
+- Guard `exec_command` process startup in its resolved working directory and seal all startup arguments. Keep incremental PTY input outside DCG's coverage; `pi-processes` requires separate per-write human approval.
+
 ## [0.3.0] - 2026-10-11
 
 ### Changed

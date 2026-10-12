@@ -15,6 +15,7 @@ const packageNames = [
   "pi-goal",
   "pi-insomnia",
   "pi-openai-reasoning",
+  "pi-processes",
   "pi-scout",
   "pi-skillful",
   "pi-subs-usage",
