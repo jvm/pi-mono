@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { access, mkdir } from "node:fs/promises";
+import { access, mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import piProcesses from "../extensions/index.ts";
@@ -40,9 +40,10 @@ test("DCG uses canonical command cwd and seals later cwd/command mutations", asy
   const h = await processes(t);
   const dir = join(h.ctx.cwd, "work");
   await mkdir(dir);
+  const canonical = await realpath(dir);
   const result = await h.run("exec_command", { cmd: "pwd", workdir: "work" });
-  assert.equal(h.checks[0].request.cwd, dir);
-  assert.equal(dataOf(result).output.trim(), dir);
+  assert.equal(h.checks[0].request.cwd, canonical);
+  assert.equal(dataOf(result).output.trim(), canonical);
 });
 
 for (const field of ["cmd", "workdir", "tty", "input"]) {

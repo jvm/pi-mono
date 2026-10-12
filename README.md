@@ -107,6 +107,8 @@ Scoped package tags are also supported, for example `@mocito/pi-goal@0.1.10`.
 
 The publish workflow dynamically resolves `packages/<package-slug>/package.json`, validates that the tag version matches the selected package's `package.json` version, then runs `npm publish --workspace packages/<package-slug> --provenance --access public`.
 
+For a new npm package, an authenticated maintainer must publish the first version before configuring its GitHub trusted publisher. That bootstrap publication has no CI provenance. The workflow checks npm before publishing: it skips an existing version only when its SHA-512 tarball integrity matches the local package exactly. A different artifact or registry error fails the release instead of being treated as a successful publication.
+
 When working in Pi, the project-local `/release-package` command discovers publishable workspaces from `packages/*/package.json`, performs the validation, prints the exact commands it will run, asks for confirmation, then tags, pushes, and creates the GitHub release without invoking the agent:
 
 ```text

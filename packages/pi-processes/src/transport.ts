@@ -27,7 +27,7 @@ export async function launch(options: TransportOptions): Promise<Transport> {
     try {
       pty = await import("node-pty");
     } catch {
-      throw new Error("PTY support is unavailable. Install node-pty 1.1.0 with its native binding, or use tty:false.");
+      throw new Error("PTY support is unavailable. Install node-pty 1.2.0-beta.15 with its native binding, or use tty:false.");
     }
     const term = pty.spawn(shell, args, {
       cwd: options.cwd, env: process.env as Record<string, string>,

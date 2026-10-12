@@ -117,7 +117,14 @@ jobs:
           PACKAGE_DIR: ${{ steps.package.outputs.dir }}
         run: npm run pack:dry-run --workspace "$PACKAGE_DIR"
 
+      - name: Check for an identical published version
+        id: published
+        env:
+          PACKAGE_DIR: ${{ steps.package.outputs.dir }}
+        run: node scripts/check-published-package.mjs "$PACKAGE_DIR"
+
       - name: Publish package
+        if: steps.published.outputs.already_published != 'true'
         env:
           PACKAGE_DIR: ${{ steps.package.outputs.dir }}
         run: npm publish --workspace "$PACKAGE_DIR" --provenance --access public
