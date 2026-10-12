@@ -20,7 +20,13 @@ Incremental stdin is not DCG-validated. Even individually harmless fragments can
 
 ## Resource ownership and cleanup
 
-Random IDs reference only this runtime's process records; arbitrary PID termination is not exposed. Output is bounded in memory, terminal escape sequences are removed from results, and completion messages carry metadata only. There are no persistent command logs.
+Random IDs reference only this runtime's process records; arbitrary PID termination is not exposed. Output is bounded in memory and terminal escape sequences are removed from results. Default and legacy completion messages carry metadata only. There are no separate persistent command logs.
+
+Setting `completion_mode` explicitly opts in to forwarding a sanitized output tail to the model and Pi's normal session transcript. This tail is separately bounded to the initial output budget, at most 64,000 raw UTF-8 bytes per process, without consuming polling output. It may duplicate already-polled output. Omitted bytes are reported independently of polling overflow. The message labels output as untrusted data; this warning and terminal sanitization do **not** prevent prompt injection or redact credentials. No command/input arguments are attached, but a process may echo commands, approved input, inherited secrets, or file contents into its output. Review the output's sensitivity before opting in.
+
+`steer` queues a result at the next safe model boundary; it does not abort in-flight inference or tools. `steer` and `followUp` can wake an idle session and incur additional provider usage. `nextTurn` never requests a wake. Each background process produces at most one completion message; shutdown/reload suppress notifications from their terminated jobs. Per-write PTY approval and startup tool hooks are unchanged.
+
+The interactive widget retains a bounded escaped command preview in memory and displays it locally while a background process is live. Command arguments may contain secrets; previews are not credential-redacted. Terminal controls and direction-changing Unicode characters are escaped, but the preview is not a safety decision. It never displays process output or PTY input, consumes output, adds model context, or writes command previews to telemetry or disk. RPC, JSON, and print sessions do not receive this widget.
 
 Pipes use detached POSIX process groups; PTYs use forkpty session groups. Timeout and orderly shutdown terminate the owned group, escalating to SIGKILL. A command that exits cannot intentionally leave ordinary descendants running in that group. A process that deliberately escapes via `setsid`, daemonization, another process group, or an external service is **not guaranteed to be stopped**. Normal Node exit has best-effort synchronous cleanup; SIGKILL, power loss, host crash, or abrupt runtime termination can leave children. This is not a supervisor or crash-recovery system.
 

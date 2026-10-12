@@ -9,7 +9,8 @@
 - Bound active processes, retained records, output, input, waits, and timeouts. Report output loss explicitly.
 - Initial-call cancellation stops its new process; polling cancellation stops the wait only.
 - Kill session-owned process groups on timeout, shutdown, reload, and normal Node exit. Never target arbitrary model-supplied PIDs.
-- Completion messages contain status metadata only and wake the model only when explicitly requested.
+- Default/legacy completion messages contain status metadata only. Explicit completion modes may deliver a bounded, sanitized, untrusted output tail without consuming polling output; wake the model only when requested. Never attach command or input arguments.
+- Keep the widget terminal-only, detached-process-only, and output-free. Drive membership from lifecycle events, not model/tool polling; stop its clock and clear only its own slot on teardown.
 - This is local execution, not a sandbox. DCG startup coverage belongs in `pi-dcg`; never claim DCG validates incremental stdin.
 
 ## Validation

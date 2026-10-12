@@ -145,10 +145,12 @@ export async function fixture(t, options = {}) {
           theme: { fg: (_color, text) => text },
           notify(message, type) { notifications.push({ message, type }); },
           setStatus() {},
+          setWidget() {},
           confirm(title, message, opts) {
             confirmations.push({ title, message, opts });
             return options.confirm ? options.confirm(title, message, opts) : Promise.resolve(false);
           },
+          ...options.uiContext,
         },
         onError: error => h.errors.push(error),
       });

@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { OutputBuffer } from "./output.js";
 import { launch, signalGroup, type Transport } from "./transport.js";
 import { abortable } from "./confirmation-queue.js";
+import { commandPreview } from "./display-text.js";
 
 export interface ProcessResult {
   session_id: string;
@@ -16,9 +17,20 @@ export interface ProcessResult {
   timed_out: boolean;
 }
 
+export type CompletionMode = "nextTurn" | "followUp" | "steer";
+
+export interface BackgroundProcess {
+  session_id: string;
+  command_preview: string;
+  tty: boolean;
+  started_at: number;
+}
+
 interface Job {
   id: string;
   tty: boolean;
+  commandPreview: string;
+  startedAt: number;
   transport?: Transport;
   output: OutputBuffer;
   exited: boolean;
@@ -27,6 +39,8 @@ interface Job {
   timedOut: boolean;
   detached: boolean;
   notify: boolean;
+  completionMode?: CompletionMode;
+  completionOutput?: OutputBuffer;
   activeReads: number;
   notified: boolean;
   stopping?: Promise<void>;
@@ -53,13 +67,14 @@ export class ProcessRuntime {
   private launching = 0;
 
   constructor(
-    private readonly completed: (result: ProcessResult, notify: boolean) => void = () => {},
+    private readonly completed: (result: ProcessResult, notify: boolean, mode?: CompletionMode) => void = () => {},
     private readonly limits = { active: 8, retained: 32, outputBytes: 1024 * 1024, killGraceMs: 500 },
+    private readonly changed: () => void = () => {},
   ) {}
 
   async start(
     cmd: string, cwd: string, tty: boolean, timeoutMs: number, notify: boolean,
-    waitMs: number, maxBytes: number, signal?: AbortSignal,
+    waitMs: number, maxBytes: number, signal?: AbortSignal, completionMode?: CompletionMode,
   ): Promise<ProcessResult> {
     aborted(signal);
     if (this.closed) throw new Error("Process runtime is closed");
@@ -69,15 +84,22 @@ export class ProcessRuntime {
     this.launching++;
     const job: Job = {
       id: randomUUID(), tty, output: new OutputBuffer(this.limits.outputBytes),
+      commandPreview: commandPreview(cmd), startedAt: Date.now(),
       exited: false, exitCode: null, signal: null, timedOut: false,
       detached: false, notify, notified: false, activeReads: 0,
+      completionMode,
+      // Separate bounded tail: completion delivery must not consume polling output.
+      completionOutput: completionMode ? new OutputBuffer(Math.min(64_000, Math.max(4, maxBytes))) : undefined,
       listeners: new Set(), queue: Promise.resolve(), queued: 0,
     };
     let reserved = true;
     try {
       job.transport = await launch({
         cmd, cwd, tty,
-        onData: data => job.output.append(data),
+        onData: data => {
+          job.output.append(data);
+          job.completionOutput?.append(data);
+        },
         onExit: (code, exitSignal) => {
           job.exited = true;
           job.exitCode = code;
@@ -88,6 +110,7 @@ export class ProcessRuntime {
             try { signalGroup(job.transport.pid, "SIGKILL"); } catch { /* best effort on exit */ }
           }
           for (const listener of job.listeners) listener();
+          this.stateChanged();
           this.maybeNotify(job);
         },
       });
@@ -106,6 +129,8 @@ export class ProcessRuntime {
       }
       const result = await this.read(job, waitMs, maxBytes, signal);
       job.detached = result.status === "running";
+      if (!job.detached) job.completionOutput = undefined;
+      this.stateChanged();
       this.maybeNotify(job);
       this.evict();
       return result;
@@ -152,8 +177,17 @@ export class ProcessRuntime {
     return [...this.jobs.values()].map(job => this.metadata(job));
   }
 
+  /** Display metadata only; never consume unread output or count foreground work. */
+  background(): BackgroundProcess[] {
+    if (this.closed) return [];
+    return [...this.jobs.values()].filter(job => job.detached && !job.exited).map(job => ({
+      session_id: job.id, command_preview: job.commandPreview, tty: job.tty, started_at: job.startedAt,
+    }));
+  }
+
   async close(): Promise<void> {
     this.closed = true;
+    this.stateChanged();
     await Promise.all([...this.jobs.values()].map(job => this.stop(job)));
     for (const job of this.jobs.values()) job.transport?.dispose();
     this.jobs.clear();
@@ -179,6 +213,10 @@ export class ProcessRuntime {
       session_id: job.id, status: job.exited ? "exited" as const : "running" as const,
       exit_code: job.exitCode, signal: job.signal, timed_out: job.timedOut,
     };
+  }
+
+  private stateChanged(): void {
+    try { this.changed(); } catch { /* display failures never alter process execution */ }
   }
 
   private async read(job: Job, waitMs: number, maxBytes: number, signal?: AbortSignal): Promise<ProcessResult> {
@@ -211,7 +249,11 @@ export class ProcessRuntime {
   private maybeNotify(job: Job): void {
     if (this.closed || !job.detached || !job.exited || job.notified || job.activeReads) return;
     job.notified = true;
-    try { this.completed({ ...this.metadata(job), output: "", dropped_bytes: 0, unread_bytes: 0 }, job.notify); }
+    const tail = job.completionOutput?.read(64_000)
+      ?? { output: "", dropped_bytes: 0, unread_bytes: 0 };
+    // Release the duplicate tail as soon as the one-shot notification is built.
+    job.completionOutput = undefined;
+    try { this.completed({ ...this.metadata(job), ...tail }, job.notify, job.completionMode); }
     catch { /* notification failures never alter process state */ }
   }
 
@@ -232,6 +274,7 @@ export class ProcessRuntime {
         job.exited = true;
         job.signal = "SIGKILL";
         for (const listener of job.listeners) listener();
+        this.stateChanged();
         this.maybeNotify(job);
       }
     })();
