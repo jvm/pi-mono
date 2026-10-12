@@ -55,10 +55,19 @@ for (const tty of [false, true]) {
 
   test(`${tty ? "PTY" : "pipe"} background completion is once and metadata-only`, async t => {
     const notifications = [];
-    const rt = fixture(t, (...args) => notifications.push(args));
-    const data = await start(rt, "sleep 0.1; printf private-output", { tty, wait: 0, notify: true });
+    let completed;
+    const completion = new Promise(resolve => { completed = resolve; });
+    const rt = fixture(t, (...args) => { notifications.push(args); completed(); });
+    const data = await start(rt, "sleep 0.4; printf private-output", { tty, wait: 0, notify: true });
     assert.equal(data.status, "running");
-    await delay(250);
+    // CI scheduling and stream draining can exceed 250 ms. Wait for the
+    // notification itself, not process polling (which could hide missing wiring).
+    let timer;
+    try {
+      await Promise.race([completion, new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("Background completion notification did not arrive")), 5000);
+      })]);
+    } finally { clearTimeout(timer); }
     assert.equal(notifications.length, 1);
     assert.equal(notifications[0][0].output, "");
     assert.equal(notifications[0][1], true);
