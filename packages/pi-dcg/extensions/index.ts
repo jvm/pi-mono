@@ -214,9 +214,14 @@ export default function piDcg(
 
     let approved = false;
     try {
+      const message = `Command:\n${truncate(command, MAX_COMMAND_PREVIEW_CHARS)}\n\n${reason}`;
       approved = await confirmations.confirm(signal, () => ctx.ui.confirm(
         "dcg requires confirmation",
-        `Command:\n${truncate(command, MAX_COMMAND_PREVIEW_CHARS)}\n\n${reason}`,
+        // Pi combines the message with its bold accent title. Reset weight
+        // and set a body color without sending terminal escapes over RPC.
+        ctx.mode === "tui" && ctx.ui.theme
+          ? `\u001b[22m${ctx.ui.theme.fg("text", message)}`
+          : message,
         { signal },
       ));
     } catch {

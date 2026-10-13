@@ -3,6 +3,7 @@ import test from "node:test";
 import { setImmediate as tick } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
 import { initTheme, InteractiveMode } from "@earendil-works/pi-coding-agent";
+import { theme } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { COMMAND, SECOND_COMMAND, deferred, fixture, hookResponse, onBash } from "./session-fixture.mjs";
 
 /** Isolate private Pi TUI calls here; production DCG uses only public APIs. */
@@ -36,13 +37,16 @@ function selectorHarness() {
 
 test("real Pi selector smoke: parallel approvals stay visible and independently actionable", { timeout: 5000 }, async t => {
   const ui = selectorHarness();
-  const h = await fixture(t, { decision: "ask", uiMode: "tui", confirm: ui.confirm });
+  const h = await fixture(t, { decision: "ask", uiMode: "tui", confirm: ui.confirm, uiContext: { theme } });
   const running = h.script(`text(await Promise.allSettled([tools.bash({command:${JSON.stringify(COMMAND)}}), tools.bash({command:${JSON.stringify(SECOND_COMMAND)}})]));`);
   const first = await ui.opened(0);
   await tick();
   assert.equal(ui.selectors.length, 1, "the second confirmation must not replace the first");
   assert.equal(ui.owner.extensionSelector, first);
   assert.ok(stripVTControlCharacters(first.render(80).join("\n")).includes(COMMAND));
+  assert.ok(h.confirmations[0].message.startsWith("\u001b[22m"));
+  const bodyColor = theme.fg("text", "Command:").split("Command:")[0];
+  assert.ok(first.render(80).join("\n").includes(`${bodyColor}Command:`));
   first.handleInput("\n"); // Yes on the actual Pi selector.
   const second = await ui.opened(1);
   assert.equal(ui.owner.extensionSelector, second);

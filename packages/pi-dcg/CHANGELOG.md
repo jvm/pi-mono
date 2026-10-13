@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-13
+
+### Fixed
+
+- Render terminal confirmation details in normal-weight text using the theme's text color instead of inheriting the title's bold accent style.
+
 ## [0.4.0] - 2026-10-12
 
 ### Added

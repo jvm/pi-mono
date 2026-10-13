@@ -101,6 +101,8 @@ DCG confirmation dialogs run one at a time per extension instance, so parallel b
 
 RPC extension UI can confirm `ask` decisions. Print/JSON sessions without UI block them. RPC **agent tool calls** are distinct from the excluded RPC control-channel `bash` command.
 
+Terminal confirmation dialogs use a bold accent title and normal-weight command/policy details in the theme's text color. The selected Yes/No option keeps Pi's accent highlight; unselected options use its normal text color. RPC prompts remain plain text.
+
 Run `/dcg` to probe the binary and show the active bridge configuration.
 
 ## Why this uses hook mode
