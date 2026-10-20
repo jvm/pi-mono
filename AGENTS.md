@@ -35,7 +35,7 @@ New packages should copy canonical config files from `templates/package/`, then 
 - `AGENTS.md`, `README.md`, `CHANGELOG.md`
 - `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `LICENSE`, `SECURITY.md`
 
-Do not create `CLAUDE.md`; only Claude Code owns that file. Do not publish tests, plans, agent files, generated builds, secrets, settings, or machine paths.
+Do not publish tests, plans, agent files, generated builds, secrets, settings, or machine paths.
 
 ### Identity and manifest
 
@@ -62,6 +62,60 @@ Run `npm run validate:packages` after manifest, package structure, telemetry, ro
 ### Install telemetry
 
 Publishable extension packages use `src/install-telemetry.ts` and call `reportInstallTelemetry()` first in `extensions/index.ts`. It must be best-effort, once per version, use a 5-second timeout, and respect CI, `PI_OFFLINE`, `PI_TELEMETRY`, and `enableInstallTelemetry: false`.
+
+## Development
+
+Target a single workspace (see the validation matrix for which checks to run):
+
+```bash
+npm run check --workspace packages/pi-goal
+npm test --workspace packages/pi-goal
+```
+
+Run a single test file:
+
+```bash
+node --import tsx --test packages/pi-goal/tests/core.test.mjs
+```
+
+Test a package locally without installing it:
+
+```bash
+pi -e /path/to/pi-mono/packages/<package-name> --print "list your tools"
+```
+
+## Architecture
+
+npm workspaces monorepo of Pi packages: extensions for [`@earendil-works/pi-coding-agent`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent). Pi loads TypeScript source directly through its extension loader; there is no build step and no `dist/` in any package.
+
+```
+packages/<name>/
+  index.ts            # thin re-export: export { default } from "./extensions/index.js"
+  extensions/index.ts # Pi extension wiring: registers tools, commands, event handlers
+  src/                # business logic, separate from Pi API wiring
+  src/install-telemetry.ts  # every publishable package; `pi-goal` is the reference implementation
+  tests/              # node:test .test.mjs files (packages that have tests)
+```
+
+Extensions default-export a function that receives `pi: ExtensionAPI`:
+
+```ts
+export default function myExtension(pi: ExtensionAPI) {
+  pi.registerTool({ name, parameters, execute, ... });
+  pi.registerCommand("cmd", { handler });
+  pi.on("session_start", async () => { ... });
+  pi.on("before_agent_start", async (event) => ({ systemPrompt: ... }));
+}
+```
+
+Pi resolves the entry point from `package.json → pi.extensions[0]`. It must point to the root `index.ts` so Pi shows the package name, not the path, in its loaded resources list.
+
+## Coding conventions
+
+- ESM TypeScript: `"type": "module"`, `"target": "ES2022"`, `"module": "NodeNext"`.
+- 2-space indentation, LF line endings, explicit `.js` import specifiers for local TypeScript modules (`./foo.js` resolves to `foo.ts` at runtime).
+- Reusable logic goes in `src/`, Pi API wiring in `extensions/index.ts`; root `index.ts` stays a thin re-export.
+- Tests use `node:test` and `node:assert/strict`. Mock `globalThis.fetch` where needed and restore it in `finally`.
 
 ## Documentation triggers
 
