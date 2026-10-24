@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { FetchProviderName, SearchProviderName, WebKitConfig } from "./types.js";
 
 const SEARCH = ["exa", "tinyfish", "brave", "firecrawl"] as const;
@@ -42,8 +43,12 @@ export function resolveConfig(
       context7: env.CONTEXT7_API_KEY,
     },
   });
+  // Production follows Pi's host-supplied resolver (including custom agent
+  // directories). Preserve explicit environment injection for library callers.
   const home = env.HOME ?? homedir();
-  const globalConfig = readConfigFile(join(home, ".pi/agent/pi-web-kit.json"));
+  const agentDir = env === process.env ? getAgentDir()
+    : env.PI_CODING_AGENT_DIR?.replace(/^~(?=$|[/\\])/, () => home) || join(home, CONFIG_DIR_NAME, "agent");
+  const globalConfig = readConfigFile(join(agentDir, "pi-web-kit.json"));
   if (globalConfig) cfg = merge(cfg, globalConfig);
   if (options.includeProject !== false) {
     const projectConfig = readConfigFile(join(cwd, ".pi-web-kit.json"));
@@ -92,6 +97,6 @@ function readConfigFile(path: string): PartialConfig | undefined {
 export function requireKey(config: WebKitConfig, provider: "exa" | "tinyfish" | "brave" | "firecrawl" | "context7"): string {
   const key = config.apiKeys[provider];
   const envName = PROVIDER_ENV_NAMES[provider];
-  if (!key) throw new Error(`${provider} provider requires ${envName} or apiKeys.${provider} in .pi-web-kit.json / ~/.pi/agent/pi-web-kit.json.`);
+  if (!key) throw new Error(`${provider} provider requires ${envName} or apiKeys.${provider} in project or agent-directory pi-web-kit config.`);
   return key;
 }

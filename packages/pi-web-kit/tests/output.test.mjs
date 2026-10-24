@@ -60,16 +60,22 @@ test("bounded UTF-8 fetch content and partial failures validate after truncation
   assert.equal(result.details.results[0].content, undefined);
 });
 
-test("search omitted-count fields and top-level truncation fallback validate", () => {
+test("search and documentation omitted-count fields and metadata fallback validate", () => {
   const result = validates("web_search", { provider: "exa", queries: [{
     query: "q", requestedResultLimit: 100, effectiveResultLimit: 100, effectiveContextTokens: 10000,
     contextCharacters: 100000, resultCount: 100,
     results: Array.from({ length: 100 }, () => ({ url: "u".repeat(2048), title: "t".repeat(2000), content: "界".repeat(1000) })),
   }] });
   assert.ok(result.structuredContent.queries[0].omittedResultCount > 0);
-  const fallback = validates("library_docs", {
+  const docs = validates("library_docs", {
     provider: "context7", libraryId: "/fixture/lib", query: "q", codeSnippets: [],
     infoSnippets: Array.from({ length: 200 }, () => ({ content: "x".repeat(2000) })),
+  });
+  assert.equal(docs.structuredContent.infoSnippets.length + docs.structuredContent.omittedInfoSnippetCount, 200);
+  assert.ok(docs.structuredContent.infoSnippets.every(snippet => snippet.content === "x".repeat(2000)));
+  assert.match(docs.structuredContent.message, /Refine/);
+  const fallback = validates("library_docs", {
+    provider: "context7", libraryId: "/fixture/lib", query: "q".repeat(60_000), codeSnippets: [], infoSnippets: [],
   });
   assert.equal(fallback.structuredContent.truncated, true);
 });

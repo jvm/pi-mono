@@ -123,6 +123,9 @@ Config files, in increasing precedence:
 | Global | `~/.pi/agent/pi-web-kit.json` |
 | Project | `.pi-web-kit.json` |
 
+The global path follows Pi's `getAgentDir()` resolver. If `PI_CODING_AGENT_DIR`
+is set, `pi-web-kit.json` is read from that directory instead of the default.
+
 Example:
 
 ```json
@@ -161,7 +164,10 @@ with Pi's expand-tools action (default: Ctrl+O) to inspect ranked library candid
 available versions, documentation sources, or code source titles and URLs.
 Long fields are clipped to the terminal width; version previews show at most two
 entries plus the remaining count. Code-search summaries flag reduced output;
-expanded views show omitted-source and context counts when present.
+expanded views show omitted-source and context counts when present. Library
+documentation also shows omitted code/text snippet counts and refinement guidance.
+All five tools remove terminal control sequences from untrusted display text
+before applying theme styling.
 
 These views change presentation only. Model-facing JSON and typed codemode
 results retain the same bounded, redacted data, including snippets and code.
@@ -184,6 +190,13 @@ Searches with the active search provider and returns compact results grouped by 
 Provider caps are Exa 100, Brave 50, and Firecrawl 100. TinyFish is paginated internally through its service maximum of page 10 and may make up to 11 search requests for one query. Search output reports requested, effective, returned, and omitted result/context counts. Brave `maxUrls` remains as a deprecated alias for `numResults`.
 
 Other provider-specific parameters are exposed only for the configured provider. These include Exa date/domain filters; TinyFish domain, date, geography, language, and publication filters; Brave locale, freshness, spellcheck, Goggles, and LLM Context controls; and Firecrawl scrape/search options.
+
+TinyFish preserves one-sided date/year bounds. If both endpoints are supplied
+in reverse order, they are reordered; an upper-only bound never becomes a
+lower bound.
+
+Output limiting preserves complete source URLs. It reduces evidence or omits
+whole results rather than shortening citation targets.
 
 #### Exa modes, filters, and notices
 
@@ -274,6 +287,28 @@ missing pages; they cannot borrow another URL's result or cache it under the
 failed URL. Failed pages are not cached. Identity-less legacy redirect results
 use positional matching only for a complete batch or a single unambiguous pair.
 
+TinyFish and Firecrawl also retain the requested URL across redirects, including
+when a redirect lands on another URL in the same batch. `url` is the requested
+identity and `fetchedUrl` is the returned final URL.
+
+Exa fallback retrieval uses TinyFish, then Firecrawl when their keys are
+configured, then markdown.new. Only structured failures or empty content trigger
+fallback, never error-like phrases in ordinary page text. Explicit Exa freshness
+is translated to TinyFish `ttl` or Firecrawl `maxAge`, rounding toward fresher
+content. A freshness-constrained request skips markdown.new because it has no
+equivalent control. Cached-only Exa (`maxAgeHours: -1`) never uses another
+provider; `refresh: true` overrides that mode to request live content without
+populating its cached-only cache key.
+
+TinyFish `links: true` and `imageLinks: true` expose `links` and `imageLinks`
+arrays of absolute HTTP(S) URLs in each successful result. Invalid,
+credential-bearing, duplicate and excess links are omitted. Each array retains
+at most 50 URLs, with one shared 12,500-byte link budget across the call.
+`omittedLinkCount` and `omittedImageLinkCount` include validation and output-budget
+omissions. Link URLs remain complete, including useful fragments; these fields
+are also available on cached reads. Fetch content limiting preserves both URL
+identities and updates `range.nextOffset` for continuation.
+
 ### `library_search`
 
 Resolves packages, frameworks, SDKs, APIs, CLIs, and libraries to canonical library IDs.
@@ -297,6 +332,15 @@ Fetches current docs and code snippets for a library. Provide `libraryId`, or pr
 | `version` | string | Optional version/tag to pin, appended as `@version`. |
 | `fast` | boolean | Skip LLM reranking for lower latency. |
 | `limit` | integer | Maximum code and info snippets to return. Range: 1-20. Default: 10. |
+
+Documentation output keeps complete snippets, including their code and token
+metadata. If the serialized result exceeds 50,000 bytes, whole snippets are
+omitted; `omittedCodeSnippetCount` and `omittedInfoSnippetCount` report exact
+counts. Smaller later snippets can still be returned. A `message` asks you to
+refine the query or lower `limit`; an empty snippet array with omission counts
+means the output budget was reached, not that no documentation exists.
+Library search similarly omits whole oversized candidates with
+`omittedResultCount`, preserving IDs and versions.
 
 ### `code_search`
 
@@ -365,7 +409,8 @@ removed rather than silently translated.
 |---|---:|
 | Cache TTL | 30 minutes |
 | Max cached entries | 100 |
-| Max cached bytes | 20 MiB |
+| Max cached bytes | 20 MiB of serialized entries, including keys and retained metadata |
+| Max incoming provider response | 8 MiB of decoded body bytes |
 | Max URLs per call | 10 |
 | Max queries per call | 5 |
 | Provider `numResults` caps | Exa 100; Brave 50; Firecrawl 100 |
@@ -373,9 +418,21 @@ removed rather than silently translated.
 | Code-search local context budget | 8,192 approximate tokens |
 | Code-search result limit | 10 (default 5) |
 | Serialized tool output | 50,000 bytes |
+| Fetch link arrays | 50 URLs per array; shared 12,500-byte output budget |
 | Max URL length | 2048 characters |
 
-Cache keys include the provider, canonical URL, fetch-affecting parameters, relevant provider defaults, and an opaque SHA-256 API-key/account scope. Internal cache keys are never returned in tool output. `refresh: true` bypasses and replaces the cached entry.
+Cache keys include the provider, canonical URL, fetch-affecting parameters, relevant provider defaults, and an opaque HMAC-SHA-256 API-key/account scope with a random process-local key. Internal cache keys are never returned in tool output. `refresh: true` bypasses and replaces the cached entry.
+
+Exa cache scopes also include fallback accounts and markdown.new defaults.
+Raw provider metadata is not retained by the fetch cache; only page fields and
+validated, requested link fields are stored. Oversized entries are served for
+the current call but are not cached.
+
+Provider bodies are streamed through the incoming byte limit before JSON
+parsing or cache insertion. Requests that exceed it fail instead of returning
+partial documents. Text and JSON request deadlines include body consumption;
+markdown.new's 45-second deadline also applies when used as an Exa fallback.
+Provider API redirects are rejected, not followed with credentials.
 
 ## Structured results and discovery
 
@@ -388,9 +445,9 @@ script API.
 | Tool | Script result |
 | --- | --- |
 | `web_search` | `{ provider, queries: [{ query, requestedResultLimit, effectiveResultLimit, requestedContextTokens?, effectiveContextTokens, contextCharacters, omittedContextCharacters?, resultCount, omittedResultCount?, notices?, omittedNoticeCount?, results }] }`. Each result has `url` and optional `title`, `snippet`, `content`, `contentFormat`, `siteName`, `publishedDate`, `position`. |
-| `web_fetch` | `{ provider, results }`. Each item is either `{ url, error }` or `{ url, fetchedUrl, title?, content, format, cached, refreshed, range }`. `range` has `offset`, `limit`, `returned`, `total`, `truncated`, `hasPrevious`, `hasNext`, and optional `nextOffset`. |
-| `library_search` | `{ provider: "context7", libraryName, query, searchFilterApplied?, results }`. Each candidate has `id`; title, description, branch, dates, state, scores, counts, stars and versions are optional. |
-| `library_docs` | `{ provider: "context7", libraryId, query, codeSnippets, infoSnippets }`. Code snippets expose optional title/description/language/ID/page/source/token fields and `codeList: [{ language, code }]`; info snippets require `content` with optional page/breadcrumb/token fields. |
+| `web_fetch` | `{ provider, results }`. Each item is either `{ url, error }` or `{ url, fetchedUrl, title?, content, format, cached, refreshed, range, links?, imageLinks?, omittedLinkCount?, omittedImageLinkCount? }`. `range` has `offset`, `limit`, `returned`, `total`, `truncated`, `hasPrevious`, `hasNext`, and optional `nextOffset`. |
+| `library_search` | `{ provider: "context7", libraryName, query, searchFilterApplied?, omittedResultCount?, results }`. Each candidate has `id`; title, description, branch, dates, state, scores, counts, stars and versions are optional. |
+| `library_docs` | `{ provider: "context7", libraryId, query, codeSnippets, infoSnippets, omittedCodeSnippetCount?, omittedInfoSnippetCount?, message? }`. Code snippets expose optional title/description/language/ID/page/source/token fields and `codeList: [{ language, code }]`; info snippets require `content` with optional page/breadcrumb/token fields. |
 | `code_search` | `{ provider: "exa", query, searchType: "auto", maxAgeHours: 0, requestedResultLimit, effectiveResultLimit, requestedContextTokens?, effectiveContextTokens, contextCharacters, omittedContextCharacters?, resultCount, omittedResultCount?, omittedNoContentCount?, notices?, omittedNoticeCount?, results }`. Sources have the same fields as web search. Freshness fields describe the request policy, not independent freshness verification. |
 
 Every result also allows the top-level fallback `{ truncated: true, message }`

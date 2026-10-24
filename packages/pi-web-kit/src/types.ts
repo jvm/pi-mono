@@ -70,7 +70,8 @@ export interface FetchInput {
 export interface WebFetchResult {
   provider: FetchProviderName;
   // Internal association survives canonical redirects; never projected as raw metadata.
-  results: Array<{ url: string; requestedUrl?: string; content?: string; format?: FetchFormat; title?: string; metadata?: Record<string, unknown>; error?: string }>;
+  results: Array<{ url: string; requestedUrl?: string; content?: string; format?: FetchFormat; title?: string;
+    links?: unknown; imageLinks?: unknown; metadata?: Record<string, unknown>; error?: string }>;
 }
 
 export interface Context7LibrarySearchInput {

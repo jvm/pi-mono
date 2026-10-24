@@ -59,9 +59,9 @@ export class FirecrawlProvider implements SearchProvider, FetchProvider {
         const d = data.data ?? data;
         const selected = selectFirecrawlContent(d, format);
         const content = stringifyContent(selected);
-        return { url: d.url ?? url, content, format, title: d.metadata?.title, metadata: d.metadata ?? d };
+        return { url: d.url ?? url, requestedUrl: url, content, format, title: d.metadata?.title, metadata: d.metadata ?? d };
       } catch (e) {
-        return { url, error: e instanceof Error ? e.message : String(e) };
+        return { url, requestedUrl: url, error: e instanceof Error ? e.message : String(e) };
       }
     });
     return { provider: "firecrawl" as const, results };

@@ -1,5 +1,5 @@
 import { FETCH_CONCURRENCY } from "../limits.js";
-import { fetchWithTimeout, mapConcurrent, normalizeUrls } from "../http.js";
+import { requestText, mapConcurrent, normalizeUrls } from "../http.js";
 import type { FetchInput, FetchProvider, WebKitConfig } from "../types.js";
 
 export class MarkdownNewProvider implements FetchProvider {
@@ -9,7 +9,7 @@ export class MarkdownNewProvider implements FetchProvider {
     const urls = normalizeUrls(input);
     const results = await mapConcurrent(urls, FETCH_CONCURRENCY, async (url) => {
       try {
-        const res = await fetchWithTimeout("https://markdown.new/", {
+        const { text, headers } = await requestText("https://markdown.new/", {
           method: "POST",
           headers: { "content-type": "application/json", accept: "text/markdown, text/plain, */*" },
           body: JSON.stringify({
@@ -20,19 +20,18 @@ export class MarkdownNewProvider implements FetchProvider {
           signal,
           timeoutMs: 45_000,
         });
-        const text = await res.text();
-        if (!res.ok) throw new Error(`Provider request failed (HTTP ${res.status}).`);
         return {
           url,
+          requestedUrl: url,
           content: text,
           format: "markdown" as const,
           metadata: {
-            estimatedTokens: numberHeader(res.headers.get("x-markdown-tokens")),
-            conversionMethod: res.headers.get("x-markdown-method") ?? undefined,
+            estimatedTokens: numberHeader(headers.get("x-markdown-tokens")),
+            conversionMethod: headers.get("x-markdown-method") ?? undefined,
           },
         };
       } catch (e) {
-        return { url, error: e instanceof Error ? e.message : String(e) };
+        return { url, requestedUrl: url, error: e instanceof Error ? e.message : String(e) };
       }
     });
     return { provider: "markdown_new" as const, results };

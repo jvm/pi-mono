@@ -9,6 +9,10 @@ export type CachedPage = {
   content: string;
   format: string;
   metadata?: Record<string, unknown>;
+  links?: string[];
+  imageLinks?: string[];
+  omittedLinkCount?: number;
+  omittedImageLinkCount?: number;
   fetchedAt: number;
   bytes: number;
 };
@@ -41,8 +45,11 @@ export class FetchCache {
   }
 
   set(key: string, page: Omit<CachedPage, "bytes"> & { bytes?: number }, now = Date.now()): CachedPage {
-    const bytes = page.bytes ?? byteLength(page.content);
-    const stored = { ...page, bytes };
+    // Count the complete serialized entry, including metadata and map key.
+    // Caller-supplied estimates must not bypass the cache budget.
+    const { bytes: _bytes, ...data } = page;
+    const bytes = byteLength(JSON.stringify({ key, page: data }));
+    const stored = { ...data, bytes };
     this.delete(key);
     this.entries.set(key, { page: stored, lastAccessed: now });
     this.totalBytes += bytes;

@@ -3,14 +3,12 @@ import { urlsMatch } from "../urls.js";
 import { FirecrawlProvider } from "./firecrawl.js";
 import { MarkdownNewProvider } from "./markdown-new.js";
 import { TinyFishProvider } from "./tinyfish.js";
+import { exaFetchMaxAgeHours } from "./exa-contract.js";
 
 type FetchPage = WebFetchResult["results"][number];
 
 export function isMissingExaCrawlResult(page: FetchPage | undefined): boolean {
-  if (!page) return true;
-  const message = [page.error, page.content].filter((v): v is string => typeof v === "string").join("\n");
-  if (!message.trim()) return true;
-  return /\b(no crawl results?|not crawled|crawl(?:ed)? content (?:is )?(?:not )?(?:available|found)|no content returned by exa|no results? found)\b/i.test(message);
+  return !page || !!page.error || typeof page.content !== "string" || !page.content.trim();
 }
 
 export async function applyExaFetchFallbacks(
@@ -21,16 +19,30 @@ export async function applyExaFetchFallbacks(
   signal?: AbortSignal,
 ): Promise<WebFetchResult> {
   const mappedPrimary = mapFetchResults(urls, primary);
-  const results = urls.map(url => mappedPrimary.get(url) ?? { url, error: "No content returned by Exa." });
+  const results = urls.map(url => {
+    const page = mappedPrimary.get(url);
+    return isMissingExaCrawlResult(page)
+      ? { url, requestedUrl: url, error: page?.error || "No content returned by Exa." }
+      : page!;
+  });
   let missing = urls.filter((url, i) => isMissingExaCrawlResult(results[i]));
   if (missing.length === 0) return { ...primary, results };
+  const hours = exaFetchMaxAgeHours(input);
+  // Other backends cannot enforce Exa's cached-only policy.
+  if (hours === -1) return { ...primary, results };
+  const maxAgeMs = hours == null ? input.maxAgeMs : hours * 3_600_000;
 
   for (const { name, provider } of fallbackProviders(config)) {
     if (missing.length === 0) break;
+    signal?.throwIfAborted();
+    // markdown.new exposes no freshness control. Do not weaken an explicit
+    // freshness bound, including refresh:true, by silently using its defaults.
+    if (name === "markdown_new" && maxAgeMs != null) continue;
     let fetched: WebFetchResult;
     try {
-      fetched = await provider.fetch({ ...input, url: undefined, urls: missing }, signal);
+      fetched = await provider.fetch({ urls: missing, maxAgeMs, refresh: input.refresh }, signal);
     } catch {
+      signal?.throwIfAborted();
       continue;
     }
     const mapped = mapFetchResults(missing, fetched);
@@ -40,7 +52,7 @@ export async function applyExaFetchFallbacks(
       const index = urls.findIndex((candidate) => candidate === url);
       results[index] = {
         ...item,
-        url,
+        url: item.url,
         requestedUrl: url,
         metadata: {
           ...(isRecord(item?.metadata) ? item.metadata : {}),

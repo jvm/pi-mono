@@ -374,7 +374,13 @@ test("oversized fetch metadata is bounded without discarding page content", () =
 test("API keys produce opaque distinct cache scopes and never escape results", () => {
   const first = buildCacheKey("exa", "https://e.test", {}, { apiKeys: { exa: "sentinel-prefix-one" } });
   const second = buildCacheKey("exa", "https://e.test", {}, { apiKeys: { exa: "sentinel-prefix-two" } });
+  assert.equal(first, buildCacheKey("exa", "https://e.test", {}, { apiKeys: { exa: "sentinel-prefix-one" } }));
   assert.notEqual(first, second);
+  for (const fallback of ["tinyfish", "firecrawl"]) {
+    const third = buildCacheKey("exa", "https://e.test", {}, { apiKeys: { exa: "sentinel-prefix-one", [fallback]: "synthetic-fallback" } });
+    assert.notEqual(first, third, "fallback accounts must not reuse an earlier account's cached page");
+    assert(!third.includes("synthetic-fallback"));
+  }
   assert(!first.includes("sentinel"));
   const out = pageSlice({ provider: "exa", cacheKey: first, url: "https://e.test", content: "body", format: "markdown", fetchedAt: 1 }, 0, 4, false, false);
   assert(!JSON.stringify(out).includes("sentinel"));

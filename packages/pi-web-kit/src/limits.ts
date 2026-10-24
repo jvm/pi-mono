@@ -8,6 +8,10 @@ export const DEFAULT_NUM_RESULTS = 10;
 export const DEFAULT_SEARCH_CONTEXT_TOKENS = 8_192;
 export const MAX_SEARCH_CONTEXT_TOKENS = 10_000;
 export const MAX_OUTPUT_BYTES = 50_000;
+// Bound decoded response bytes before parsing, redacting, or caching provider data.
+export const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+export const MAX_FETCH_LINKS = 50;
+export const MAX_FETCH_LINK_OUTPUT_BYTES = 12_500;
 // Local context budget, not an upstream token target. Serialized bytes remain authoritative.
 export const MAX_CODE_CONTEXT_TOKENS = 8_192;
 export const DEFAULT_CODE_RESULTS = 5;
