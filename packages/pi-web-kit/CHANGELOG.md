@@ -21,13 +21,13 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Fixed
 
-- Preserve complete code-search source URLs and useful excerpts within the serialized 50,000-byte budget, with exact result/context omission counts. Do not silently collapse oversized evidence to 1,000 characters.
+- Preserve complete code-search source URLs and useful excerpts within the serialized 50,000-byte budget, with exact result/context omission counts. Refill the evidence budget after dropping oversized source metadata. Do not silently collapse oversized evidence to 1,000 characters.
 - Never use text/summary-only fallbacks as code evidence or locally cache code-search responses. Count unusable/no-excerpt sources, and surface failures without automatic stale or legacy fallback.
 - Respect Exa Contents per-URL failure statuses and preserve requested document identities through redirects, fallback retrieval, and caching. Never reuse another URL's result for a missing or failed page.
 - Reject explicit Exa freshness limits outside -1–720 hours and cap millisecond-to-provider conversion at 720 hours without weakening the caller's freshness requirement.
 - Declare Exa query, mode/category, domain-array, and publication-date limits in the tool schema to match runtime validation.
 - Apply JSON request deadlines through response-body consumption and use controlled cancellation errors instead of exposing raw abort reasons.
-- Mask configured credentials before provider snippet cuts, local search/code budgets, and cached page range slicing, so a truncation boundary cannot reveal a credential prefix.
+- Mask configured credentials before provider snippet cuts, local search/code budgets, manual evaluation excerpt cuts, and cached page range slicing, so a truncation boundary cannot reveal a credential prefix.
 
 ## [0.4.0] - 2026-10-09
 

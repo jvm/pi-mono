@@ -70,6 +70,7 @@ Exa search API calls reject redirects to prevent forwarding
 their API key to another destination. Normal TLS certificate validation remains
 enabled. The manual Exa evaluation is opt-in and uses only fixed public queries;
 it sends the documented Dynamic Highlights beta header only in that experiment.
+Evaluation results also mask the configured key before context or excerpt cuts.
 
 The `web` namespace and read-only/idempotent/open-world annotations are advisory.
 They do not approve provider spending, bypass tool hooks, or make an inactive

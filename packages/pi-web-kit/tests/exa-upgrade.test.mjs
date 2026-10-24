@@ -243,6 +243,21 @@ test("manual evaluation separates beta requests, bounds results and never retrie
   assert.doesNotMatch(JSON.stringify(rows), /synthetic-key|private failure/);
 });
 
+test("manual evaluation masks credentials before a provider over-return splits them at the context boundary", async t => {
+  t.mock.method(globalThis, "fetch", async () => json({
+    results: Array.from({ length: 20 }, (_, i) => ({
+      url: `https://example.test/${i}`, highlights: ["x".repeat(394) + "synthetic-key tail"],
+    })),
+  }));
+  const rows = await evaluateExa("synthetic-key");
+  assert.equal(rows.length, 12);
+  assert.ok(rows.every(row => row.ok));
+  assert.ok(rows.filter(row => row.mode === "dynamic").every(row => row.sources.length === 20));
+  for (const row of rows) {
+    for (const source of row.sources) assert.doesNotMatch(source.excerpt, /synthe/, `${row.case}/${row.mode}`);
+  }
+});
+
 for (const withStatuses of [true, false]) {
   test(`registered fetch never reuses another URL's content after a partial failure (statuses=${withStatuses})`, async t => {
     const h = harness(t);

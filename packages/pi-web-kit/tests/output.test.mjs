@@ -110,6 +110,8 @@ test("code search bounds large source metadata without fabricating shortened URL
   assert.equal(result.omittedResultCount + result.resultCount, input.resultCount);
   assert.equal(result.omittedContextCharacters + result.contextCharacters, input.contextCharacters);
   assert.equal(result.resultCount, result.results.length);
+  assert.ok(result.contextCharacters > 0, "retain useful evidence after dropping oversized source metadata");
+  assert.ok(result.results.every(source => source.content.length > 0));
   for (const source of result.results) assert.ok(input.results.some(r => r.url === source.url));
 });
 

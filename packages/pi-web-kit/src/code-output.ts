@@ -56,20 +56,20 @@ export function boundCodeResult(value: ExaCodeResult): ExaCodeResult | { truncat
   const fits = (data: unknown) => Buffer.byteLength(JSON.stringify(data)) <= MAX_OUTPUT_BYTES;
   const full = candidate(Math.max(0, ...sources.map(r => r.content?.length ?? 0)));
   if (fits(full)) return full;
-  let best = candidate(0);
-  let low = 0;
-  let high = Math.max(0, ...sources.map(r => r.content?.length ?? 0));
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2);
-    const current = candidate(middle);
-    if (fits(current)) { best = current; low = middle + 1; }
-    else high = middle - 1;
-  }
-  if (fits(best)) return best;
   // Metadata can dominate. Drop tail sources rather than fabricate shortened URLs.
-  for (let count = sources.length - 1; count >= 0; count--) {
-    const current = candidate(0, count);
-    if (fits(current)) return current;
+  // Refill the remaining byte budget with evidence once the retained metadata fits.
+  for (let count = sources.length; count >= 0; count--) {
+    let best = candidate(0, count);
+    if (!fits(best)) continue;
+    let low = 0;
+    let high = Math.max(0, ...sources.slice(0, count).map(r => r.content?.length ?? 0));
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const current = candidate(middle, count);
+      if (fits(current)) { best = current; low = middle + 1; }
+      else high = middle - 1;
+    }
+    return best;
   }
   return { truncated: true, message: "Code search metadata exceeded 50KB; refine the request." };
 }
