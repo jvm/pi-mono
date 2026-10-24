@@ -137,5 +137,6 @@ function providerScope(provider: FetchProviderName, config?: Partial<WebKitConfi
   const keys = config?.apiKeys;
   const key = provider === "exa" ? JSON.stringify([keys?.exa, keys?.tinyfish, keys?.firecrawl])
     : provider === "tinyfish" ? keys?.tinyfish : provider === "firecrawl" ? keys?.firecrawl : undefined;
+  // codeql[js/insufficient-password-hash] Ephemeral keyed cache identity, never a stored password verifier; the random HMAC key stays in this process.
   return key ? `key:${createHmac("sha256", cacheScopeKey).update(key).digest("hex")}` : "default";
 }
