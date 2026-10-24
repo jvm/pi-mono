@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-24
+
 ### Added
 
 - Expose bounded, validated TinyFish link and image-link arrays with omission counts, including on cached page reads.
