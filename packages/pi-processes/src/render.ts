@@ -18,7 +18,8 @@ export function displayText(text: string): string {
 export function statusText(data: ProcessResult): string {
   return data.status === "running" ? "running"
     : data.timed_out ? "timed out"
-    : data.signal ? `stopped · ${data.signal}`
+    : data.stopped ? "stopped"
+    : data.signal ? `failed · ${data.signal}`
     : data.exit_code === 0 ? "done" : `exit ${data.exit_code ?? "unknown"}`;
 }
 
@@ -41,7 +42,7 @@ export class ProcessOutput implements Component {
 export function renderCall(input: object, theme: Theme): Component {
   const args = input as Record<string, unknown>;
   const title = typeof args.title === "string" ? args.title
-    : typeof args.cmd === "string" ? args.cmd
+    : typeof args.command === "string" ? args.command
     : args.chars ? "Send approved input" : args.session_ids ? "Wait for processes" : "Read process output";
   const id = typeof args.session_id === "string" ? ` · ${args.session_id.slice(0, 8)}` : "";
   return {

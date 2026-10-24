@@ -279,13 +279,28 @@ export default function piDcg(
       return undefined;
     }
     if (!isToolCallEventType("bash", event)) return undefined;
-    const command = event.input.command;
-    const outcome = await guard(command, ctx.cwd, ctx);
+    const input = event.input as { command: string; workdir?: string } & Record<string, unknown>;
+    const snapshot = { ...input };
+    const command = input.command;
+    if (input.workdir !== undefined && typeof input.workdir !== "string") {
+      return { block: true, reason: "dcg received invalid bash workdir" };
+    }
+    const cwd = input.workdir === undefined ? ctx.cwd : await realpath(resolve(ctx.cwd, input.workdir));
+    if (input.workdir !== undefined && !(await stat(cwd)).isDirectory()) {
+      return { block: true, reason: "Bash workdir is not a directory" };
+    }
+    const outcome = await guard(command, cwd, ctx);
     if (outcome.block) return { block: true, reason: outcome.reason };
+    if (event.input !== input || Object.keys(input).length !== Object.keys(snapshot).length ||
+      Object.keys(snapshot).some(key => input[key] !== snapshot[key])) {
+      return { block: true, reason: "dcg blocked bash arguments changed during the safety check" };
+    }
+    if (input.workdir !== undefined) input.workdir = cwd;
 
     // Seal against later mutations. Pi 1.1.0 cannot reconcile an input reference
     // replaced by an earlier handler; see the documented upstream limitation.
     sealCheckedBashCommand(event, command);
+    Object.freeze(input);
     return undefined;
   });
 

@@ -8,9 +8,9 @@ import piProcesses from "../extensions/index.ts";
 import { ProcessRuntime } from "../src/runtime.ts";
 import { ProcessWidget, WIDGET_KEY } from "../src/process-widget.ts";
 import { commandPreview } from "../src/display-text.ts";
-import { fixture, textOf } from "../../pi-dcg/tests/session-fixture.mjs";
+import { fixture, textOf } from "./process-fixture.mjs";
 
-const dataOf = result => result.structuredContent ?? JSON.parse(textOf(result));
+const dataOf = result => result.structuredContent ?? result.details ?? JSON.parse(textOf(result));
 async function eventually(check) {
   for (let i = 0; i < 100; i++) {
     if (check()) return;
@@ -57,11 +57,11 @@ for (const [mode, Engine] of [["regular", TuiMainScreen], ["fullscreen", TuiAltS
     });
     tui.start();
     try {
-      await h.run("exec_command", { cmd: "printf foreground" });
+      await h.run("bash", { command: "printf foreground", mode: "foreground" });
       assert.ok(!widgets.has(WIDGET_KEY), "foreground calls must not flash a background widget");
-      const first = dataOf(await h.run("exec_command", { cmd: "sleep 30", yield_time_ms: 0 }));
-      const second = dataOf(await h.run("exec_command", {
-        cmd: "printf 'unread-output\\n'; read -r answer", tty: true, yield_time_ms: 0,
+      const first = dataOf(await h.run("bash", { command: "sleep 30", mode: "service" }));
+      const second = dataOf(await h.run("bash", {
+        command: "printf 'unread-output\\n'; read -r answer", tty: true, mode: "service",
       }));
       const widget = widgets.get(WIDGET_KEY);
       assert.ok(widget, "the extension must wire runtime events to setWidget");
@@ -101,10 +101,10 @@ for (const [mode, Engine] of [["regular", TuiMainScreen], ["fullscreen", TuiAltS
       await delay(1100);
       assert.equal(redraws, quiet, "the last exit stops the widget clock");
 
-      await h.run("exec_command", { cmd: "sleep 0.3", yield_time_ms: 0 });
+      await h.run("bash", { command: "sleep 0.3", mode: "service" });
       assert.ok(widgets.has(WIDGET_KEY));
       await eventually(() => !widgets.has(WIDGET_KEY)); // no polling or extra model turn
-      await h.run("exec_command", { cmd: "sleep 30", yield_time_ms: 0 });
+      await h.run("bash", { command: "sleep 30", mode: "service" });
       await h.session.reload();
       assert.ok(!widgets.has(WIDGET_KEY));
       assert.equal(widgets.get("neighbor"), neighbor);
@@ -126,8 +126,8 @@ test("PTY background remains visible after rejecting input; approval still contr
       widget = content?.({ requestRender() {} });
     },
   } });
-  const job = dataOf(await h.run("exec_command", {
-    cmd: "read -r answer; printf 'received:%s' \"$answer\"", tty: true, yield_time_ms: 0,
+  const job = dataOf(await h.run("bash", {
+    command: "read -r answer; printf 'received:%s' \"$answer\"", tty: true, mode: "service",
   }));
   assert.ok(widget);
   assert.equal((await h.run("write_stdin", { session_id: job.session_id, chars: "rejected\n" })).isError, true);
@@ -145,7 +145,7 @@ for (const uiMode of ["print", "json", "rpc"]) {
     const h = await fixture(t, { uiMode, after: [piProcesses], uiContext: {
       setWidget() { calls++; },
     } });
-    const job = dataOf(await h.run("exec_command", { cmd: "sleep 30", yield_time_ms: 0 }));
+    const job = dataOf(await h.run("bash", { command: "sleep 30", mode: "service" }));
     await h.run("process_kill", { session_id: job.session_id });
     await h.session.reload();
     assert.equal(calls, 0);
@@ -192,7 +192,7 @@ test("widget teardown failure does not prevent session-owned process cleanup", a
       widget = content({ requestRender() {} });
     },
   } });
-  const job = dataOf(await h.run("exec_command", { cmd: "sleep 30", yield_time_ms: 0 }));
+  const job = dataOf(await h.run("bash", { command: "sleep 30", mode: "service" }));
   assert.ok(widget);
   await h.session.reload();
   assert.equal((await h.run("write_stdin", { session_id: job.session_id, yield_time_ms: 0 })).isError, true);

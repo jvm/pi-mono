@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- One live `/processes` manager with attention-first ordering, direct output navigation, line/page/segment scrolling, follow/pause, mode labels, inline confirmations, and keyboard help.
+- Explicit per-process/all-failure acknowledgment, distinct intentional-stop status, and safe single/bulk completed-output cleanup. Human attention is independent of model delivery and inspection.
+- Protect unacknowledged failures and active viewers from eviction. UI viewers pin retention without delaying background result delivery, and release timers/subscriptions/pins on close.
+
+### Changed
+
+- Extend `bash` with explicit foreground/background/service modes using `command` and `timeout` in seconds. Calls without a mode retain the built-in executor, output, truncation, and error behavior.
+- Remove `exec_command` without a compatibility alias. Migrate scripts to `bash` with `command`, `timeout` in seconds, and explicit modes instead of legacy startup/completion options.
+- Route managed bash through the existing process UI, completion coordinator, and per-write PTY approval. Pair with the matching DCG release for resolved-working-directory checks and full startup argument sealing.
+
 ## [0.3.0] - 2026-10-13
 
 ### Added

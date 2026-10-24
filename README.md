@@ -38,7 +38,7 @@ Each package installs independently. Pick the capability you need, then follow i
 | Need | Package | What it adds |
 | --- | --- | --- |
 | Stop destructive shell commands | [pi-dcg](./packages/pi-dcg) | Destructive Command Guard checks before agent or user shell commands execute. |
-| Run commands without polling loops | [pi-processes](./packages/pi-processes) | Foreground/background/service execution, task-scoped results, compact output and process controls, with approved PTY input. |
+| Run commands without polling loops | [pi-processes](./packages/pi-processes) | Extend `bash` with background execution, task-scoped results, a live process manager, explicit attention/cleanup controls, and approved PTY input. |
 | Keep a Mac awake while Pi works | [pi-insomnia](./packages/pi-insomnia) | Automatic macOS idle-sleep prevention for active agent runs. |
 
 ## Development

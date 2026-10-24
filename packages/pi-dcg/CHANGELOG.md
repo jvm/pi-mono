@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Changed
+
+- Check managed `bash` in its canonical working directory and freeze all approved bash arguments, including execution mode. Block argument changes during asynchronous policy checks.
+
 ## [0.4.1] - 2026-10-13
 
 ### Fixed
