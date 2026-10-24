@@ -218,7 +218,7 @@ test("web_search returns grouped multi-query output with bounded details", async
     return new Response(JSON.stringify({ results: [{ title: body.query, url: `https://example.com/${body.query}` }] }), { status: 200, headers: { "content-type": "application/json" } });
   };
   try {
-    const out = await searchTool.execute("id", { queries: ["one", "two"], numResults: 101 }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")), isProjectTrusted: () => true });
+    const out = await searchTool.execute("id", { queries: ["one", "two"], purpose: "Find sources", numResults: 101 }, undefined, undefined, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")), isProjectTrusted: () => true });
     const parsed = JSON.parse(out.content[0].text);
     assert.deepEqual(parsed.queries.map((q) => q.query), ["one", "two"]);
     assert.equal(parsed.queries[0].requestedResultLimit, 101);

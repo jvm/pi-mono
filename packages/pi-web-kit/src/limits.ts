@@ -7,6 +7,21 @@ export const MAX_NUM_RESULTS = 20;
 export const DEFAULT_NUM_RESULTS = 10;
 export const DEFAULT_SEARCH_CONTEXT_TOKENS = 8_192;
 export const MAX_SEARCH_CONTEXT_TOKENS = 10_000;
+export const MAX_OUTPUT_BYTES = 50_000;
+// Local context budget, not an upstream token target. Serialized bytes remain authoritative.
+export const MAX_CODE_CONTEXT_TOKENS = 8_192;
+export const DEFAULT_CODE_RESULTS = 5;
+export const MAX_CODE_RESULTS = 10;
+export const CODE_SEARCH_CRAWL_TIMEOUT_MS = 15_000;
+export const CODE_SEARCH_TIMEOUT_MS = 45_000;
+export const MAX_EXA_NOTICES = 8;
+export const MAX_EXA_MESSAGE_CHARACTERS = 512;
+export const MAX_EXA_AGE_HOURS = 720;
+export const MAX_EXA_QUERY_CHARACTERS = 2_000;
+export const MAX_EXA_HINT_CHARACTERS = 64;
+export const MAX_EXA_DOMAINS = 1_200;
+export const MAX_EXA_DATE_CHARACTERS = 128;
+export const EXA_DATE_PATTERN = "^\\d{4}-\\d{2}-\\d{2}(?:T.*)?$";
 export const SEARCH_RESULT_LIMITS: Readonly<Record<SearchProviderName, number | undefined>> = {
   exa: 100,
   brave: 50,
@@ -28,7 +43,7 @@ export function capSearchResultLimit(provider: SearchProviderName, requested: nu
   return Math.min(requested, SEARCH_RESULT_LIMITS[provider] ?? requested);
 }
 
-export function applySearchContextBudget(results: Array<{ content?: string; [key: string]: unknown }>, maxCharacters: number) {
+export function applySearchContextBudget<T extends { content?: string }>(results: T[], maxCharacters: number) {
   let remaining = maxCharacters;
   let remainingContentResults = results.filter((result) => typeof result.content === "string").length;
   let contextCharacters = 0;

@@ -11,7 +11,7 @@ Give [Pi](https://pi.dev) current web knowledge, authoritative library docs, and
 - **Find proven implementation patterns** — search practical usage, setup, migrations, and error context across real code.
 - **Spend context wisely** — compact search results, chunked page reads, bounded output, and fetch caching keep research useful without overwhelming the model.
 - **Compose research in scripts** — typed results let codemode filter and join data without parsing model-facing text.
-- **Choose your providers** — mix Exa, TinyFish, Brave, Firecrawl, markdown.new, Context7, and Exa Code based on coverage, cost, and credentials.
+- **Choose your providers** — mix Exa, TinyFish, Brave, Firecrawl, markdown.new, and Context7 based on coverage, cost, and credentials.
 
 ## Installation
 
@@ -88,13 +88,13 @@ Provider-native efficiencies are used as follows:
 
 | Service | Efficient path |
 |---|---|
-| Exa API | Keep included highlights; request bounded text in the same search only when requested; batch `/contents` fetches with freshness controls. |
+| Exa API | Use highlights-first `/search`, send task intent as `objective`, and batch `/contents` fetches when full pages are needed. Auto remains the default; Lite is opt-in. |
 | TinyFish | Paginate only as needed; use dedicated filters; batch only enough top-result fetches to fill requested context; pass TTL and intent. |
 | Brave | Return pre-extracted LLM Context in one search call with native URL, token, snippet, threshold, and Goggles controls. |
 | Firecrawl | Return search metadata by default; use scrape-on-search only when requested; pass cache/main-content options. |
 | markdown.new | Keep `method: auto` so native Markdown falls back to AI and browser rendering only as needed; keep images opt-in. |
 | Context7 | Support `fast` mode to skip reranking and reduce latency. |
-| Exa Code | Send the requested/dynamic context token target directly to Exa Code Context. |
+| Code examples | Use Exa `/search` with fixed Auto, live content, and bounded structured excerpts. Never Lite, synthesis, or Agent. |
 
 ## Configuration
 
@@ -162,14 +162,74 @@ Searches with the active search provider and returns compact results grouped by 
 | `query` | string | Single search query. |
 | `queries` | string[] | Multiple related search queries. Max 5 after de-duplication. |
 | `numResults` | integer | Desired results per query. Default: 10. Values above the active provider's limit are capped rather than rejected. |
-| `contextTokens` | integer | Desired extracted context across the result set. Omitted native context uses an 8,192-token output budget; an explicit value can enable extraction. Any positive value; capped at 10,000. |
-| `purpose` | string | Optional task/use-case hint for providers that support separate intent. |
+| `contextTokens` | integer | Desired context across the result set. Default: 8,192; capped at 10,000. For Exa this only bounds returned highlights, not a request for page text. Other providers can enable extraction when explicit. |
+| `purpose` | string | Required for Exa, optional for other search providers; up to 2,000 characters. Exa receives it as top-level `objective` to guide ranking and evidence selection. This does not select Deep Search or Agent. |
 
-`numResults` controls source breadth. `contextTokens` controls grounding depth. The tool automatically keeps native/included Exa highlights and Brave LLM Context. Explicit `contextTokens` enables extra extraction for Exa, TinyFish, and Firecrawl; this can add provider calls or provider cost. Search results keep a compact `snippet` plus ranked `content` and `contentFormat`, with one shared context budget and the existing 50KB tool-output limit.
+`numResults` controls source breadth. `contextTokens` controls grounding depth. The tool automatically keeps native/included Exa highlights and Brave LLM Context. Explicit `contextTokens` enables extra extraction for TinyFish and Firecrawl; this can add provider calls or provider cost. Exa always requests highlights and prefers them over text or summaries. Use `web_fetch` for complete pages, exact passages, or missing context. Search results keep a compact `snippet` plus ranked `content` and `contentFormat`, with one shared context budget and the existing 50KB tool-output limit.
 
 Provider caps are Exa 100, Brave 50, and Firecrawl 100. TinyFish is paginated internally through its service maximum of page 10 and may make up to 11 search requests for one query. Search output reports requested, effective, returned, and omitted result/context counts. Brave `maxUrls` remains as a deprecated alias for `numResults`.
 
 Other provider-specific parameters are exposed only for the configured provider. These include Exa date/domain filters; TinyFish domain, date, geography, language, and publication filters; Brave locale, freshness, spellcheck, Goggles, and LLM Context controls; and Firecrawl scrape/search options.
+
+#### Exa modes, filters, and notices
+
+- `type: "auto"` is the default. `type: "lite"` is an explicit lower-cost option
+  that serves content from Exa's regularly refreshed index without query-time
+  page fetching. When content is requested, Lite can exclude sources with no
+  cached content. Use Auto when coverage or live freshness matters.
+  Lite remains available for general `web_search`, but is never available in
+  `code_search`.
+- Lite accepts the exposed domain/path, publication-date, category, result-count,
+  and purpose controls. Every `maxAgeHours` value, including `-1`, is rejected
+  locally with guidance to use Auto. Unsupported overrides are not silently
+  removed. Legacy search types remain accepted.
+- `startCrawlDate` and `endCrawlDate` are deprecated and rejected: Exa ignores
+  them. Publication dates describe a different constraint and are not substituted.
+  The `company` and `people` categories reject publication-date filters; `people`
+  also rejects `excludeDomains`.
+- Exa query strings, including each `queries` entry, are limited to 2,000
+  characters. `type` and `category` are limited to 64 characters. Each domain
+  filter accepts at most 1,200 entries of up to 2,048 characters each.
+  Publication-date strings are limited to 128 characters and must be ISO 8601
+  dates. Blank query, purpose, mode, category, and domain/path strings are
+  rejected. These local limits are declared in the tool schema.
+- Each query group can include `notices: [{ code, message, path? }]` that explain
+  changes to retrieval, such as relaxed query restrictions. At most 8 notices
+  with 512-character messages are returned; `omittedNoticeCount` reports omitted
+  entries. Notice codes are an open set. Arbitrary notice `details` are excluded.
+- Ordinary `highlights: true` is the stable baseline. Dynamic Highlights is not
+  enabled automatically: the announcement and current API guide disagree about
+  its GA/beta status. The manual evaluation below tests the documented beta
+  request separately; no beta header is sent by the production provider.
+
+Exa `/search` calls emit best-effort
+`pi-web-kit:exa-diagnostics` events through `pi.events`, outside model output.
+Consumers can subscribe to capture request IDs, duration in milliseconds,
+provider `searchTime` and `costDollars.total` when present, known search modes,
+warning codes/field paths, and controlled failure categories/HTTP status.
+Warning messages, queries, content, headers, and credentials are not included.
+At most 8 warning identifiers are emitted, with `omittedWarningCount` for the
+rest. No diagnostic file or remote log is created by this package.
+
+#### Purpose, Search, Deep Search, and Agent
+
+`purpose` is task intent, not a research-mode switch. Exa's Search best-practices
+guide recommends a required objective in model-facing tools, including ordinary
+Auto searches. Keep it short: name the implementation goal, exact dependency
+version, and useful sources. The tool sends it as `objective` in the same request.
+It does not send `outputSchema`, start Agent, or make a second API call.
+
+| Product/path | Work performed | Cost/latency distinction |
+|---|---|---|
+| Search Auto, `/search` | Ranked sources and excerpts; Pi performs downstream reasoning | Standard Search price; live crawling adds latency |
+| Deep Search, `/search` with a Deep type | Iterative research; optional synthesis via `outputSchema` | Higher published price and latency than Auto; explicitly selected in `web_search` only |
+| Exa Agent, `/agent/runs` | Asynchronous, multi-step research, enrichment, verification, and optional data partners | Fixed-effort or metered run pricing; not used by this package |
+
+Exa lists no separate `objective` charge. That is not a claim of zero processing
+overhead or identical latency. Auto is currently $7 per 1,000 requests up to 10
+results; Deep types have separate prices. See [pricing](https://exa.ai/docs/admin/pricing.md).
+JSON returned by this extension is a local structured tool contract, not Exa's
+paid synthesis feature.
 
 ### `web_fetch`
 
@@ -185,6 +245,20 @@ Fetches page content with the active fetch provider. Results are cached in memor
 | `maxAgeMs` | integer | Desired maximum local/provider-cached page age in milliseconds. `0` requests live content where supported. |
 
 Provider-specific parameters are exposed only for the configured provider. TinyFish supports `purpose`, `format`, links/images, selectors, per-URL timeout, and a seconds-based `ttl` alias. Exa supports the hours-based `maxAgeHours` alias. markdown.new supports `method` / `retainImages`. Firecrawl supports `format`, `waitFor`, `mobile`, structured `location`, and its existing `maxAge` alias. `refresh: true` also requests live content from Exa, TinyFish, and Firecrawl instead of only bypassing the local cache.
+
+For Exa, explicit `maxAgeHours` must be an integer from `-1` to `720`, in
+both search and fetch calls. Larger `maxAgeMs` values remain valid: their
+provider-side hour conversion is capped at 720, which requests content at least
+as fresh as the caller requires. Sub-hour values round down, possibly to zero.
+The original millisecond limit still governs the local cache. Explicit invalid
+hour values are rejected even when `refresh: true` would otherwise override
+them.
+
+Exa Contents responses are matched by requested document IDs before canonical
+URLs. Per-URL error statuses trigger fallback retrieval for only the failed or
+missing pages; they cannot borrow another URL's result or cache it under the
+failed URL. Failed pages are not cached. Identity-less legacy redirect results
+use positional matching only for a complete batch or a single unambiguous pair.
 
 ### `library_search`
 
@@ -212,12 +286,62 @@ Fetches current docs and code snippets for a library. Provide `libraryId`, or pr
 
 ### `code_search`
 
-Finds practical code examples, implementation context, setup snippets, migrations, usage patterns, and error-message research.
+Finds practical code examples, implementation context, setup snippets, migrations,
+usage patterns, and error-message research through Exa Search Auto. The endpoint
+is `/search`, not the undocumented legacy `/context`.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `query` | string | Code-context query. |
-| `tokensNum` | `"dynamic"` or integer | Output token target. Integer range: 50-100000. Default: `"dynamic"`. |
+| `query` | string | Required, up to 2,000 characters. Include language, exact dependency version, and operation or error. |
+| `purpose` | string | Required nonblank task intent, up to 2,000 characters; sent as Search `objective`. |
+| `numResults` | integer | Source breadth, 1–10. Default: 5. The ceiling avoids result-count surcharges. |
+| `contextTokens` | integer | Local excerpt budget, 1–8,192. Default: 8,192. This is an approximate character-based budget, not an upstream token or synthesis request. |
+| `includeDomains`, `excludeDomains` | string[] | Optional hard domain/path constraints; at most 1,200 entries of up to 2,048 characters each. Prefer soft source preferences in `purpose`. |
+
+Code search always sends:
+
+```json
+{
+  "type": "auto",
+  "contents": {
+    "highlights": true,
+    "maxAgeHours": 0,
+    "livecrawlTimeout": 15000
+  }
+}
+```
+
+There is no Lite, legacy fast/instant, Deep, cached-only, historical snapshot,
+beta, or Agent override. No summary, `outputSchema`, or synthesized answer is
+requested. It uses the Exa key regardless of the providers selected for general
+web search and fetch. Search responses are not locally cached.
+
+`maxAgeHours: 0` requests freshly fetched page content under Exa's documented
+contract. It does **not** guarantee that every newly published page is indexed,
+that a source matches the project's version, or that the provider's freshness
+can be independently attested: Search does not return a per-page verified crawl
+timestamp. `publishedDate` is an estimated publication date, not proof of a fresh
+crawl. No publication-date filter is imposed on code search, because current
+evergreen references can have old publication dates.
+
+Only highlight evidence is returned. Metadata-only results and responses with
+only text/summary fallbacks are omitted and counted in `omittedNoContentCount`;
+the tool never substitutes cached-only retrieval when crawling fails. Errors
+surface without automatic retry or endpoint/mode fallback. The HTTP deadline is
+45 seconds, including JSON body consumption; the provider's individual live
+crawl timeout is 15 seconds.
+
+Results preserve complete source URLs, titles, excerpts, and publication dates
+when present, with exact result/context omission accounting within the
+50,000-byte JSON limit. Character counts use JavaScript UTF-16 string length;
+prefixes do not split surrogate pairs. If evidence is incomplete, narrow the
+query or use `web_fetch` with `refresh: true` on a cited URL. Excerpts are not
+guaranteed to contain complete compilable functions.
+
+**Breaking migration:** provide `purpose` for both Exa search tools, replace
+`tokensNum`/`"dynamic"` with `contextTokens`, and read `results[].content` instead
+of the old combined `response`. Legacy response/token metadata and aliases are
+removed rather than silently translated.
 
 ## Cache and limits
 
@@ -232,6 +356,9 @@ Finds practical code examples, implementation context, setup snippets, migration
 | Max queries per call | 5 |
 | Provider `numResults` caps | Exa 100; Brave 50; Firecrawl 100 |
 | Search context budget | 10,000 tokens |
+| Code-search local context budget | 8,192 approximate tokens |
+| Code-search result limit | 10 (default 5) |
+| Serialized tool output | 50,000 bytes |
 | Max URL length | 2048 characters |
 
 Cache keys include the provider, canonical URL, fetch-affecting parameters, relevant provider defaults, and an opaque SHA-256 API-key/account scope. Internal cache keys are never returned in tool output. `refresh: true` bypasses and replaces the cached entry.
@@ -246,11 +373,11 @@ script API.
 
 | Tool | Script result |
 | --- | --- |
-| `web_search` | `{ provider, queries: [{ query, requestedResultLimit, effectiveResultLimit, requestedContextTokens?, effectiveContextTokens, contextCharacters, omittedContextCharacters?, resultCount, omittedResultCount?, results }] }`. Each result has `url` and optional `title`, `snippet`, `content`, `contentFormat`, `siteName`, `position`. |
+| `web_search` | `{ provider, queries: [{ query, requestedResultLimit, effectiveResultLimit, requestedContextTokens?, effectiveContextTokens, contextCharacters, omittedContextCharacters?, resultCount, omittedResultCount?, notices?, omittedNoticeCount?, results }] }`. Each result has `url` and optional `title`, `snippet`, `content`, `contentFormat`, `siteName`, `publishedDate`, `position`. |
 | `web_fetch` | `{ provider, results }`. Each item is either `{ url, error }` or `{ url, fetchedUrl, title?, content, format, cached, refreshed, range }`. `range` has `offset`, `limit`, `returned`, `total`, `truncated`, `hasPrevious`, `hasNext`, and optional `nextOffset`. |
 | `library_search` | `{ provider: "context7", libraryName, query, searchFilterApplied?, results }`. Each candidate has `id`; title, description, branch, dates, state, scores, counts, stars and versions are optional. |
 | `library_docs` | `{ provider: "context7", libraryId, query, codeSnippets, infoSnippets }`. Code snippets expose optional title/description/language/ID/page/source/token fields and `codeList: [{ language, code }]`; info snippets require `content` with optional page/breadcrumb/token fields. |
-| `code_search` | `{ provider: "exa", query, response, resultsCount?, searchTime?, outputTokens?, requestId? }`. Provider token counts are informational, not a second Pi usage report. |
+| `code_search` | `{ provider: "exa", query, searchType: "auto", maxAgeHours: 0, requestedResultLimit, effectiveResultLimit, requestedContextTokens?, effectiveContextTokens, contextCharacters, omittedContextCharacters?, resultCount, omittedResultCount?, omittedNoContentCount?, notices?, omittedNoticeCount?, results }`. Sources have the same fields as web search. Freshness fields describe the request policy, not independent freshness verification. |
 
 Every result also allows the top-level fallback `{ truncated: true, message }`
 when metadata alone cannot fit. Check this before reading ordinary fields.
@@ -260,7 +387,7 @@ Missing/invalid optional provider fields are omitted. Invalid required fields
 fail the call rather than yielding a guessed success object.
 
 ```js
-const search = await tools.web_search({ query: "Pi extension API", numResults: 3 });
+const search = await tools.web_search({ query: "Pi extension API", purpose: "Implement a tool with the installed Pi version; prefer official extension docs", numResults: 3 });
 if ("truncated" in search) throw new Error(search.message);
 const urls = search.queries.flatMap(q => q.results.map(r => r.url));
 if (urls.length) {
@@ -347,6 +474,45 @@ npm test
 npm audit --omit=dev
 npm run pack:dry-run
 ```
+
+### Manual Exa comparison and smoke test
+
+From the monorepo root, with `EXA_API_KEY` in the environment:
+
+```bash
+node --import tsx packages/pi-web-kit/tests/exa-evaluation.mjs --live
+```
+
+This opt-in, paid run sends 12 requests: three fixed public coding queries
+(Node.js streams, Pydantic v2 migration, React 19 actions) through production
+fresh-only code search, general Auto highlights, general Lite highlights, and
+Auto Dynamic Highlights with the documented
+`Exa-Beta: dynamic-highlights-2026-08-28` header. It makes no retries or follow-up
+fetches. Lite and Dynamic are comparison paths for general web search, never
+code-search configuration options. All paths request 5 results with an
+8,000-character local search-context budget, followed by the same public output
+projection and byte limiter used by the tools.
+
+The JSON output includes latency, reported cost when available, raw/returned
+character counts, serialized bytes, and source excerpts for human inspection.
+`approximateTokens` is characters divided by four, not a tokenizer measurement.
+Review version/operation match, usable code, citations, and whether a follow-up
+fetch is needed. This is a small retrieval smoke test, not a downstream
+answer-quality benchmark or proof that a returned page matches a dependency
+version. The earlier legacy-Context comparison did not test this fresh-only
+policy and is not a release gate for migration away from that API.
+
+The deterministic tests exercise all 16 general search/fetch provider
+combinations, every documented general search mode with freshness controls,
+strict code-search override rejection, source/budget boundaries, stale-text
+poisoning, credential masking, notices, HTTP failures, cancellation, and a stalled
+response body after headers. Root contract tests exercise real Pi direct and
+codemode dispatch, including rejection before provider access.
+
+Contract references: [Search](https://exa.ai/docs/reference/search),
+[Highlights](https://exa.ai/docs/search/highlights.md), and
+[Code & Docs](https://exa.ai/docs/search/data/code.md). The live OpenAPI is
+linked from those pages; check it again before changing beta defaults.
 
 This package is source-distributed. Pi loads the TypeScript extension files directly via its extension loader.
 

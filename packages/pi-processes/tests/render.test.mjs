@@ -7,7 +7,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { ProcessOutput, renderCall, renderResult } from "../src/render.ts";
 import piProcesses from "../extensions/index.ts";
 import { ProcessPanel } from "../src/process-panel.ts";
-import { fixture, textOf } from "../../pi-dcg/tests/session-fixture.mjs";
+import { deferred, fixture, textOf } from "../../pi-dcg/tests/session-fixture.mjs";
 
 const theme = { fg: (_color, value) => value };
 const output = Array.from({ length: 200 }, (_, i) => `line ${i} ${"界".repeat(100)}`).join("\n");
@@ -125,7 +125,7 @@ test("real /processes command opens local output without a provider call or cons
   assert.deepEqual(h.errors, []);
 });
 
-test("background completion creates footer feedback, not permanent UI notification rows", async t => {
+test("background completion creates footer feedback, not permanent UI notification rows", { timeout: 10_000 }, async t => {
   const statuses = new Map();
   const h = await fixture(t, { after: [piProcesses], uiMode: "tui", uiContext: {
     setStatus(key, value) { statuses.set(key, value); },
@@ -136,11 +136,24 @@ test("background completion creates footer feedback, not permanent UI notificati
       component.handleInput("\x1b");
     },
   } });
-  await h.run("exec_command", { cmd: "sleep 0.1; printf private-output; exit 7", mode: "background", title: "Failed test" });
-  await new Promise(resolve => setTimeout(resolve, 300));
+  const delivered = deferred();
+  const unsubscribe = h.session.subscribe(event => {
+    if (event.type === "message_end" && event.message.customType === "pi-processes-completed") {
+      delivered.resolve(event.message);
+    }
+  });
+  t.after(unsubscribe);
+  // Gate the child until the initial call settles, then await actual delivery
+  // rather than racing the process exit and the idle completion timer.
+  await h.run("exec_command", {
+    cmd: "while ! test -f footer-ready; do sleep 0.02; done; printf private-output; exit 7",
+    mode: "background", title: "Failed test",
+  });
+  await writeFile(join(h.ctx.cwd, "footer-ready"), "");
+  const completion = await delivered.promise;
+  await h.session.waitForIdle();
   assert.match(statuses.get("pi-processes-results"), /need attention/);
   assert.equal(h.notifications.length, 0, "ui.notify would append permanent visible conversation rows");
-  const completion = h.session.messages.find(m => m.customType === "pi-processes-completed");
   assert.equal(completion.display, false);
   await h.session.prompt("/processes");
   assert.equal(statuses.get("pi-processes-results"), undefined);

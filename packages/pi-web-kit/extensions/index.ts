@@ -4,9 +4,11 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type, type TSchema } from "typebox";
 import { fetchCache, type CachedPage } from "../src/cache.js";
 import { resolveConfig } from "../src/config.js";
-import { applySearchContextBudget, capSearchResultLimit, DEFAULT_FETCH_LIMIT, DEFAULT_NUM_RESULTS, DEFAULT_SEARCH_CONTEXT_TOKENS, MAX_LIMIT, MAX_NUM_RESULTS, MAX_OFFSET, MAX_QUERY_COUNT, MAX_SEARCH_CONTEXT_TOKENS, MAX_URL_COUNT, MULTI_FETCH_LIMIT, safePrefix, TINYFISH_MAX_PAGE } from "../src/limits.js";
+import { applySearchContextBudget, capSearchResultLimit, DEFAULT_FETCH_LIMIT, DEFAULT_NUM_RESULTS, DEFAULT_SEARCH_CONTEXT_TOKENS, EXA_DATE_PATTERN, MAX_CODE_CONTEXT_TOKENS, MAX_CODE_RESULTS, MAX_EXA_AGE_HOURS, MAX_EXA_DATE_CHARACTERS, MAX_EXA_DOMAINS, MAX_EXA_HINT_CHARACTERS, MAX_EXA_QUERY_CHARACTERS, MAX_LIMIT, MAX_NUM_RESULTS, MAX_OFFSET, MAX_OUTPUT_BYTES, MAX_QUERY_COUNT, MAX_SEARCH_CONTEXT_TOKENS, MAX_URL_COUNT, MAX_URL_LENGTH, MULTI_FETCH_LIMIT, safePrefix, TINYFISH_MAX_PAGE } from "../src/limits.js";
+import { boundCodeResult } from "../src/code-output.js";
 import { createCodeSearchProvider, createContext7Provider, createFetchProvider, createSearchProvider } from "../src/providers/index.js";
 import { mapFetchResults } from "../src/providers/fallback.js";
+import { exaFetchMaxAgeHours } from "../src/providers/exa-contract.js";
 import type { FetchProviderName, SearchProviderName, WebFetchResult } from "../src/types.js";
 import { canonicalWebUrl, normalizeUrlInput } from "../src/urls.js";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
@@ -110,6 +112,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
         if (signal?.aborted) throw new Error("Web tool cancelled.");
         return jsonToolResult(result, WEB_OUTPUT_SCHEMAS[tool.name], secrets);
       } catch (error) {
+        if (signal?.aborted) throw new Error("Web tool cancelled.");
         throw new Error(redactText(error instanceof Error ? error.message : "Web tool failed.", secrets).slice(0, 1000));
       }
     },
@@ -146,7 +149,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
       const effectiveResultLimit = capSearchResultLimit(config.provider_search, requestedResultLimit);
       const requestedContextTokens = params.contextTokens == null ? undefined : parseInteger(params.contextTokens, 0, "contextTokens", 1);
       const effectiveContextTokens = Math.min(requestedContextTokens ?? DEFAULT_SEARCH_CONTEXT_TOKENS, MAX_SEARCH_CONTEXT_TOKENS);
-      const provider = createSearchProvider(config);
+      const provider = createSearchProvider(config, diagnostic => pi.events?.emit("pi-web-kit:exa-diagnostics", diagnostic));
       const grouped = [];
       const progress = createProgress("search", config.provider_search, queries);
       emitProgress(onUpdate, progress);
@@ -154,7 +157,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
         markProgressCurrent(progress, query);
         emitProgress(onUpdate, progress);
         const result = await provider.search({ ...params, query, numResults: effectiveResultLimit, contextTokens: requestedContextTokens == null ? undefined : effectiveContextTokens }, signal);
-        const bounded = applySearchContextBudget(result.results, effectiveContextTokens * 4);
+        const bounded = applySearchContextBudget(redactOutput(result.results, Object.values(config.apiKeys)), effectiveContextTokens * 4);
         grouped.push({
           query,
           requestedResultLimit,
@@ -165,6 +168,8 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
           ...(bounded.omittedContextCharacters ? { omittedContextCharacters: bounded.omittedContextCharacters } : {}),
           resultCount: bounded.results.length,
           results: bounded.results,
+          ...(result.notices ? { notices: result.notices } : {}),
+          ...(result.omittedNoticeCount ? { omittedNoticeCount: result.omittedNoticeCount } : {}),
         });
         markProgressDone(progress, query, `${bounded.results.length} results`);
         emitProgress(onUpdate, progress);
@@ -260,19 +265,19 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
     register({
       name: "code_search",
       label: "Code Search",
-      description: "Find practical code examples, usage patterns, setup snippets, migrations, and error context.",
-      promptSnippet: "Find real-world code examples, usage patterns, migrations, and error context.",
+      description: "Find practical code examples with Exa Auto and live page fetching. No Lite, cached-only, synthesis, or Agent mode.",
+      promptSnippet: "Find fresh, version-specific code examples and implementation guidance.",
       promptGuidelines: [
         "Use code_search for real-world code examples, usage patterns, setup snippets, migrations, and error context from open source.",
+        "Include the language, exact dependency version, and operation or error in query; state the task and source preferences in required purpose. A live fetch does not guarantee version relevance.",
+        "Code search always uses Auto with maxAgeHours: 0. Read structured results and omission counts. For complete code or missing context, use web_fetch with refresh: true on a cited URL; excerpts need not be complete compilable code.",
         ...(startupConfig.apiKeys.context7 ? ["Prefer library_docs for official API/reference documentation."] : []),
       ],
       parameters: buildCodeSearchSchema(),
       async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
         const params = rawParams as Record<string, any>;
-        const query = requiredString(params.query, "query");
-        const tokensNum = parseTokensNum(params.tokensNum);
-        const provider = createCodeSearchProvider(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)));
-        const result = await provider.searchCode({ query, tokensNum }, signal);
+        const provider = createCodeSearchProvider(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)), diagnostic => pi.events?.emit("pi-web-kit:exa-diagnostics", diagnostic));
+        const result = await provider.searchCode(params as unknown as import("../src/types.js").ExaCodeInput, signal);
         return result;
       },
     });
@@ -296,23 +301,27 @@ type FetchProgressEvent = { status: "current" | "done" | "error"; url: string; n
 const int = (description: string, min: number, max?: number) => Type.Integer({ description, minimum: min, ...(max == null ? {} : { maximum: max }) });
 
 export function buildSearchSchema(provider: SearchProviderName) {
+  const exaString = (maxLength: number) => ({ minLength: 1, maxLength, pattern: "\\S" });
+  const queryBounds = provider === "exa" ? exaString(MAX_EXA_QUERY_CHARACTERS) : {};
   const props: Record<string, any> = {
-    query: Type.Optional(Type.String({ description: "Single search query" })),
-    queries: Type.Optional(Type.Array(Type.String(), { description: `Multiple related search queries (max ${MAX_QUERY_COUNT})`, maxItems: MAX_QUERY_COUNT })),
+    query: Type.Optional(Type.String({ description: "Single search query", ...queryBounds })),
+    queries: Type.Optional(Type.Array(Type.String(queryBounds), { description: `Multiple related search queries (max ${MAX_QUERY_COUNT})`, maxItems: MAX_QUERY_COUNT })),
     numResults: Type.Optional(int("Desired results per query; capped by the active provider", 1)),
-    contextTokens: Type.Optional(int("Desired extracted context tokens; capped to the tool output budget and may enable provider extraction", 1)),
-    purpose: Type.Optional(Type.String({ description: "Optional task/use-case hint when supported by the provider", minLength: 1, maxLength: 2_000 })),
+    contextTokens: Type.Optional(int(provider === "exa" ? "Output context budget for highlights; does not request page text. Use web_fetch for full pages" : "Desired extracted context tokens; capped to the tool output budget and may enable provider extraction", 1)),
+    purpose: Type.Optional(Type.String({ description: provider === "exa" ? "Goal for this search turn; say which documents should rank first, which should be excluded, and what specific facts or figures to pull from them." : "Optional task/use-case hint when supported by the provider", minLength: 1, maxLength: 2_000, ...(provider === "exa" ? { pattern: "\\S" } : {}) })),
   };
   if (provider === "exa") Object.assign(props, {
-    includeDomains: Type.Optional(Type.Array(Type.String())),
-    excludeDomains: Type.Optional(Type.Array(Type.String())),
-    startPublishedDate: Type.Optional(Type.String()),
-    endPublishedDate: Type.Optional(Type.String()),
-    startCrawlDate: Type.Optional(Type.String()),
-    endCrawlDate: Type.Optional(Type.String()),
-    type: Type.Optional(Type.String()),
-    category: Type.Optional(Type.String()),
-    maxAgeHours: Type.Optional(int("Maximum Exa cached content age in hours; 0 forces live crawl, -1 disables live crawl", -1)),
+    purpose: Type.String({ minLength: 1, maxLength: 2_000, pattern: "\\S",
+      description: "Goal for this search turn; say which documents should rank first, which should be excluded, and what specific facts or figures to pull from them." }),
+    includeDomains: Type.Optional(Type.Array(Type.String(exaString(MAX_URL_LENGTH)), { maxItems: MAX_EXA_DOMAINS })),
+    excludeDomains: Type.Optional(Type.Array(Type.String(exaString(MAX_URL_LENGTH)), { maxItems: MAX_EXA_DOMAINS })),
+    startPublishedDate: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_EXA_DATE_CHARACTERS, pattern: EXA_DATE_PATTERN })),
+    endPublishedDate: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_EXA_DATE_CHARACTERS, pattern: EXA_DATE_PATTERN })),
+    startCrawlDate: Type.Optional(Type.String({ description: "Deprecated: Exa ignores crawl-date filters. Rejected locally; publication dates have different semantics." })),
+    endCrawlDate: Type.Optional(Type.String({ description: "Deprecated: Exa ignores crawl-date filters. Rejected locally; publication dates have different semantics." })),
+    type: Type.Optional(Type.String({ ...exaString(MAX_EXA_HINT_CHARACTERS), description: "Search mode: auto (default), lite (lower cost, cached pages only; no maxAgeHours), or deep. Legacy types remain accepted." })),
+    category: Type.Optional(Type.String(exaString(MAX_EXA_HINT_CHARACTERS))),
+    maxAgeHours: Type.Optional(int("Maximum Exa cached content age in hours; 0 forces live crawl, -1 disables live crawl. Not supported by lite, even -1", -1, MAX_EXA_AGE_HOURS)),
   });
   if (provider === "tinyfish") Object.assign(props, {
     page: Type.Optional(int("Deprecated starting result page", 0, TINYFISH_MAX_PAGE)),
@@ -351,7 +360,7 @@ export function buildFetchSchema(provider: FetchProviderName) {
     refresh: Type.Optional(Type.Boolean({ description: "Refetch even if cached" })),
     maxAgeMs: Type.Optional(int("Maximum local/provider-cached page age in milliseconds; 0 requests live content where supported", 0)),
   };
-  if (provider === "exa") Object.assign(props, { maxAgeHours: Type.Optional(int("Maximum Exa cached content age in hours; 0 forces live crawl, -1 disables live crawl", -1)) });
+  if (provider === "exa") Object.assign(props, { maxAgeHours: Type.Optional(int("Maximum Exa cached content age in hours; 0 forces live crawl, -1 disables live crawl", -1, MAX_EXA_AGE_HOURS)) });
   if (provider === "tinyfish") Object.assign(props, { format: Type.Optional(Type.Union([Type.Literal("markdown"), Type.Literal("html"), Type.Literal("json")])), links: Type.Optional(Type.Boolean()), imageLinks: Type.Optional(Type.Boolean()) });
   if (provider === "tinyfish") Object.assign(props, {
     purpose: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000 })),
@@ -392,8 +401,12 @@ export function buildLibraryDocsSchema() {
 
 export function buildCodeSearchSchema() {
   return Type.Object({
-    query: Type.String({ description: "Code-context query for examples, APIs, setup, migrations, or errors", minLength: 1, maxLength: 2000 }),
-    tokensNum: Type.Optional(Type.Union([Type.Literal("dynamic"), int("Target response tokens", 50, MAX_LIMIT)])),
+    query: Type.String({ description: "Coding query with language, exact dependency version, and operation or error", minLength: 1, maxLength: MAX_EXA_QUERY_CHARACTERS, pattern: "\\S" }),
+    purpose: Type.String({ description: "Goal for this search turn; say which documents should rank first, which should be excluded, and what specific facts or figures to pull from them.", minLength: 1, maxLength: 2_000, pattern: "\\S" }),
+    numResults: Type.Optional(int("Source breadth; default 5, maximum 10 to stay within the base search price", 1, MAX_CODE_RESULTS)),
+    contextTokens: Type.Optional(int("Local excerpt budget; default 8192. Does not request synthesis or full page text", 1, MAX_CODE_CONTEXT_TOKENS)),
+    includeDomains: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: MAX_URL_LENGTH, pattern: "\\S" }), { maxItems: MAX_EXA_DOMAINS })),
+    excludeDomains: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: MAX_URL_LENGTH, pattern: "\\S" }), { maxItems: MAX_EXA_DOMAINS })),
   }, { additionalProperties: false });
 }
 
@@ -418,6 +431,8 @@ function normalizeUrls(params: Record<string, any>): string[] {
 }
 
 export async function fetchWithCache(providerName: FetchProviderName, params: Record<string, any>, urls: string[], signal: AbortSignal | undefined, config: any, onProgress?: (event: FetchProgressEvent) => void) {
+  if (providerName === "exa") exaFetchMaxAgeHours(params);
+  const secrets = Object.values(config?.apiKeys ?? {}).filter((key): key is string => typeof key === "string");
   const provider = createFetchProvider(config);
   const offset = parseInteger(params.offset, 0, "offset", 0, MAX_OFFSET);
   const defaultLimit = urls.length > 1 ? MULTI_FETCH_LIMIT : DEFAULT_FETCH_LIMIT;
@@ -459,7 +474,7 @@ export async function fetchWithCache(providerName: FetchProviderName, params: Re
         requestedUrl,
         url: item.url || requestedUrl,
         title: item.title,
-        content: item.content ?? "",
+        content: redactText(item.content ?? "", secrets),
         format: item.format ?? "markdown",
         metadata: item.metadata,
         fetchedAt: Date.now(),
@@ -472,7 +487,9 @@ export async function fetchWithCache(providerName: FetchProviderName, params: Re
   return { provider: providerName, results: urls.map((url) => {
     const entry = pages.get(url);
     if (!entry?.page) return { url, error: entry?.error ?? "No content returned." };
-    return pageSlice(entry.page, offset, limit, entry.cached, entry.refreshed);
+    // Cover cache pages created before credential masking, too. Masking is
+    // length-preserving and must happen before arbitrary range boundaries.
+    return pageSlice({ ...entry.page, content: redactText(entry.page.content, secrets) }, offset, limit, entry.cached, entry.refreshed);
   }) };
 }
 
@@ -521,8 +538,6 @@ function runtimeConfig(pi: ExtensionAPI, cwd: string, projectTrusted: boolean) {
   }
 }
 
-const MAX_OUTPUT_BYTES = 50_000;
-
 export function jsonToolResult(result: unknown, schema?: TSchema, secrets: readonly string[] = []) {
   const publicResult = schema ? projectOutput(schema, result) : result;
   const bounded = boundStructuredResult(redactOutput(publicResult, secrets));
@@ -533,6 +548,10 @@ export function jsonToolResult(result: unknown, schema?: TSchema, secrets: reado
 }
 
 function boundStructuredResult(result: unknown): unknown {
+  if (result && typeof result === "object" && "searchType" in result && result.searchType === "auto"
+    && "results" in result && Array.isArray(result.results)) {
+    return boundCodeResult(result as import("../src/types.js").ExaCodeResult);
+  }
   if (Buffer.byteLength(JSON.stringify(result)) <= MAX_OUTPUT_BYTES) return result;
 
   if (isFetchResult(result)) {
@@ -707,12 +726,6 @@ function optionalString(value: unknown, name: string): string | undefined {
   return requiredString(value, name);
 }
 
-function parseTokensNum(value: unknown): "dynamic" | number {
-  if (value == null) return "dynamic";
-  if (value === "dynamic") return "dynamic";
-  return parseInteger(value, 0, "tokensNum", 50, MAX_LIMIT);
-}
-
 function fetchConfigDefaults(provider: FetchProviderName, config?: any): Record<string, unknown> {
   if (provider === "markdown_new") return { method: config?.markdownNew?.method ?? "auto", retainImages: config?.markdownNew?.retainImages ?? false };
   if (provider === "firecrawl") return { onlyMainContent: true, format: "markdown" };
@@ -737,7 +750,7 @@ function boundedDetails(value: any): unknown {
   if (value?.queries && Array.isArray(value.queries)) return searchDetails(value);
   if (value?.provider === "context7" && value?.results && Array.isArray(value.results)) return librarySearchDetails(value);
   if (value?.provider === "context7" && value?.codeSnippets && value?.infoSnippets) return libraryDocsDetails(value);
-  if (value?.provider === "exa" && typeof value.response === "string") return codeSearchDetails(value);
+  if (value?.provider === "exa" && value.searchType === "auto") return codeSearchDetails(value);
   if (value?.results && Array.isArray(value.results)) return fetchDetails(value);
   return value;
 }
@@ -786,9 +799,11 @@ function codeSearchDetails(value: any) {
   return {
     provider: value.provider,
     query: value.query,
-    resultsCount: value.resultsCount,
-    outputTokens: value.outputTokens,
-    requestId: value.requestId,
+    searchType: value.searchType, maxAgeHours: value.maxAgeHours,
+    resultCount: value.resultCount, omittedResultCount: value.omittedResultCount,
+    contextCharacters: value.contextCharacters, omittedContextCharacters: value.omittedContextCharacters,
+    omittedNoContentCount: value.omittedNoContentCount,
+    results: value.results.map((r: any) => ({ title: r.title, url: r.url, publishedDate: r.publishedDate })),
   };
 }
 

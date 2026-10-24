@@ -6,7 +6,7 @@ import { requireKey } from "../config.js";
 
 export class TinyFishProvider implements SearchProvider, FetchProvider {
   private key: string;
-  constructor(config: WebKitConfig) { this.key = requireKey(config, "tinyfish"); }
+  constructor(private config: WebKitConfig) { this.key = requireKey(config, "tinyfish"); }
 
   async search(input: SearchInput, signal?: AbortSignal) {
     const desired = input.numResults ?? DEFAULT_NUM_RESULTS;
@@ -49,7 +49,7 @@ export class TinyFishProvider implements SearchProvider, FetchProvider {
         results.push({
           title: r.title,
           url: resultUrl,
-          snippet: asSnippet(r.snippet ?? r.description ?? r.text),
+          snippet: asSnippet(r.snippet ?? r.description ?? r.text, [this.key, ...Object.values(this.config.apiKeys)]),
           siteName: r.siteName ?? r.source,
           position: results.length + 1,
         });

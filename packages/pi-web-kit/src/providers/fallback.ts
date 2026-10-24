@@ -20,7 +20,8 @@ export async function applyExaFetchFallbacks(
   primary: WebFetchResult,
   signal?: AbortSignal,
 ): Promise<WebFetchResult> {
-  const results = urls.map((url, i) => primary.results.find((item) => urlsMatch(item.url, url)) ?? primary.results[i] ?? { url, error: "No content returned by Exa." });
+  const mappedPrimary = mapFetchResults(urls, primary);
+  const results = urls.map(url => mappedPrimary.get(url) ?? { url, error: "No content returned by Exa." });
   let missing = urls.filter((url, i) => isMissingExaCrawlResult(results[i]));
   if (missing.length === 0) return { ...primary, results };
 
@@ -40,6 +41,7 @@ export async function applyExaFetchFallbacks(
       results[index] = {
         ...item,
         url,
+        requestedUrl: url,
         metadata: {
           ...(isRecord(item?.metadata) ? item.metadata : {}),
           fallbackProvider: name,
@@ -66,14 +68,15 @@ export function mapFetchResults(requested: string[], fetched: WebFetchResult): M
   const out = new Map<string, FetchPage>();
   const remaining = [...(fetched.results ?? [])];
   for (const url of requested) {
-    const index = remaining.findIndex((item) => urlsMatch(item.url, url));
+    const index = remaining.findIndex((item) => urlsMatch(item.requestedUrl ?? item.url, url));
     if (index >= 0) out.set(url, remaining.splice(index, 1)[0]);
   }
   // Providers may not echo the requested URL. Assign each unmatched result at
-  // most once, after exact canonical matches have consumed their results.
+  // most once, after exact matches. Never repurpose an explicitly bound result.
   for (const url of requested) {
-    if (out.has(url) || remaining.length === 0) continue;
-    out.set(url, remaining.shift()!);
+    if (out.has(url)) continue;
+    const index = remaining.findIndex(item => item.requestedUrl == null);
+    if (index >= 0) out.set(url, remaining.splice(index, 1)[0]);
   }
   return out;
 }

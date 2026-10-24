@@ -1,5 +1,6 @@
 import { DEFAULT_TIMEOUT_MS } from "./limits.js";
 import { normalizeUrlInput } from "./urls.js";
+import { redactText } from "./output.js";
 
 const MAX_CHARS = 50_000;
 const MAX_LINES = 2_000;
@@ -10,30 +11,38 @@ export function truncateText(text: string, maxChars = MAX_CHARS): string {
   return lineLimited.length > maxChars ? lineLimited.slice(0, maxChars) + "\n[truncated: size limit]" : lineLimited;
 }
 
-export async function fetchWithTimeout(url: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<Response> {
+async function withResponseTimeout<T>(url: string, init: RequestInit & { timeoutMs?: number },
+  consume: (res: Response) => Promise<T>): Promise<T> {
   const controller = new AbortController();
   const timeoutMs = init.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const timer = setTimeout(() => controller.abort(new Error(`Request timed out after ${timeoutMs}ms`)), timeoutMs);
   const signal = init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
   const { timeoutMs: _timeoutMs, ...rest } = init;
   try {
-    return await fetch(url, { ...rest, signal });
+    return await consume(await fetch(url, { ...rest, signal }));
   } finally {
     clearTimeout(timer);
   }
 }
 
-export async function requestJson<T>(url: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
-  const res = await fetchWithTimeout(url, init);
-  const text = await res.text();
-  if (!res.ok) throw new Error(`Provider request failed (HTTP ${res.status}).`);
-  if (!text) return undefined as T;
-  try { return JSON.parse(text) as T; }
-  catch { throw new Error("Provider returned invalid JSON."); }
+export function fetchWithTimeout(url: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<Response> {
+  return withResponseTimeout(url, init, async res => res);
 }
 
-export function asSnippet(value: unknown): string | undefined {
-  return asText(value)?.slice(0, 1000) || undefined;
+export async function requestJson<T>(url: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
+  // Keep the deadline active through body consumption, not just response headers.
+  return withResponseTimeout(url, init, async res => {
+    const text = await res.text();
+    if (!res.ok) throw new Error(`Provider request failed (HTTP ${res.status}).`);
+    if (!text) return undefined as T;
+    try { return JSON.parse(text) as T; }
+    catch { throw new Error("Provider returned invalid JSON."); }
+  });
+}
+
+export function asSnippet(value: unknown, secrets: readonly string[] = []): string | undefined {
+  const text = asText(value);
+  return text ? redactText(text, secrets).slice(0, 1000) : undefined;
 }
 
 export function asText(value: unknown): string | undefined {

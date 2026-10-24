@@ -128,6 +128,20 @@ test("mapFetchResults prioritizes exact matches then consumes unmatched results 
   assert.equal(new Set(mapped.values()).size, mapped.size);
 });
 
+test("mapFetchResults respects explicit requested identities and never repurposes them", () => {
+  const mapped = mapFetchResults(["https://a.test", "https://b.test", "https://missing.test"], {
+    provider: "exa",
+    results: [
+      { requestedUrl: "https://a.test", url: "https://b.test", content: "redirected A" },
+      { requestedUrl: "https://b.test", url: "https://b.test", content: "original B" },
+      { requestedUrl: "https://other.test", url: "https://missing.test", content: "unrequested" },
+    ],
+  });
+  assert.equal(mapped.get("https://a.test").content, "redirected A");
+  assert.equal(mapped.get("https://b.test").content, "original B");
+  assert.equal(mapped.has("https://missing.test"), false);
+});
+
 test("fetchWithCache preserves requested URL when provider returns canonical URL", async () => {
   const oldFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ results: [{ url: "https://example.com/page/", title: "T", text: "body" }] }), { status: 200 });

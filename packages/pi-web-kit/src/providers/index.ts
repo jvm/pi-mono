@@ -1,5 +1,5 @@
 import { validateFetchProvider, validateSearchProvider } from "../config.js";
-import type { FetchProvider, SearchProvider, WebKitConfig } from "../types.js";
+import type { ExaDiagnosticSink, FetchProvider, SearchProvider, WebKitConfig } from "../types.js";
 import { BraveProvider } from "./brave.js";
 import { Context7Provider } from "./context7.js";
 import { ExaProvider } from "./exa.js";
@@ -7,10 +7,10 @@ import { FirecrawlProvider } from "./firecrawl.js";
 import { MarkdownNewProvider } from "./markdown-new.js";
 import { TinyFishProvider } from "./tinyfish.js";
 
-export function createSearchProvider(config: WebKitConfig): SearchProvider {
+export function createSearchProvider(config: WebKitConfig, onDiagnostic?: ExaDiagnosticSink): SearchProvider {
   validateSearchProvider(config.provider_search);
   switch (config.provider_search) {
-    case "exa": return new ExaProvider(config);
+    case "exa": return new ExaProvider(config, onDiagnostic);
     case "tinyfish": return new TinyFishProvider(config);
     case "brave": return new BraveProvider(config);
     case "firecrawl": return new FirecrawlProvider(config);
@@ -31,6 +31,6 @@ export function createContext7Provider(config: WebKitConfig): Context7Provider {
   return new Context7Provider(config);
 }
 
-export function createCodeSearchProvider(config: WebKitConfig): ExaProvider {
-  return new ExaProvider(config);
+export function createCodeSearchProvider(config: WebKitConfig, onDiagnostic?: ExaDiagnosticSink): ExaProvider {
+  return new ExaProvider(config, onDiagnostic);
 }
