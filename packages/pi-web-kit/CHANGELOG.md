@@ -27,6 +27,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - Reject explicit Exa freshness limits outside -1–720 hours and cap millisecond-to-provider conversion at 720 hours without weakening the caller's freshness requirement.
 - Declare Exa query, mode/category, domain-array, and publication-date limits in the tool schema to match runtime validation.
 - Apply JSON request deadlines through response-body consumption and use controlled cancellation errors instead of exposing raw abort reasons.
+- Mask configured credentials before provider snippet cuts, local search/code budgets, and cached page range slicing, so a truncation boundary cannot reveal a credential prefix.
 
 ## [0.4.0] - 2026-10-09
 

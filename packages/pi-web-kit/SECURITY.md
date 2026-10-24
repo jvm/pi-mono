@@ -31,6 +31,9 @@ Tool results use an allowlisted output schema before publication. Model text and
 `structuredContent` share the same 50,000-byte JSON budget and credential masking;
 renderer details and progress also mask configured API keys, URL credential
 patterns and Basic/Bearer authorization-header values (not ordinary auth prose).
+Masking precedes provider snippet cuts, local context budgets, and cached page
+range slicing so those boundaries cannot expose fragments of a known credential.
+Cached page masking preserves character offsets.
 Arbitrary provider metadata, Context7 `rules`, cache keys,
 and HTTP failure bodies are excluded. Untrusted per-page error bodies become
 generic diagnostics; controlled HTTP status/timeout messages remain useful.

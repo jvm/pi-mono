@@ -5,7 +5,7 @@ import { requireKey } from "../config.js";
 
 export class FirecrawlProvider implements SearchProvider, FetchProvider {
   private key: string;
-  constructor(config: WebKitConfig) { this.key = requireKey(config, "firecrawl"); }
+  constructor(private config: WebKitConfig) { this.key = requireKey(config, "firecrawl"); }
   private headers() { return { "content-type": "application/json", authorization: `Bearer ${this.key}` }; }
 
   async search(input: SearchInput, signal?: AbortSignal) {
@@ -31,7 +31,7 @@ export class FirecrawlProvider implements SearchProvider, FetchProvider {
     return { provider: "firecrawl" as const, query: input.query, results: list.map((r: any, i: number) => {
       const content = asText(r.markdown ?? r.content ?? r.highlights);
       return {
-        title: r.title, url: r.url, snippet: asSnippet(r.highlights ?? r.description ?? content), content,
+        title: r.title, url: r.url, snippet: asSnippet(r.highlights ?? r.description ?? content, [this.key, ...Object.values(this.config.apiKeys)]), content,
         contentFormat: content ? (r.markdown ? "markdown" as const : "text" as const) : undefined,
         siteName: r.siteName, position: i + 1,
       };

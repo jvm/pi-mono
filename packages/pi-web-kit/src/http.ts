@@ -1,5 +1,6 @@
 import { DEFAULT_TIMEOUT_MS } from "./limits.js";
 import { normalizeUrlInput } from "./urls.js";
+import { redactText } from "./output.js";
 
 const MAX_CHARS = 50_000;
 const MAX_LINES = 2_000;
@@ -39,8 +40,9 @@ export async function requestJson<T>(url: string, init: RequestInit & { timeoutM
   });
 }
 
-export function asSnippet(value: unknown): string | undefined {
-  return asText(value)?.slice(0, 1000) || undefined;
+export function asSnippet(value: unknown, secrets: readonly string[] = []): string | undefined {
+  const text = asText(value);
+  return text ? redactText(text, secrets).slice(0, 1000) : undefined;
 }
 
 export function asText(value: unknown): string | undefined {

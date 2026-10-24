@@ -6,6 +6,7 @@ import { CODE_SEARCH_CRAWL_TIMEOUT_MS, CODE_SEARCH_TIMEOUT_MS } from "../limits.
 import { buildExaSearchBody, exaDiagnostic, exaFetchMaxAgeHours, exaNotices } from "./exa-contract.js";
 import { mapExaContents } from "./exa-contents.js";
 import { applyExaFetchFallbacks } from "./fallback.js";
+import { redactText } from "../output.js";
 
 export class ExaProvider implements SearchProvider, FetchProvider {
   private key: string;
@@ -27,7 +28,8 @@ export class ExaProvider implements SearchProvider, FetchProvider {
       // Never turn a metadata-only/live-crawl failure into stale text evidence.
       const highlights = Array.isArray(r?.highlights)
         ? asText(r.highlights.filter((h: unknown) => typeof h === "string" && h.trim())) : undefined;
-      const content = codeOnly ? highlights : highlights ?? asText(r?.text) ?? asText(r?.summary);
+      const rawContent = codeOnly ? highlights : highlights ?? asText(r?.text) ?? asText(r?.summary);
+      const content = rawContent ? redactText(rawContent, [this.key, ...Object.values(this.config.apiKeys)]) : undefined;
       return {
         title: r?.title, url: r?.url, snippet: asSnippet(content), content,
         contentFormat: content ? "markdown" as const : undefined,

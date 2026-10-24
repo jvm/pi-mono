@@ -4,7 +4,7 @@ import { requireKey } from "../config.js";
 
 export class BraveProvider implements SearchProvider {
   private key: string;
-  constructor(config: WebKitConfig) { this.key = requireKey(config, "brave"); }
+  constructor(private config: WebKitConfig) { this.key = requireKey(config, "brave"); }
 
   async search(input: SearchInput, signal?: AbortSignal) {
     const params: Record<string, string | number | boolean | string[]> = { q: boundedQuery(input.query) };
@@ -46,7 +46,7 @@ export class BraveProvider implements SearchProvider {
     return { provider: "brave" as const, query: input.query, results: rows.map((r: any, i: number) => {
       const content = asText(r.snippets ?? r.snippet ?? r.description ?? snippets[i]?.snippets);
       return {
-        title: r.title ?? r.name, url: r.url, snippet: asSnippet(content), content, contentFormat: content ? "markdown" as const : undefined, siteName: r.site_name ?? r.source, position: i + 1,
+        title: r.title ?? r.name, url: r.url, snippet: asSnippet(content, [this.key, ...Object.values(this.config.apiKeys)]), content, contentFormat: content ? "markdown" as const : undefined, siteName: r.site_name ?? r.source, position: i + 1,
       };
     }).filter((r: any) => r.url) };
   }

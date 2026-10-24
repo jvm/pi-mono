@@ -157,7 +157,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
         markProgressCurrent(progress, query);
         emitProgress(onUpdate, progress);
         const result = await provider.search({ ...params, query, numResults: effectiveResultLimit, contextTokens: requestedContextTokens == null ? undefined : effectiveContextTokens }, signal);
-        const bounded = applySearchContextBudget(result.results, effectiveContextTokens * 4);
+        const bounded = applySearchContextBudget(redactOutput(result.results, Object.values(config.apiKeys)), effectiveContextTokens * 4);
         grouped.push({
           query,
           requestedResultLimit,
@@ -432,6 +432,7 @@ function normalizeUrls(params: Record<string, any>): string[] {
 
 export async function fetchWithCache(providerName: FetchProviderName, params: Record<string, any>, urls: string[], signal: AbortSignal | undefined, config: any, onProgress?: (event: FetchProgressEvent) => void) {
   if (providerName === "exa") exaFetchMaxAgeHours(params);
+  const secrets = Object.values(config?.apiKeys ?? {}).filter((key): key is string => typeof key === "string");
   const provider = createFetchProvider(config);
   const offset = parseInteger(params.offset, 0, "offset", 0, MAX_OFFSET);
   const defaultLimit = urls.length > 1 ? MULTI_FETCH_LIMIT : DEFAULT_FETCH_LIMIT;
@@ -473,7 +474,7 @@ export async function fetchWithCache(providerName: FetchProviderName, params: Re
         requestedUrl,
         url: item.url || requestedUrl,
         title: item.title,
-        content: item.content ?? "",
+        content: redactText(item.content ?? "", secrets),
         format: item.format ?? "markdown",
         metadata: item.metadata,
         fetchedAt: Date.now(),
@@ -486,7 +487,9 @@ export async function fetchWithCache(providerName: FetchProviderName, params: Re
   return { provider: providerName, results: urls.map((url) => {
     const entry = pages.get(url);
     if (!entry?.page) return { url, error: entry?.error ?? "No content returned." };
-    return pageSlice(entry.page, offset, limit, entry.cached, entry.refreshed);
+    // Cover cache pages created before credential masking, too. Masking is
+    // length-preserving and must happen before arbitrary range boundaries.
+    return pageSlice({ ...entry.page, content: redactText(entry.page.content, secrets) }, offset, limit, entry.cached, entry.refreshed);
   }) };
 }
 

@@ -611,3 +611,44 @@ test("code search cancellation before a request and after headers never yields a
   assert.equal(calls, 1);
   assert.doesNotMatch(JSON.stringify(h.events), /private-abort/);
 });
+
+test("registered research tools mask credentials before context budgets and cached range slicing", async t => {
+  const h = harness(t);
+  const text = "prefix synthetic-exa-key suffix";
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    calls++;
+    return json({ results: [{ id: "https://redaction.test/", url: "https://redaction.test/", text, highlights: [text] }] });
+  });
+  for (const name of ["web_search", "code_search"]) {
+    const result = (await h.call(name, { query: "q", purpose: "Implement q", contextTokens: 5 })).structuredContent;
+    const source = name === "web_search" ? result.queries[0].results[0] : result.results[0];
+    assert.equal(source.content, "prefix *************", `${name} must not reveal a credential prefix`);
+  }
+  for (const offset of [0, 7, 10]) {
+    const result = (await h.call("web_fetch", { url: "https://redaction.test/", offset, limit: 20 })).structuredContent.results[0];
+    assert.equal(result.content, "prefix ***************** suffix".slice(offset, offset + 20));
+    assert.equal(result.range.total, text.length, "masking must preserve range offsets");
+    assert.doesNotMatch(result.content, /synthet|exa-key/);
+    if (offset) assert.equal(result.cached, true);
+  }
+  assert.equal(calls, 3, "range reads should use the same safely masked cache page");
+});
+
+test("all search providers mask cross-provider credentials before the snippet cut", async t => {
+  for (const provider of ["exa", "tinyfish", "brave", "firecrawl"]) {
+    await t.test(provider, async child => {
+      const h = harness(child, undefined, { PI_WEB_KIT_PROVIDER_SEARCH: provider,
+        TINYFISH_API_KEY: "synthetic-tiny", BRAVE_SEARCH_API_KEY: "synthetic-brave", FIRECRAWL_API_KEY: "synthetic-fire" });
+      const text = "x".repeat(994) + "synthetic-context-key suffix";
+      child.mock.method(globalThis, "fetch", async () => {
+        const row = { url: "https://redaction.test/", title: "T", highlights: [text], snippet: text, snippets: [text], markdown: text };
+        return json({ results: [row], total_results: 1, grounding: { generic: [row] }, data: { web: [row] } });
+      });
+      const result = (await h.call("web_search", { query: "q", purpose: "Find sources" })).structuredContent;
+      const snippet = result.queries[0].results[0].snippet;
+      assert.equal(snippet, "x".repeat(994) + "******");
+      assert.doesNotMatch(JSON.stringify(result), /synthetic-context-key/);
+    });
+  }
+});
