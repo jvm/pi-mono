@@ -228,6 +228,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
       promptSnippet: "List candidate library IDs; library_docs resolves names on its own.",
       promptGuidelines: ["Use library_search only to inspect matching libraries (official source, versions, forks) before a precise library_docs call.", "Not needed for ordinary doc lookups — library_docs resolves a libraryName for you."],
       parameters: buildLibrarySearchSchema(),
+      constrainedSampling: { type: "json_schema", strict: "prefer" },
       ...researchRenderers("library_search"),
       async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
         const params = rawParams as Record<string, any>;
@@ -248,6 +249,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
       promptSnippet: "Get current, version-aware library/framework/SDK docs and code examples.",
       promptGuidelines: ["Use library_docs for any library, framework, SDK, API, or CLI — even familiar ones like React, Next.js, Prisma, or Express. Training data may be outdated; this returns version-specific docs.", "Prefer library_docs over web_search or your own knowledge for library/API questions. Pass libraryName and query; you rarely need library_search first.", "Documentation snippets are complete, but oversized snippets can be omitted. Check omission counts and refine the query or lower limit when needed."],
       parameters: buildLibraryDocsSchema(),
+      constrainedSampling: { type: "json_schema", strict: "prefer" },
       ...researchRenderers("library_docs"),
       async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
         const params = rawParams as Record<string, any>;
