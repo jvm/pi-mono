@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Prefer provider-enforced strict argument schemas for `library_search` and `library_docs` when supported, preventing out-of-range arguments on strict-capable routes. Preserve best-effort fallback, existing parameters, and local validation.
+
 ## [0.4.1] - 2026-10-24
 
 ### Added

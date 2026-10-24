@@ -320,6 +320,11 @@ Resolves packages, frameworks, SDKs, APIs, CLIs, and libraries to canonical libr
 | `fast` | boolean | Skip LLM reranking for lower latency. |
 | `limit` | integer | Maximum libraries to return. Range: 1-20. Default: 10. |
 
+Both Context7 tools prefer provider-enforced strict argument schemas when
+supported. Unsupported providers or schemas retain best-effort tool calling;
+local validation always applies. In Pi 1.4.0, Anthropic falls back because its
+strict schemas do not support these numeric bounds.
+
 ### `library_docs`
 
 Fetches current docs and code snippets for a library. Provide `libraryId`, or provide `libraryName` and the tool resolves the best match first.
@@ -545,6 +550,37 @@ npm test
 npm audit --omit=dev
 npm run pack:dry-run
 ```
+
+### Context7 strict-sampling checks
+
+The SDK regression tests cover strict-capable OpenAI requests, unsupported
+routes, Anthropic's numeric-bound fallback, optional argument defaults, and
+local rejection before Context7 access:
+
+```bash
+node --import tsx --test packages/pi-web-kit/tests/strict-sampling.test.mjs
+```
+
+To repeat against an installed Pi host instead of the pinned development SDK,
+set `PI_WEB_KIT_TEST_RUNTIME` to its directory containing the `pi-ai` and
+`pi-coding-agent` packages:
+
+```bash
+PI_WEB_KIT_TEST_RUNTIME=/path/to/node_modules/@earendil-works \
+  node --import tsx --test packages/pi-web-kit/tests/strict-sampling.test.mjs
+```
+
+For a small live smoke test, configure Context7 and model credentials, select
+a strict-capable model, and run from the monorepo root:
+
+```bash
+pi -ne -e ./packages/pi-web-kit --no-session --no-context-files \
+  --tools library_search,library_docs --print \
+  "Call library_search for Node.js with limit 1. Then call library_docs for the returned ID about node:fs readFile with limit 1. Report whether both calls succeeded."
+```
+
+Confirm that both calls succeed without schema errors. This is a paid model
+and Context7 smoke test, not a guarantee of provider support on every route.
 
 ### Manual terminal smoke test
 
