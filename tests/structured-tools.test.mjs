@@ -61,6 +61,7 @@ async function fixture(t, { mode = "only", inlineBudget = 0, defaultTools, exclu
   const events = [];
   const progress = [];
   const requests = [];
+  const providerRequests = [];
   let gitCalls = 0;
   const capture = extension => pi => extension({
     ...pi,
@@ -98,8 +99,15 @@ async function fixture(t, { mode = "only", inlineBudget = 0, defaultTools, exclu
   let provider = async (url, init) => {
     const target = String(url);
     if (target === "https://api.exa.ai/search") {
-      const { query } = JSON.parse(init.body);
-      return json({ results: query === "empty" ? [] : [{ title: "Fixture", url: "https://fixture.invalid/page", text: "bounded page context" }] });
+      const body = JSON.parse(init.body);
+      const { query } = body;
+      assert.equal(typeof body.objective, "string");
+      if (body.contents.maxAgeHours === 0) {
+        assert.equal(body.type, "auto");
+        assert.deepEqual(body.contents, { highlights: true, maxAgeHours: 0, livecrawlTimeout: 15000 });
+      }
+      return json({ results: query === "empty" ? [] : [{ title: "Fixture", url: "https://fixture.invalid/page",
+        highlights: [body.contents.maxAgeHours === 0 ? "Fixture code" : "bounded page context"] }] });
     }
     if (target === "https://markdown.new/") {
       const { url } = JSON.parse(init.body);
@@ -114,7 +122,6 @@ async function fixture(t, { mode = "only", inlineBudget = 0, defaultTools, exclu
       return json({ codeSnippets: [{ codeTitle: "Fixture", codeList: [{ language: "js", code: "example()", authorization: "private" }] }],
         infoSnippets: [{ content: "Fixture docs", contentTokens: null }], rules: { authorization: "private" } });
     }
-    if (target === "https://api.exa.ai/context") return json({ query: "fixture", response: "Fixture code" });
     throw new Error("Unmocked provider URL");
   };
   globalThis.fetch = async (url, init) => {
@@ -127,10 +134,11 @@ async function fixture(t, { mode = "only", inlineBudget = 0, defaultTools, exclu
       next = undefined;
       return responseFor(request, ...call);
     }
+    providerRequests.push({ url: String(url), body: init?.body ? JSON.parse(init.body) : undefined });
     return provider(url, init);
   };
   return {
-    ...h, definitions, events, requests, progress,
+    ...h, definitions, events, requests, providerRequests, progress,
     get gitCalls() { return gitCalls; },
     setProvider(value) { provider = value; },
     async run(name, args) {
@@ -144,6 +152,29 @@ async function fixture(t, { mode = "only", inlineBudget = 0, defaultTools, exclu
       return this.run("codemode", code);
     },
   };
+}
+
+for (const mode of ["on", "only"]) {
+  test(`real codemode ${mode}: fresh code contract cannot escalate mode or omit purpose`, async t => {
+    const h = await fixture(t, { mode });
+    succeeds(await h.script(`
+      const invalid = await Promise.allSettled([
+        tools.code_search({query:"Node 22 streams",purpose:"Implement cancellation",type:"lite"}),
+        tools.code_search({query:"Node 22 streams",purpose:"Implement cancellation",maxAgeHours:-1}),
+        tools.code_search({query:"Node 22 streams",purpose:"Implement cancellation",outputSchema:{}}),
+        tools.code_search({query:"Node 22 streams",purpose:"Implement cancellation",tokensNum:"dynamic"}),
+        tools.code_search({query:"Node 22 streams"})
+      ]);
+      if (invalid.some(r=>r.status!=="rejected")) throw new Error("Invalid configuration accepted");
+      const code = await tools.code_search({query:"Node 22 streams",purpose:"Deep research is not requested; implement cancellation"});
+      if (code.searchType !== "auto" || code.maxAgeHours !== 0 || code.results[0].content !== "Fixture code")
+        throw new Error("Fresh retrieval contract lost");
+      text(code.resultCount);
+    `));
+    assert.equal(h.providerRequests.length, 1, "invalid nested calls must fail before provider access");
+    assert.equal(h.providerRequests[0].url, "https://api.exa.ai/search");
+    assert.deepEqual(h.providerRequests[0].body.contents, { highlights: true, maxAgeHours: 0, livecrawlTimeout: 15000 });
+  });
 }
 
 function resultText(result) { return result.content.filter(block => block.type === "text").map(block => block.text).join("\n"); }
@@ -166,15 +197,15 @@ for (const mode of ["on", "only"]) {
       const empty = await tools.get_goal({});
       if (empty.goal !== null) throw new Error("Expected null goal");
       const [search, libs, docs, code] = await Promise.all([
-        tools.web_search({query:"fixture"}),
+        tools.web_search({query:"fixture",purpose:"Find fixture sources"}),
         tools.library_search({libraryName:"fixture"}),
         tools.library_docs({libraryName:"fixture",query:"usage"}),
-        tools.code_search({query:"fixture"})
+        tools.code_search({query:"fixture",purpose:"Implement fixture"})
       ]);
       const pages = await tools.web_fetch({urls: search.queries.flatMap(q => q.results.map(r => r.url))});
       if (!pages.results.every(r => typeof r.content === "string")) throw new Error("Missing page data");
       if (libs.results[0].id !== "/fixture/library" || docs.infoSnippets[0].content !== "Fixture docs") throw new Error("Missing library data");
-      if (code.response !== "Fixture code") throw new Error("Missing code data");
+      if (code.results[0].content !== "Fixture code") throw new Error("Missing code data");
       const added = await tools.scout_add({source:"owner/fixture"});
       const created = await tools.create_goal({objective:"Synthetic tool contract",token_budget:1});
       if (created.goal.objective !== "Synthetic tool contract") throw new Error("Missing created goal");
@@ -215,9 +246,9 @@ for (const mode of ["on", "only"]) {
 test("codemode off keeps direct text, schemas, renderer details and no-goal/empty/partial data", async t => {
   const h = await fixture(t, { mode: "off" });
   for (const [name, args] of [
-    ["get_goal", {}], ["web_search", { query: "empty" }],
+    ["get_goal", {}], ["web_search", { query: "empty", purpose: "Find sources" }],
     ["library_search", { libraryName: "fixture" }], ["library_docs", { libraryId: "/fixture/library", query: "usage" }],
-    ["code_search", { query: "fixture" }],
+    ["code_search", { query: "fixture", purpose: "Implement fixture" }],
     ["web_fetch", { urls: ["https://fixture.invalid/page", "https://fixture.invalid/fail"] }],
   ]) {
     const result = await h.run(name, args);
@@ -394,11 +425,11 @@ test("explicit deferred adapter is discoverable with budget zero and can be acti
   succeeds(await h.script(`
     const hits = await searchTools("search query", {namespace:"web"});
     if (!hits.some(t=>t.name==="web_search")) throw new Error("Undiscoverable deferred tool");
-    const r = await tools.web_search({query:"fixture"});
+    const r = await tools.web_search({query:"fixture",purpose:"Find sources"});
     text(r.queries[0].results[0].url);
   `));
   h.api.setActiveTools([...h.api.getActiveTools(), "web_search"]);
-  const direct = await h.run("web_search", { query: "fixture" });
+  const direct = await h.run("web_search", { query: "fixture", purpose: "Find sources" });
   succeeds(direct);
   validates(h, h.events.findLast(e => e.toolName === "web_search"));
 });
@@ -415,7 +446,7 @@ test("errors reject, fetch failures remain data, and all output surfaces exclude
     return new Response("raw-backend-secret synthetic-CONTEXT7_API_KEY-secret", { status: 401 });
   });
   succeeds(await h.script(`
-    const r = await tools.web_search({query:"fixture"});
+    const r = await tools.web_search({query:"fixture",purpose:"Find sources"});
     if (r.queries[0].results[0].title.includes("synthetic")) throw new Error("Secret leak");
     const failures = await tools.web_fetch({urls:["https://fixture.invalid/fail"]});
     if (!failures.results[0].error) throw new Error("Expected per-item failure");
@@ -450,13 +481,14 @@ test("progress and per-page backend errors are sanitized through the registered 
 test("nested research keeps auth prose but masks real header values in every result surface", async t => {
   const h = await fixture(t);
   h.setProvider(async () => json({
-    response: 'Basic authentication uses a Bearer token.\nAuthorization: Basic YWJj\n"authorization": "Bearer x"',
+    results: [{ url: "https://fixture.invalid/auth", highlights: ['Basic authentication uses a Bearer token.\nAuthorization: Basic YWJj\n"authorization": "Bearer x"'] }],
   }));
   succeeds(await h.script(`
-    const r = await tools.code_search({query:"HTTP authentication"});
-    if (!r.response.includes("Basic authentication uses a Bearer token.")) throw new Error("Redacted ordinary prose");
-    if (r.response.includes("YWJj") || r.response.includes("Bearer x")) throw new Error("Leaked header credential");
-    text(r.response);
+    const r = await tools.code_search({query:"HTTP authentication",purpose:"Implement authentication"});
+    const content = r.results[0].content;
+    if (!content.includes("Basic authentication uses a Bearer token.")) throw new Error("Redacted ordinary prose");
+    if (content.includes("YWJj") || content.includes("Bearer x")) throw new Error("Leaked header credential");
+    text(content);
   `));
   assert.match(outputSurfaces(h), /Basic authentication uses a Bearer token/);
   assert.doesNotMatch(outputSurfaces(h), /YWJj|Bearer x/);
@@ -495,9 +527,9 @@ test("normal approval and result-redaction hooks cover nested structured calls",
     });
   }] });
   succeeds(await h.script(`
-    const r = await tools.code_search({query:"fixture"});
+    const r = await tools.code_search({query:"fixture",purpose:"Implement fixture"});
     if (r.response !== "policy-safe") throw new Error("Structured redaction bypass");
-    try { await tools.web_search({query:"blocked"}); throw new Error("Approval bypass"); }
+    try { await tools.web_search({query:"blocked",purpose:"Find sources"}); throw new Error("Approval bypass"); }
     catch (e) { if (!e.message.includes("Synthetic approval denied")) throw e; }
     // Pi drops stale structuredContent when a later hook replaces only text.
     try {
@@ -532,7 +564,7 @@ test("parallel reads overlap; Scout mutations serialize, omit origin credentials
     return json({ results: [] });
   });
   const result = await h.script(`
-    await Promise.all([tools.web_search({query:"one"}),tools.web_search({query:"two"})]);
+    await Promise.all([tools.web_search({query:"one",purpose:"Find sources"}),tools.web_search({query:"two",purpose:"Find sources"})]);
     const repos = await Promise.all([
       tools.scout_add({source:"https://fixture-user:fixture-password@fixture.invalid/one.git"}),
       tools.scout_add({source:"owner/two"})

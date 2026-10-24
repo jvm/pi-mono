@@ -1,5 +1,6 @@
 import { Type, type TSchema } from "typebox";
 import { Check } from "typebox/value";
+import { MAX_EXA_MESSAGE_CHARACTERS, MAX_EXA_NOTICES } from "./limits.js";
 
 const object = (properties: Record<string, TSchema>) => Type.Object(properties, { additionalProperties: false });
 const string = () => Type.Optional(Type.String());
@@ -7,23 +8,30 @@ const number = () => Type.Optional(Type.Number());
 const boolean = () => Type.Optional(Type.Boolean());
 const truncated = object({ truncated: Type.Literal(true), message: Type.String() });
 const output = (schema: TSchema) => Type.Union([schema, truncated]);
+const searchSource = object({
+  url: Type.String(), title: string(), snippet: string(), content: string(),
+  contentFormat: Type.Optional(Type.Union([Type.Literal("markdown"), Type.Literal("text")])),
+  siteName: string(), publishedDate: string(), position: number(),
+});
+const notices = Type.Optional(Type.Array(object({
+  code: Type.String({ maxLength: 64 }), message: Type.String({ maxLength: MAX_EXA_MESSAGE_CHARACTERS }),
+  path: Type.Optional(Type.String({ maxLength: 128 })),
+}), { maxItems: MAX_EXA_NOTICES }));
+const searchFields = {
+  query: Type.String(), requestedResultLimit: Type.Integer(), effectiveResultLimit: Type.Integer(),
+  requestedContextTokens: Type.Optional(Type.Integer()), effectiveContextTokens: Type.Integer(),
+  contextCharacters: Type.Integer(), omittedContextCharacters: Type.Optional(Type.Integer()),
+  resultCount: Type.Integer(), omittedResultCount: Type.Optional(Type.Integer()),
+  notices, omittedNoticeCount: Type.Optional(Type.Integer({ minimum: 0 })),
+  results: Type.Array(searchSource),
+};
 
 // Only explicitly selected fields cross the tool boundary. Provider metadata,
 // cache keys, response headers and Context7's untyped `rules` are not a contract.
 export const WEB_OUTPUT_SCHEMAS: Record<string, TSchema> = {
   web_search: output(object({
     provider: Type.String(),
-    queries: Type.Array(object({
-      query: Type.String(), requestedResultLimit: Type.Integer(), effectiveResultLimit: Type.Integer(),
-      requestedContextTokens: Type.Optional(Type.Integer()), effectiveContextTokens: Type.Integer(),
-      contextCharacters: Type.Integer(), omittedContextCharacters: Type.Optional(Type.Integer()),
-      resultCount: Type.Integer(), omittedResultCount: Type.Optional(Type.Integer()),
-      results: Type.Array(object({
-        url: Type.String(), title: string(), snippet: string(), content: string(),
-        contentFormat: Type.Optional(Type.Union([Type.Literal("markdown"), Type.Literal("text")])),
-        siteName: string(), position: number(),
-      })),
-    })),
+    queries: Type.Array(object(searchFields)),
   })),
   web_fetch: output(object({
     provider: Type.String(),
@@ -63,8 +71,8 @@ export const WEB_OUTPUT_SCHEMAS: Record<string, TSchema> = {
     })),
   })),
   code_search: output(object({
-    provider: Type.Literal("exa"), query: Type.String(), response: Type.String(),
-    resultsCount: number(), searchTime: number(), outputTokens: number(), requestId: string(),
+    ...searchFields, provider: Type.Literal("exa"), searchType: Type.Literal("auto"), maxAgeHours: Type.Literal(0),
+    omittedNoContentCount: Type.Optional(Type.Integer({ minimum: 0 })),
   })),
 };
 

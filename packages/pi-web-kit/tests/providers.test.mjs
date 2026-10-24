@@ -73,16 +73,19 @@ test("Brave uses POST for Goggles and caps its native query constraints", async 
   }
 });
 
-test("Exa maps generic context intent to bounded native text", async () => {
+test("Exa uses highlights and objective even when context is explicit", async () => {
   const oldFetch = globalThis.fetch;
   globalThis.fetch = async (_url, init) => {
     const body = JSON.parse(init.body);
-    assert.deepEqual(body.contents, { highlights: { query: "compare implementations" }, text: { maxCharacters: 2_000 } });
-    return new Response(JSON.stringify({ results: [{ title: "T", url: "https://example.test", text: "x".repeat(1_500) }] }), { status: 200, headers: { "content-type": "application/json" } });
+    assert.deepEqual(body.contents, { highlights: true });
+    assert.equal(body.objective, "compare implementations");
+    assert.equal(body.type, "auto");
+    return new Response(JSON.stringify({ results: [{ title: "T", url: "https://example.test", highlights: ["h".repeat(1_500)], text: "unfocused text" }] }), { status: 200, headers: { "content-type": "application/json" } });
   };
   try {
     const result = await new ExaProvider(cfg({ exa: "test-key" })).search({ query: "q", purpose: "compare implementations", numResults: 4, contextTokens: 2_000 });
     assert.equal(result.results[0].content.length, 1_500);
+    assert.equal(result.results[0].content, "h".repeat(1_500));
     assert.equal(result.results[0].snippet.length, 1_000);
   } finally {
     globalThis.fetch = oldFetch;
@@ -292,19 +295,20 @@ test("Context7 provider resolves libraries and fetches docs", async () => {
 });
 
 
-test("Exa Code provider calls context endpoint", async () => {
+test("Exa Code provider uses Search Auto with live highlights and no synthesis", async () => {
   const oldFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
-    assert.equal(String(url), "https://api.exa.ai/context");
+    assert.equal(String(url), "https://api.exa.ai/search");
     assert.equal(init.headers["x-api-key"], "exa-key");
-    assert.deepEqual(JSON.parse(init.body), { query: "react hooks", tokensNum: 5000 });
-    return new Response(JSON.stringify({ query: "react hooks", response: "example", resultsCount: 3, outputTokens: 120 }), { status: 200, headers: { "content-type": "application/json" } });
+    assert.deepEqual(JSON.parse(init.body), { query: "react hooks", objective: "Implement React 19 hooks", type: "auto", numResults: 5,
+      contents: { highlights: true, maxAgeHours: 0, livecrawlTimeout: 15000 } });
+    return new Response(JSON.stringify({ results: [{ url: "https://example.test", title: "Example", highlights: ["example"] }] }), { status: 200, headers: { "content-type": "application/json" } });
   };
   try {
     const provider = new ExaProvider(cfg({ exa: "exa-key" }));
-    const result = await provider.searchCode({ query: "react hooks", tokensNum: 5000 });
-    assert.equal(result.response, "example");
-    assert.equal(result.resultsCount, 3);
+    const result = await provider.searchCode({ query: "react hooks", purpose: "Implement React 19 hooks", contextTokens: 5000 });
+    assert.equal(result.results[0].content, "example");
+    assert.equal(result.resultCount, 1);
   } finally {
     globalThis.fetch = oldFetch;
   }

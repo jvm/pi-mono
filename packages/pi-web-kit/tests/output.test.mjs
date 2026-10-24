@@ -14,6 +14,13 @@ function validates(name, data, secrets = []) {
   return result;
 }
 
+function codeResult(content) {
+  return { provider: "exa", query: "fixture", searchType: "auto", maxAgeHours: 0,
+    requestedResultLimit: 5, effectiveResultLimit: 5, effectiveContextTokens: 8192,
+    contextCharacters: content?.length ?? 0, resultCount: content == null ? 0 : 1,
+    results: content == null ? [] : [{ url: "https://fixture.invalid/code", content }] };
+}
+
 test("output projection omits unknown/invalid optional fields and rejects invalid required data", () => {
   const result = validates("library_search", {
     provider: "context7", libraryName: "fixture", query: "fixture", cacheKey: "private",
@@ -32,7 +39,7 @@ test("output projection omits unknown/invalid optional fields and rejects invali
 test("empty results and docs with absent snippet metadata have stable schemas", () => {
   validates("library_search", { provider: "context7", libraryName: "empty", query: "q", results: [] });
   validates("library_docs", { provider: "context7", libraryId: "/fixture/lib", query: "q", codeSnippets: [], infoSnippets: [] });
-  validates("code_search", { provider: "exa", query: "empty", response: "" });
+  validates("code_search", codeResult());
   const docs = validates("library_docs", {
     provider: "context7", libraryId: "/fixture/lib", query: "q",
     codeSnippets: [{ codeList: [{ language: "js", code: "example()", token: "private" }] }],
@@ -70,7 +77,7 @@ test("search omitted-count fields and top-level truncation fallback validate", (
 test("known credentials and transport patterns are redacted before output bounding", () => {
   const secret = "synthetic-api-key";
   const text = `${secret} https://user:password@fixture.invalid/p?token=secret-token Authorization: Basic YWJj Omitting this is safe.`;
-  const result = validates("code_search", { provider: "exa", query: secret, response: text.repeat(5000) }, [secret]);
+  const result = validates("code_search", { ...codeResult(text.repeat(5000)), query: secret }, [secret]);
   assert.doesNotMatch(JSON.stringify(result), /synthetic-api-key|password|secret-token|YWJj/);
   assert.deepEqual(redactOutput({ nested: [secret], count: 1 }, [secret]), { nested: ["*".repeat(secret.length)], count: 1 });
   assert.equal(publicPageError("private unrestricted backend body"), "Provider could not fetch this page.");
@@ -85,10 +92,25 @@ test("auth documentation stays readable while short and quoted header credential
     "authorization = `Bearer token-value`",
   ];
   const response = [prose, ...headers].join("\n");
-  const result = validates("code_search", { provider: "exa", query: "authentication", response });
-  assert.ok(result.structuredContent.response.startsWith(prose));
-  assert.equal(result.structuredContent.response.length, response.length, "masking retains character offsets");
+  const result = validates("code_search", codeResult(response));
+  assert.ok(result.structuredContent.results[0].content.startsWith(prose));
+  assert.equal(result.structuredContent.results[0].content.length, response.length, "masking retains character offsets");
   assert.doesNotMatch(JSON.stringify(result), /YWJj|Bearer x|dTpw|token-value/);
+});
+
+test("code search bounds large source metadata without fabricating shortened URLs or omission counts", () => {
+  const input = { ...codeResult(), resultCount: 10, contextCharacters: 50_000,
+    results: Array.from({ length: 10 }, (_, i) => ({
+      url: `https://fixture.invalid/${i}/${"u".repeat(2000)}`,
+      title: "界".repeat(2000), siteName: "界".repeat(2000), content: "c".repeat(5000),
+    })) };
+  const result = validates("code_search", input).structuredContent;
+  assert.ok(!result.truncated);
+  assert.ok(result.resultCount < input.resultCount);
+  assert.equal(result.omittedResultCount + result.resultCount, input.resultCount);
+  assert.equal(result.omittedContextCharacters + result.contextCharacters, input.contextCharacters);
+  assert.equal(result.resultCount, result.results.length);
+  for (const source of result.results) assert.ok(input.results.some(r => r.url === source.url));
 });
 
 test("HTTP and JSON parse failures do not echo backend bodies", async t => {

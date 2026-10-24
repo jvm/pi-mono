@@ -21,8 +21,33 @@ export interface WebSearchResult {
   provider: SearchProviderName;
   query: string;
   effectiveResultLimit?: number;
-  results: Array<{ title?: string; url: string; snippet?: string; content?: string; contentFormat?: "markdown" | "text"; siteName?: string; position?: number }>;
+  notices?: ExaNotice[];
+  omittedNoticeCount?: number;
+  omittedNoContentCount?: number;
+  results: Array<{ title?: string; url: string; snippet?: string; content?: string; contentFormat?: "markdown" | "text"; siteName?: string; publishedDate?: string; position?: number }>;
 }
+
+export interface ExaNotice {
+  code: string;
+  message: string;
+  path?: string;
+}
+
+/** Non-model diagnostics: no queries, page text, headers, or warning messages. */
+export interface ExaDiagnostic {
+  endpoint: "/search";
+  durationMs: number;
+  requestId?: string;
+  searchType?: string;
+  searchTime?: number;
+  costDollars?: number;
+  warnings?: Array<{ code: string; path?: string }>;
+  omittedWarningCount?: number;
+  error?: "http" | "timeout" | "cancelled" | "invalid-response" | "network";
+  httpStatus?: number;
+}
+
+export type ExaDiagnosticSink = (diagnostic: ExaDiagnostic) => void;
 
 export interface FetchInput {
   url?: string;
@@ -44,7 +69,8 @@ export interface FetchInput {
 
 export interface WebFetchResult {
   provider: FetchProviderName;
-  results: Array<{ url: string; content?: string; format?: FetchFormat; title?: string; metadata?: Record<string, unknown>; error?: string }>;
+  // Internal association survives canonical redirects; never projected as raw metadata.
+  results: Array<{ url: string; requestedUrl?: string; content?: string; format?: FetchFormat; title?: string; metadata?: Record<string, unknown>; error?: string }>;
 }
 
 export interface Context7LibrarySearchInput {
@@ -105,17 +131,30 @@ export interface Context7DocsResult {
 
 export interface ExaCodeInput {
   query: string;
-  tokensNum?: "dynamic" | number;
+  purpose: string;
+  numResults?: number;
+  contextTokens?: number;
+  includeDomains?: string[];
+  excludeDomains?: string[];
 }
 
 export interface ExaCodeResult {
   provider: "exa";
   query: string;
-  response: string;
-  resultsCount?: number;
-  searchTime?: number;
-  outputTokens?: number;
-  requestId?: string;
+  searchType: "auto";
+  maxAgeHours: 0;
+  requestedResultLimit: number;
+  effectiveResultLimit: number;
+  requestedContextTokens?: number;
+  effectiveContextTokens: number;
+  contextCharacters: number;
+  omittedContextCharacters?: number;
+  resultCount: number;
+  omittedResultCount?: number;
+  omittedNoContentCount?: number;
+  notices?: ExaNotice[];
+  omittedNoticeCount?: number;
+  results: WebSearchResult["results"];
 }
 
 export interface SearchProvider {

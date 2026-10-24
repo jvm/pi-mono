@@ -37,6 +37,37 @@ generic diagnostics; controlled HTTP status/timeout messages remain useful.
 This does not classify all private information in fetched content or sanitize
 Pi's stored caller arguments. Do not send secrets in queries or URLs.
 
+Exa Contents results retain an internal requested-URL association across
+canonical redirects. Per-URL failure statuses cannot consume another URL's
+content or enter the cache as successful pages. Raw status error details are
+not returned to the model; failed or unidentifiable pages use the bounded
+fallback/error path.
+
+Exa retrieval notices are model-facing, untrusted provider text. Only bounded
+`code`, `message`, and `path` fields are exposed after credential masking;
+arbitrary notice details are excluded. `/search` diagnostics use
+the local `pi-web-kit:exa-diagnostics` event channel, not model context, files,
+or an additional network endpoint. They contain only bounded identifier fields,
+finite metrics, and controlled error categories/status codes. Warning messages,
+request bodies, raw errors, content, and headers are excluded. Consumers are
+responsible for storage and retention if they subscribe to these events.
+Known configured API keys are excluded from diagnostic identifiers.
+
+Code search uses only Exa `/search` with fixed Auto and `maxAgeHours: 0`.
+Caller-controlled mode, cache/snapshot, synthesis, beta, and Agent overrides
+are rejected before a request. No legacy endpoint or cached-content fallback
+is used on code-search failure. Metadata-only/text-only results are not
+substituted for highlight evidence. Freshness is a provider request policy,
+not an independent attestation of the provider's content. A search's required
+`purpose` is sent as `objective` in that same API call; it does not start an Agent
+run or an additional request. API errors and cancellation do not expose raw
+abort reasons, and JSON deadlines remain active until the body is consumed.
+
+Exa search API calls reject redirects to prevent forwarding
+their API key to another destination. Normal TLS certificate validation remains
+enabled. The manual Exa evaluation is opt-in and uses only fixed public queries;
+it sends the documented Dynamic Highlights beta header only in that experiment.
+
 The `web` namespace and read-only/idempotent/open-world annotations are advisory.
 They do not approve provider spending, bypass tool hooks, or make an inactive
 direct tool reachable from nested dispatch. Project trust, URL validation,
