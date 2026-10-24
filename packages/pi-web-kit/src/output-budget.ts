@@ -25,9 +25,16 @@ export function boundStructuredResult(result: any): unknown {
 }
 
 function boundSearchResult(value: SearchOutput) {
+  // Bound display labels separately so one oversized title cannot force every
+  // ranked source out of the result. Never shorten citation identity fields.
+  const groups: SearchOutput["queries"] = value.queries.map(group => ({ ...group, results: group.results.map(item => ({
+    ...item,
+    ...(typeof item.title === "string" ? { title: safePrefix(item.title, 1_000) } : {}),
+    ...(typeof item.siteName === "string" ? { siteName: safePrefix(item.siteName, 1_000) } : {}),
+  })) }));
   const candidate = (characters: number, count?: number) => ({
     ...value,
-    queries: value.queries.map(group => {
+    queries: groups.map(group => {
       const original = group.results.reduce((sum, item) => sum + (item.content?.length ?? 0), 0);
       const results = group.results.slice(0, count).map(item => {
         const bounded = { ...item };

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { fetchCache, type CachedPage } from "./cache.js";
 import { DEFAULT_FETCH_LIMIT, MAX_FETCH_LINKS, MAX_LIMIT, MAX_OFFSET, MAX_URL_LENGTH, MULTI_FETCH_LIMIT } from "./limits.js";
 import { publicPageError, redactText } from "./output.js";
@@ -10,6 +10,11 @@ import { canonicalWebUrl, normalizeWebUrl } from "./urls.js";
 import { parseInteger } from "./validation.js";
 
 export type FetchProgressEvent = { status: "current" | "done" | "error"; url: string; note?: string; error?: string };
+
+// Cache identities are process-local, not password verifiers. A random HMAC
+// key keeps account fingerprints stable only for this in-memory cache and
+// prevents offline guessing from an accidentally disclosed fingerprint.
+const cacheScopeKey = randomBytes(32);
 
 export async function fetchWithCache(providerName: FetchProviderName, params: Record<string, any>, urls: string[], signal: AbortSignal | undefined,
   config: WebKitConfig, onProgress?: (event: FetchProgressEvent) => void) {
@@ -132,5 +137,5 @@ function providerScope(provider: FetchProviderName, config?: Partial<WebKitConfi
   const keys = config?.apiKeys;
   const key = provider === "exa" ? JSON.stringify([keys?.exa, keys?.tinyfish, keys?.firecrawl])
     : provider === "tinyfish" ? keys?.tinyfish : provider === "firecrawl" ? keys?.firecrawl : undefined;
-  return key ? `key:${createHash("sha256").update(key).digest("hex")}` : "default";
+  return key ? `key:${createHmac("sha256", cacheScopeKey).update(key).digest("hex")}` : "default";
 }

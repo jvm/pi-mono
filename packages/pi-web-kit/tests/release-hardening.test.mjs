@@ -58,7 +58,7 @@ for (const provider of ["tinyfish", "firecrawl"]) {
       const body = JSON.parse(init.body);
       requests.push(body);
       if (provider === "tinyfish") return json({
-        results: body.urls.includes(a) ? [{ url: a, final_url: b, text: "body from A" }] : [],
+        results: body.urls.some(url => url === a) ? [{ url: a, final_url: b, text: "body from A" }] : [],
         errors: [{ url: b, error: "page_not_found" }],
       });
       return body.url === a ? json({ data: { url: b, markdown: "body from A" } }) : json({}, 404);
@@ -73,7 +73,7 @@ for (const provider of ["tinyfish", "firecrawl"]) {
       assert.ok(results[1].error);
       assert.equal(results[1].content, undefined);
     }
-    assert.equal(requests.filter(body => body.url === a || body.urls?.includes(a)).length, 1);
+    assert.equal(requests.filter(body => body.url === a || body.urls?.some(url => url === a)).length, 1);
   });
 }
 
@@ -293,8 +293,8 @@ for (const provider of ["tinyfish", "firecrawl"]) {
       if (url.includes("exa.ai")) return json({ results: [] });
       if (url.includes("markdown.new")) return json({}, 404);
       if (provider === "tinyfish") {
-        if (body.urls.includes(a)) aCalls++;
-        return json({ results: body.urls.includes(a) ? [{ url: a, final_url: b, text: "redirected fallback A" }] : [],
+        if (body.urls.some(url => url === a)) aCalls++;
+        return json({ results: body.urls.some(url => url === a) ? [{ url: a, final_url: b, text: "redirected fallback A" }] : [],
           errors: [{ url: b, error: "missing" }] });
       }
       if (body.url === a) { aCalls++; return json({ data: { url: b, markdown: "redirected fallback A" } }); }
@@ -332,6 +332,21 @@ test("oversized documentation never publishes partial code or stale token counts
   assert.match(rendered, /Output limit reached/);
   assert.match(rendered, /1 code snippet omitted/);
   assert.match(rendered, /Refine/);
+});
+
+test("an oversized first search title cannot hide smaller ranked sources", async t => {
+  const h = harness(t);
+  const urls = [a, b, "https://c.test/page"];
+  t.mock.method(globalThis, "fetch", async () => json({ results: urls.map((url, i) => ({
+    url, title: i === 0 ? "界🙂".repeat(20_000) : `Source ${i}`, highlights: ["useful evidence"],
+  })) }));
+  const group = (await h.call("web_search", { query: "q", purpose: "Find evidence", numResults: 3 })).structuredContent.queries[0];
+  assert.deepEqual(group.results.map(source => source.url), urls);
+  assert.equal(group.resultCount, 3);
+  assert.equal(group.omittedResultCount, 0);
+  assert.ok(group.results[0].title.length <= 1000);
+  assert.ok(!group.results[0].title.endsWith("\ud83d"));
+  assert.ok(group.results.every(source => source.content === "useful evidence"));
 });
 
 test("registered library search omits whole oversized candidates without modifying IDs or versions", async t => {

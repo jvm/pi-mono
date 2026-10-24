@@ -421,7 +421,7 @@ removed rather than silently translated.
 | Fetch link arrays | 50 URLs per array; shared 12,500-byte output budget |
 | Max URL length | 2048 characters |
 
-Cache keys include the provider, canonical URL, fetch-affecting parameters, relevant provider defaults, and an opaque SHA-256 API-key/account scope. Internal cache keys are never returned in tool output. `refresh: true` bypasses and replaces the cached entry.
+Cache keys include the provider, canonical URL, fetch-affecting parameters, relevant provider defaults, and an opaque HMAC-SHA-256 API-key/account scope with a random process-local key. Internal cache keys are never returned in tool output. `refresh: true` bypasses and replaces the cached entry.
 
 Exa cache scopes also include fallback accounts and markdown.new defaults.
 Raw provider metadata is not retained by the fetch cache; only page fields and

@@ -86,6 +86,10 @@ validated as absolute HTTP(S) URLs without credentials, deduplicated and bounded
 before caching; publication also applies a shared link-byte budget and reports
 omissions without shortening URLs.
 
+Account scopes use HMAC-SHA-256 with a randomly generated, process-local key.
+These are ephemeral cache identifiers, not stored password verifiers; neither
+the HMAC key nor its fingerprints are published in tool results.
+
 Explicit Exa freshness requirements are translated into fallback-native controls.
 Backends that cannot preserve them are skipped. Cached-only Exa requests do not
 trigger live fallbacks. Fallback classification never searches document prose

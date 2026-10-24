@@ -18,6 +18,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - Resolve global config through Pi's agent-directory API, including `PI_CODING_AGENT_DIR`, without weakening project trust.
 - Bound streamed provider bodies to 8 MiB before parsing; account for complete serialized cache entries and stop retaining raw provider metadata.
 - Reject redirects consistently for all provider API requests and reuse terminal-text sanitization across all five tools.
+- Use process-keyed HMAC-SHA-256 account fingerprints for the in-memory fetch cache.
 - Extract fetch/cache orchestration, range slicing, shared validation and output budgeting from the extension entry point into dedicated source modules.
 - Make Exa search highlights-first even with explicit `contextTokens`; send `purpose` as top-level `objective` and retain Auto as the default.
 - Validate Lite compatibility before requests, including rejection of all `maxAgeHours` values. Reject ignored crawl-date filters rather than imply they constrain results.
@@ -30,6 +31,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - Preserve TinyFish/Firecrawl requested identities through redirect collisions, partial failures, Exa fallback and cache reads.
 - Keep markdown.new's request deadline active until its body is consumed, including on Exa fallback paths.
 - Preserve full search/fetch source URLs under output limits; reduce evidence or omit records instead of shortening identities.
+- Bound search display titles separately so one oversized title cannot hide smaller ranked sources.
 - Keep complete documentation examples and their token metadata together instead of silently reducing oversized code to 1,000 characters.
 - Preserve TinyFish upper-only date/year filters and reorder endpoints only when both are present.
 - Translate Exa freshness into fallback-native controls; skip uncontrolled fallbacks and keep forced-live responses out of cached-only cache keys.
