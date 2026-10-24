@@ -1,7 +1,6 @@
-import { stripVTControlCharacters } from "node:util";
 import type { AgentToolResult, ToolRenderers } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
-import { redactText } from "./output.js";
+import { singleLine } from "./render-text.js";
 
 type ResearchTool = "library_search" | "library_docs" | "code_search";
 type Candidate = { id?: string; title?: string; url?: string; versions?: string[] };
@@ -14,6 +13,8 @@ type ResearchDetails = {
   omittedResultCount?: number;
   omittedContextCharacters?: number;
   omittedNoContentCount?: number;
+  omittedCodeSnippetCount?: number;
+  omittedInfoSnippetCount?: number;
   truncated?: boolean;
   message?: string;
 };
@@ -24,14 +25,6 @@ const labels = {
   code_search: { title: "Code search", pending: "Searching code…", provider: "Exa" },
 } as const;
 const MAX_ITEMS = 20;
-
-/** Provider text is data, never terminal markup or extra transcript rows. */
-function singleLine(value: unknown): string {
-  if (typeof value !== "string") return "";
-  return stripVTControlCharacters(redactText(value))
-    .replace(/[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, " ")
-    .replace(/\s+/g, " ").trim();
-}
 
 /** Bound physical rows, not newline count before wrapping a giant JSON line. */
 function rows(lines: string[]): Component {
@@ -111,13 +104,16 @@ export function researchRenderers(kind: ResearchTool): ToolRenderers {
         details.omittedResultCount ? `${quantity(details.omittedResultCount, "source")} omitted` : "",
         details.omittedContextCharacters ? `${details.omittedContextCharacters} context chars omitted` : "",
         details.omittedNoContentCount ? `${quantity(details.omittedNoContentCount, "source")} without excerpts` : "",
+        details.omittedCodeSnippetCount ? `${quantity(details.omittedCodeSnippetCount, "code snippet")} omitted` : "",
+        details.omittedInfoSnippetCount ? `${quantity(details.omittedInfoSnippetCount, "text snippet")} omitted` : "",
       ].filter(Boolean);
       const lines = [
-        theme.fg(count ? "success" : "muted", count ? `✓ ${label.title} complete` : empty),
+        theme.fg(count ? "success" : "muted", count ? `✓ ${label.title} complete` : omissions.length ? "Output limit reached" : empty),
         theme.fg("muted", `  ${summary} · ${label.provider}${omissions.length ? " · output reduced" : ""}`),
       ];
       if (!expanded) return rows(lines);
       for (const omission of omissions) lines.push(theme.fg("muted", `  ${omission}`));
+      if (details.message) lines.push(theme.fg("muted", `  ${singleLine(details.message)}`));
 
       // Keep retrieval order; ranking alone is not proof of an official source.
       if (docs) {

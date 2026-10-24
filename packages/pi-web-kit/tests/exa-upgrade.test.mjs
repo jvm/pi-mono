@@ -586,10 +586,12 @@ test("fresh code search deadline covers body stalls after headers", async t => {
   let signal;
   t.mock.method(globalThis, "fetch", async (_url, init) => {
     signal = init.signal;
-    return { ok: true, text() {
-      entered();
-      return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
-    } };
+    return new Response(new ReadableStream({
+      start(controller) {
+        signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+      },
+      pull() { entered(); },
+    }));
   });
   const pending = h.call("code_search", { query: "q", purpose: "Implement q" });
   await started;
@@ -613,10 +615,12 @@ test("code search cancellation before a request and after headers never yields a
   const started = new Promise(resolve => { entered = resolve; });
   globalThis.fetch = async (_url, init) => {
     calls++;
-    return { ok: true, text() {
-      entered();
-      return new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true }));
-    } };
+    return new Response(new ReadableStream({
+      start(controller) {
+        init.signal.addEventListener("abort", () => controller.error(init.signal.reason), { once: true });
+      },
+      pull() { entered(); },
+    }));
   };
   const pending = h.call("code_search", { query: "q", purpose: "Implement q" }, afterHeaders.signal);
   await started;

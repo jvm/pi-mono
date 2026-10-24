@@ -1,11 +1,13 @@
 import { Type, type TSchema } from "typebox";
 import { Check } from "typebox/value";
-import { MAX_EXA_MESSAGE_CHARACTERS, MAX_EXA_NOTICES } from "./limits.js";
+import { MAX_EXA_MESSAGE_CHARACTERS, MAX_EXA_NOTICES, MAX_FETCH_LINKS, MAX_URL_LENGTH } from "./limits.js";
 
 const object = (properties: Record<string, TSchema>) => Type.Object(properties, { additionalProperties: false });
 const string = () => Type.Optional(Type.String());
 const number = () => Type.Optional(Type.Number());
 const boolean = () => Type.Optional(Type.Boolean());
+const omitted = () => Type.Optional(Type.Integer({ minimum: 0 }));
+const links = () => Type.Optional(Type.Array(Type.String({ maxLength: MAX_URL_LENGTH }), { maxItems: MAX_FETCH_LINKS }));
 const truncated = object({ truncated: Type.Literal(true), message: Type.String() });
 const output = (schema: TSchema) => Type.Union([schema, truncated]);
 const searchSource = object({
@@ -41,6 +43,7 @@ export const WEB_OUTPUT_SCHEMAS: Record<string, TSchema> = {
         url: Type.String(), fetchedUrl: Type.String(), title: string(), content: Type.String(),
         format: Type.Union([Type.Literal("markdown"), Type.Literal("html"), Type.Literal("json")]),
         cached: Type.Boolean(), refreshed: Type.Boolean(),
+        links: links(), imageLinks: links(), omittedLinkCount: omitted(), omittedImageLinkCount: omitted(),
         range: object({
           offset: Type.Integer(), limit: Type.Integer(), returned: Type.Integer(), total: Type.Integer(),
           truncated: Type.Boolean(), hasPrevious: Type.Boolean(), hasNext: Type.Boolean(),
@@ -52,6 +55,7 @@ export const WEB_OUTPUT_SCHEMAS: Record<string, TSchema> = {
   library_search: output(object({
     provider: Type.Literal("context7"), libraryName: Type.String(), query: Type.String(),
     searchFilterApplied: boolean(),
+    omittedResultCount: omitted(),
     results: Type.Array(object({
       id: Type.String(), title: string(), description: string(), branch: string(),
       lastUpdateDate: string(), state: string(), totalTokens: number(), totalSnippets: number(),
@@ -61,6 +65,8 @@ export const WEB_OUTPUT_SCHEMAS: Record<string, TSchema> = {
   })),
   library_docs: output(object({
     provider: Type.Literal("context7"), libraryId: Type.String(), query: Type.String(),
+    omittedCodeSnippetCount: omitted(), omittedInfoSnippetCount: omitted(),
+    message: string(),
     codeSnippets: Type.Array(object({
       codeTitle: string(), codeDescription: string(), codeLanguage: string(), codeTokens: number(),
       codeId: string(), pageTitle: string(), sourceFile: string(), isDynamic: boolean(),
@@ -143,6 +149,7 @@ export function publicPageError(error: unknown): string {
     || /^Request timed out after \d+ms$/.test(error)
     || /^No content returned(?: by (?:TinyFish|Exa(?: contents endpoint)?))?\.$/.test(error)
     || error === "Provider returned invalid JSON."
+    || /^Provider response exceeded \d+ bytes\.$/.test(error)
   )) return error;
   return "Provider could not fetch this page.";
 }

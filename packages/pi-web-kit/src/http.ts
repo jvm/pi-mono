@@ -1,4 +1,4 @@
-import { DEFAULT_TIMEOUT_MS } from "./limits.js";
+import { DEFAULT_TIMEOUT_MS, MAX_RESPONSE_BYTES } from "./limits.js";
 import { normalizeUrlInput } from "./urls.js";
 import { redactText } from "./output.js";
 
@@ -19,25 +19,66 @@ async function withResponseTimeout<T>(url: string, init: RequestInit & { timeout
   const signal = init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
   const { timeoutMs: _timeoutMs, ...rest } = init;
   try {
-    return await consume(await fetch(url, { ...rest, signal }));
+    signal.throwIfAborted();
+    // All destinations are fixed provider endpoints. Never forward API keys,
+    // query bodies, or URLs through a provider-controlled redirect.
+    const result = await consume(await fetch(url, { ...rest, signal, redirect: "error" }));
+    signal.throwIfAborted();
+    return result;
+  } catch (error) {
+    if (init.signal?.aborted) throw new Error("Web tool cancelled.");
+    if (controller.signal.aborted) throw new Error(`Request timed out after ${timeoutMs}ms`);
+    throw error;
   } finally {
     clearTimeout(timer);
   }
 }
 
-export function fetchWithTimeout(url: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<Response> {
-  return withResponseTimeout(url, init, async res => res);
+export async function requestJson<T>(url: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
+  const { text } = await requestText(url, init);
+  if (!text) return undefined as T;
+  try { return JSON.parse(text) as T; }
+  catch { throw new Error("Provider returned invalid JSON."); }
 }
 
-export async function requestJson<T>(url: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
-  // Keep the deadline active through body consumption, not just response headers.
+/** Keep both text and JSON deadlines active until the bounded body is consumed. */
+export function requestText(url: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<{ text: string; headers: Headers }> {
   return withResponseTimeout(url, init, async res => {
-    const text = await res.text();
-    if (!res.ok) throw new Error(`Provider request failed (HTTP ${res.status}).`);
-    if (!text) return undefined as T;
-    try { return JSON.parse(text) as T; }
-    catch { throw new Error("Provider returned invalid JSON."); }
+    if (!res.ok) {
+      void res.body?.cancel().catch(() => undefined);
+      throw new Error(`Provider request failed (HTTP ${res.status}).`);
+    }
+    return { text: await readBoundedText(res), headers: res.headers };
   });
+}
+
+async function readBoundedText(res: Response): Promise<string> {
+  const tooLarge = () => new Error(`Provider response exceeded ${MAX_RESPONSE_BYTES} bytes.`);
+  if (Number(res.headers.get("content-length")) > MAX_RESPONSE_BYTES) {
+    void res.body?.cancel().catch(() => undefined);
+    throw tooLarge();
+  }
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_RESPONSE_BYTES) throw tooLarge();
+      chunks.push(decoder.decode(value, { stream: true }));
+    }
+    chunks.push(decoder.decode());
+    return chunks.join("");
+  } catch (error) {
+    void reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export function asSnippet(value: unknown, secrets: readonly string[] = []): string | undefined {

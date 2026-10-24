@@ -1,6 +1,6 @@
 import { asSnippet, normalizeUrls, requestJson, withoutContent } from "../http.js";
 import { DEFAULT_NUM_RESULTS, MAX_URL_COUNT, TINYFISH_MAX_PAGE } from "../limits.js";
-import type { FetchInput, FetchProvider, SearchInput, SearchProvider, WebKitConfig, WebSearchResult } from "../types.js";
+import type { FetchInput, FetchProvider, SearchInput, SearchProvider, WebFetchResult, WebKitConfig, WebSearchResult } from "../types.js";
 import { canonicalWebUrl, urlsMatch } from "../urls.js";
 import { requireKey } from "../config.js";
 
@@ -67,7 +67,7 @@ export class TinyFishProvider implements SearchProvider, FetchProvider {
         const batch = results.slice(i, i + batchSize);
         const fetched = await this.fetch({ urls: batch.map((item) => item.url), format: "markdown", purpose: input.purpose }, signal);
         for (const item of batch) {
-          const page = fetched.results.find((candidate) => urlsMatch(candidate.url, item.url) || urlsMatch(candidate.metadata?.requestedUrl, item.url));
+          const page = fetched.results.find((candidate) => urlsMatch(candidate.requestedUrl ?? candidate.url, item.url));
           if (page?.content) {
             item.content = page.content;
             item.contentFormat = "markdown";
@@ -86,7 +86,7 @@ export class TinyFishProvider implements SearchProvider, FetchProvider {
     };
   }
 
-  async fetch(input: FetchInput, signal?: AbortSignal) {
+  async fetch(input: FetchInput, signal?: AbortSignal): Promise<WebFetchResult> {
     const urls = normalizeUrls(input);
     if (urls.length > MAX_URL_COUNT) throw new Error(`TinyFish fetch supports a maximum of ${MAX_URL_COUNT} URLs per request.`);
     const data = await requestJson<any>("https://api.fetch.tinyfish.ai", {
@@ -113,13 +113,16 @@ export class TinyFishProvider implements SearchProvider, FetchProvider {
     return { provider: "tinyfish" as const, results: urls.map((url) => {
       const r = list.find((x: any) => urlsMatch(x.url ?? x.source_url, url));
       const failure = errors.find((x: any) => urlsMatch(x.url, url));
-      if (!r) return { url, error: failure ? `${failure.error}${failure.status ? ` (${failure.status})` : ""}` : "No content returned by TinyFish." };
+      if (!r) return { url, requestedUrl: url, error: failure ? `${failure.error}${failure.status ? ` (${failure.status})` : ""}` : "No content returned by TinyFish." };
       const content = r.text ?? r.content ?? r.markdown ?? r.html;
       return {
         url: r.final_url ?? r.url ?? url,
+        requestedUrl: url,
         content: stringifyContent(content),
         format: input.format ?? r.format ?? "markdown",
         title: r.title,
+        ...(input.links === true ? { links: r.links } : {}),
+        ...(input.imageLinks === true ? { imageLinks: r.image_links } : {}),
         metadata: { ...withoutContent(r), requestedUrl: url, finalUrl: r.final_url },
         error: r.error,
       };
@@ -141,13 +144,15 @@ function setDomains(url: URL, name: string, value: unknown) {
 }
 
 function orderedStrings(a: unknown, b: unknown): [string | undefined, string | undefined] {
-  const values = [a, b].filter((value): value is string => typeof value === "string").sort();
-  return [values[0], values[1]];
+  const lower = typeof a === "string" ? a : undefined;
+  const upper = typeof b === "string" ? b : undefined;
+  return lower != null && upper != null && lower > upper ? [upper, lower] : [lower, upper];
 }
 
 function orderedNumbers(a: unknown, b: unknown): [number | undefined, number | undefined] {
-  const values = [a, b].filter((value): value is number => typeof value === "number").sort((x, y) => x - y);
-  return [values[0], values[1]];
+  const lower = typeof a === "number" ? a : undefined;
+  const upper = typeof b === "number" ? b : undefined;
+  return lower != null && upper != null && lower > upper ? [upper, lower] : [lower, upper];
 }
 
 function stringifyContent(value: unknown): string | undefined {

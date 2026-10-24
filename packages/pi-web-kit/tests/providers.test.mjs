@@ -346,7 +346,7 @@ test("Exa fetch skips unavailable keyed fallbacks and uses markdown.new", async 
   globalThis.fetch = async (url) => {
     calls.push(String(url));
     if (String(url).includes("api.exa.ai/contents")) {
-      return new Response(JSON.stringify({ results: [{ url: "https://example.com", text: "No crawl results found" }] }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ results: [{ url: "https://example.com", text: "" }] }), { status: 200, headers: { "content-type": "application/json" } });
     }
     if (String(url) === "https://markdown.new/") {
       return new Response("markdown.new content", { status: 200, headers: { "content-type": "text/markdown" } });

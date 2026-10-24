@@ -1,19 +1,21 @@
-import { createHash } from "node:crypto";
 import { type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type, type TSchema } from "typebox";
-import { fetchCache, type CachedPage } from "../src/cache.js";
 import { resolveConfig } from "../src/config.js";
-import { applySearchContextBudget, capSearchResultLimit, DEFAULT_FETCH_LIMIT, DEFAULT_NUM_RESULTS, DEFAULT_SEARCH_CONTEXT_TOKENS, EXA_DATE_PATTERN, MAX_CODE_CONTEXT_TOKENS, MAX_CODE_RESULTS, MAX_EXA_AGE_HOURS, MAX_EXA_DATE_CHARACTERS, MAX_EXA_DOMAINS, MAX_EXA_HINT_CHARACTERS, MAX_EXA_QUERY_CHARACTERS, MAX_LIMIT, MAX_NUM_RESULTS, MAX_OFFSET, MAX_OUTPUT_BYTES, MAX_QUERY_COUNT, MAX_SEARCH_CONTEXT_TOKENS, MAX_URL_COUNT, MAX_URL_LENGTH, MULTI_FETCH_LIMIT, safePrefix, TINYFISH_MAX_PAGE } from "../src/limits.js";
-import { boundCodeResult } from "../src/code-output.js";
-import { createCodeSearchProvider, createContext7Provider, createFetchProvider, createSearchProvider } from "../src/providers/index.js";
-import { mapFetchResults } from "../src/providers/fallback.js";
-import { exaFetchMaxAgeHours } from "../src/providers/exa-contract.js";
-import type { FetchProviderName, SearchProviderName, WebFetchResult } from "../src/types.js";
-import { canonicalWebUrl, normalizeUrlInput } from "../src/urls.js";
+import { applySearchContextBudget, capSearchResultLimit, DEFAULT_NUM_RESULTS, DEFAULT_SEARCH_CONTEXT_TOKENS, EXA_DATE_PATTERN, MAX_CODE_CONTEXT_TOKENS, MAX_CODE_RESULTS, MAX_EXA_AGE_HOURS, MAX_EXA_DATE_CHARACTERS, MAX_EXA_DOMAINS, MAX_EXA_HINT_CHARACTERS, MAX_EXA_QUERY_CHARACTERS, MAX_LIMIT, MAX_NUM_RESULTS, MAX_OFFSET, MAX_QUERY_COUNT, MAX_SEARCH_CONTEXT_TOKENS, MAX_URL_COUNT, MAX_URL_LENGTH, TINYFISH_MAX_PAGE } from "../src/limits.js";
+import { createCodeSearchProvider, createContext7Provider, createSearchProvider } from "../src/providers/index.js";
+import type { FetchProviderName, SearchProviderName } from "../src/types.js";
+import { normalizeUrlInput } from "../src/urls.js";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
-import { projectOutput, publicPageError, redactOutput, redactText, WEB_OUTPUT_SCHEMAS, WEB_TOOL_METADATA } from "../src/output.js";
+import { projectOutput, redactOutput, redactText, WEB_OUTPUT_SCHEMAS, WEB_TOOL_METADATA } from "../src/output.js";
+import { fetchWithCache, type FetchProgressEvent } from "../src/fetch.js";
+import { boundStructuredResult } from "../src/output-budget.js";
+import { parseInteger } from "../src/validation.js";
+import { singleLine } from "../src/render-text.js";
 import { researchProgress, researchRenderers } from "../src/research-render.js";
+
+// Preserve existing test/library entry points while keeping orchestration in src.
+export { buildCacheKey, fetchWithCache, pageSlice } from "../src/fetch.js";
 
 const REGISTERED_TOOLS_ENTRY = "pi-web-kit:registered-tools";
 
@@ -244,7 +246,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
       label: "Library Docs",
       description: "Fetch current, version-aware documentation and code examples for a library. Pass libraryName to resolve it automatically, or a known libraryId.",
       promptSnippet: "Get current, version-aware library/framework/SDK docs and code examples.",
-      promptGuidelines: ["Use library_docs for any library, framework, SDK, API, or CLI — even familiar ones like React, Next.js, Prisma, or Express. Training data may be outdated; this returns version-specific docs.", "Prefer library_docs over web_search or your own knowledge for library/API questions. Pass libraryName and query; you rarely need library_search first."],
+      promptGuidelines: ["Use library_docs for any library, framework, SDK, API, or CLI — even familiar ones like React, Next.js, Prisma, or Express. Training data may be outdated; this returns version-specific docs.", "Prefer library_docs over web_search or your own knowledge for library/API questions. Pass libraryName and query; you rarely need library_search first.", "Documentation snippets are complete, but oversized snippets can be omitted. Check omission counts and refine the query or lower limit when needed."],
       parameters: buildLibraryDocsSchema(),
       ...researchRenderers("library_docs"),
       async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
@@ -303,7 +305,6 @@ function toolConfigSignature(config: ReturnType<typeof resolveConfig>): string {
 type ProgressKind = "search" | "fetch";
 type ProgressItem = { label: string; status: "pending" | "current" | "done" | "error"; note?: string; error?: string };
 type WebProgress = { kind: ProgressKind; provider: string; total: number; completed: number; items: ProgressItem[] };
-type FetchProgressEvent = { status: "current" | "done" | "error"; url: string; note?: string; error?: string };
 
 const int = (description: string, min: number, max?: number) => Type.Integer({ description, minimum: min, ...(max == null ? {} : { maximum: max }) });
 
@@ -437,96 +438,6 @@ function normalizeUrls(params: Record<string, any>): string[] {
   return normalizeUrlInput({ url: params.url, urls: params.urls }, MAX_URL_COUNT);
 }
 
-export async function fetchWithCache(providerName: FetchProviderName, params: Record<string, any>, urls: string[], signal: AbortSignal | undefined, config: any, onProgress?: (event: FetchProgressEvent) => void) {
-  if (providerName === "exa") exaFetchMaxAgeHours(params);
-  const secrets = Object.values(config?.apiKeys ?? {}).filter((key): key is string => typeof key === "string");
-  const provider = createFetchProvider(config);
-  const offset = parseInteger(params.offset, 0, "offset", 0, MAX_OFFSET);
-  const defaultLimit = urls.length > 1 ? MULTI_FETCH_LIMIT : DEFAULT_FETCH_LIMIT;
-  const limit = parseInteger(params.limit, defaultLimit, "limit", 1, MAX_LIMIT);
-  const refresh = params.refresh === true;
-  const maxAgeMs = localCacheMaxAge(providerName, params);
-
-  const pages = new Map<string, { page?: CachedPage; cached: boolean; refreshed: boolean; error?: string }>();
-  const cacheKeys = new Map<string, string>();
-  const missing: string[] = [];
-  for (const url of urls) {
-    const cacheKey = buildCacheKey(providerName, url, params, config);
-    cacheKeys.set(url, cacheKey);
-    const cached = fetchCache.get(cacheKey);
-    if (cached && !refresh && (maxAgeMs == null || (maxAgeMs > 0 && Date.now() - cached.fetchedAt <= maxAgeMs))) {
-      pages.set(url, { page: cached, cached: true, refreshed: false });
-      onProgress?.({ status: "done", url, note: "cached" });
-    } else {
-      missing.push(url);
-    }
-  }
-
-  if (missing.length > 0) {
-    for (const url of missing) onProgress?.({ status: "current", url });
-    const fetched = await provider.fetch({ ...params, url: undefined, urls: missing }, signal);
-    const mapped = mapFetchResults(missing, fetched);
-    for (const requestedUrl of missing) {
-      const item = mapped.get(requestedUrl);
-      if (!item || item.error) {
-        const error = publicPageError(item?.error ?? "No content returned.");
-        pages.set(requestedUrl, { error, cached: false, refreshed: refresh });
-        onProgress?.({ status: "error", url: requestedUrl, error });
-        continue;
-      }
-      const cacheKey = cacheKeys.get(requestedUrl)!;
-      const page = fetchCache.set(cacheKey, {
-        provider: providerName,
-        cacheKey,
-        requestedUrl,
-        url: item.url || requestedUrl,
-        title: item.title,
-        content: redactText(item.content ?? "", secrets),
-        format: item.format ?? "markdown",
-        metadata: item.metadata,
-        fetchedAt: Date.now(),
-      });
-      pages.set(requestedUrl, { page, cached: false, refreshed: refresh });
-      onProgress?.({ status: "done", url: requestedUrl, note: `${page.content.length} chars` });
-    }
-  }
-
-  return { provider: providerName, results: urls.map((url) => {
-    const entry = pages.get(url);
-    if (!entry?.page) return { url, error: entry?.error ?? "No content returned." };
-    // Cover cache pages created before credential masking, too. Masking is
-    // length-preserving and must happen before arbitrary range boundaries.
-    return pageSlice({ ...entry.page, content: redactText(entry.page.content, secrets) }, offset, limit, entry.cached, entry.refreshed);
-  }) };
-}
-
-function localCacheMaxAge(provider: FetchProviderName, params: Record<string, any>): number | undefined {
-  if (params.maxAgeMs != null) return parseInteger(params.maxAgeMs, 0, "maxAgeMs", 0);
-  if (provider === "exa" && typeof params.maxAgeHours === "number" && params.maxAgeHours >= 0) return params.maxAgeHours * 3_600_000;
-  if (provider === "tinyfish" && typeof params.ttl === "number") return params.ttl * 1_000;
-  if (provider === "firecrawl" && typeof params.maxAge === "number") return params.maxAge;
-  return undefined;
-}
-
-
-export function pageSlice(page: CachedPage, offset: number, limit: number, cached: boolean, refreshed: boolean) {
-  const total = page.content.length;
-  const content = page.content.slice(offset, offset + limit);
-  return { url: page.requestedUrl ?? page.url, fetchedUrl: page.url, title: page.title, content, format: page.format, cached, refreshed, range: { offset, limit, returned: content.length, total, truncated: offset > 0 || offset + content.length < total, hasPrevious: offset > 0, hasNext: offset + content.length < total, nextOffset: offset + content.length < total ? offset + content.length : undefined } };
-}
-
-export function buildCacheKey(provider: FetchProviderName, url: string, params: Record<string, any>, config?: any): string {
-  const canonical = canonicalWebUrl(url);
-  const affecting: Record<string, unknown> = {};
-  for (const key of Object.keys(params).sort()) {
-    if (["url", "urls", "offset", "limit", "refresh"].includes(key)) continue;
-    affecting[key] = params[key];
-  }
-  for (const [key, value] of Object.entries(fetchConfigDefaults(provider, config))) if (affecting[key] === undefined) affecting[key] = value;
-  const scope = providerScope(provider, config);
-  return `${provider}\0${scope}\0${JSON.stringify(affecting)}\0${canonical}`;
-}
-
 function projectIsTrusted(ctx: { isProjectTrusted?: () => boolean }): boolean {
   return typeof ctx.isProjectTrusted === "function" && ctx.isProjectTrusted() === true;
 }
@@ -554,175 +465,6 @@ export function jsonToolResult(result: unknown, schema?: TSchema, secrets: reado
   return { content: [{ type: "text" as const, text }], structuredContent, details: boundedDetails(structuredContent) };
 }
 
-function boundStructuredResult(result: unknown): unknown {
-  if (result && typeof result === "object" && "searchType" in result && result.searchType === "auto"
-    && "results" in result && Array.isArray(result.results)) {
-    return boundCodeResult(result as import("../src/types.js").ExaCodeResult);
-  }
-  if (Buffer.byteLength(JSON.stringify(result)) <= MAX_OUTPUT_BYTES) return result;
-
-  if (isFetchResult(result)) {
-    const metadataBounded = limitFetchMetadata(result, 1_000);
-    let low = 0;
-    let high = Math.max(...metadataBounded.results.map((item: any) => typeof item.content === "string" ? item.content.length : 0));
-    const emptyContent = fetchResultWithContentLimit(metadataBounded, 0);
-    if (Buffer.byteLength(JSON.stringify(emptyContent)) > MAX_OUTPUT_BYTES) {
-      return { truncated: true, message: "Fetch metadata exceeded 50KB; retry with fewer URLs." };
-    }
-    let best: unknown = emptyContent;
-    while (low <= high) {
-      const middle = Math.floor((low + high) / 2);
-      const candidate = fetchResultWithContentLimit(metadataBounded, middle);
-      if (Buffer.byteLength(JSON.stringify(candidate)) <= MAX_OUTPUT_BYTES) {
-        best = candidate;
-        low = middle + 1;
-      } else {
-        high = middle - 1;
-      }
-    }
-    return best;
-  }
-
-  if (isSearchResult(result)) return boundSearchResult(result);
-
-  const compact = limitStrings(result, 1_000);
-  if (Buffer.byteLength(JSON.stringify(compact)) <= MAX_OUTPUT_BYTES) return compact;
-  return { truncated: true, message: "Structured result exceeded 50KB; refine the request or use smaller limits." };
-}
-
-function isFetchResult(value: any): value is { provider?: string; results: any[] } {
-  return !!value && Array.isArray(value.results) && value.results.some((item: any) => typeof item?.content === "string" && item?.range);
-}
-
-function isSearchResult(value: any): value is { provider?: string; queries: Array<{ query?: string; results?: any[] }> } {
-  return !!value && Array.isArray(value.queries) && value.queries.every((group: any) => Array.isArray(group?.results));
-}
-
-function boundSearchResult(value: { provider?: string; queries: Array<{ query?: string; results?: any[] }> }) {
-  const compact = {
-    ...(limitStrings(value, 1_000) as Record<string, unknown>),
-    queries: value.queries.map((group) => ({
-      ...(limitStrings(group, 1_000) as Record<string, unknown>),
-      results: (group.results ?? []).map((item) => ({
-        ...(limitStrings(item, 1_000) as Record<string, unknown>),
-        ...(typeof item?.content === "string" ? { content: item.content } : {}),
-      })),
-    })),
-  } as typeof value;
-  const maxSnippet = Math.max(0, ...compact.queries.flatMap((group) => (group.results ?? []).flatMap((item) => [
-    typeof item?.snippet === "string" ? item.snippet.length : 0,
-    typeof item?.content === "string" ? item.content.length : 0,
-  ])));
-  let low = 0;
-  let high = maxSnippet;
-  let best = searchResultWithLimits(compact, 0);
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2);
-    const candidate = searchResultWithLimits(compact, middle);
-    if (Buffer.byteLength(JSON.stringify(candidate)) <= MAX_OUTPUT_BYTES) {
-      best = candidate;
-      low = middle + 1;
-    } else {
-      high = middle - 1;
-    }
-  }
-  if (Buffer.byteLength(JSON.stringify(best)) <= MAX_OUTPUT_BYTES) return best;
-
-  low = 0;
-  high = Math.max(0, ...compact.queries.map((group) => group.results?.length ?? 0));
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2);
-    const candidate = searchResultWithLimits(compact, 0, middle);
-    if (Buffer.byteLength(JSON.stringify(candidate)) <= MAX_OUTPUT_BYTES) {
-      best = candidate;
-      low = middle + 1;
-    } else {
-      high = middle - 1;
-    }
-  }
-  return Buffer.byteLength(JSON.stringify(best)) <= MAX_OUTPUT_BYTES
-    ? best
-    : { truncated: true, message: "Search metadata exceeded 50KB; retry with fewer queries or results." };
-}
-
-function searchResultWithLimits(value: { provider?: string; queries: Array<{ query?: string; results?: any[] }> }, snippetChars: number, resultsPerQuery?: number) {
-  return {
-    ...value,
-    queries: value.queries.map((group) => {
-      const originalContextCharacters = (group.results ?? []).reduce((total, item) => total + (typeof item?.content === "string" ? item.content.length : 0), 0);
-      const results = (group.results ?? []).slice(0, resultsPerQuery).map((item) => {
-        const bounded = { ...item };
-        for (const key of ["snippet", "content"] as const) {
-          if (typeof bounded[key] !== "string") continue;
-          if (snippetChars === 0) delete bounded[key];
-          else bounded[key] = safePrefix(bounded[key], snippetChars);
-        }
-        return bounded;
-      });
-      const omittedResultCount = Math.max(0, (group.results?.length ?? 0) - results.length);
-      const contextCharacters = results.reduce((total, item) => total + (typeof item?.content === "string" ? item.content.length : 0), 0);
-      const omittedContextCharacters = (typeof (group as any).omittedContextCharacters === "number" ? (group as any).omittedContextCharacters : 0) + originalContextCharacters - contextCharacters;
-      return {
-        ...group,
-        contextCharacters,
-        ...(omittedContextCharacters ? { omittedContextCharacters } : {}),
-        resultCount: results.length,
-        ...(omittedResultCount ? { omittedResultCount } : {}),
-        results,
-      };
-    }),
-  };
-}
-
-function limitFetchMetadata(value: { provider?: string; results: any[] }, maxChars: number) {
-  return {
-    ...value,
-    results: value.results.map((item: any) => {
-      if (typeof item.content !== "string") return limitStrings(item, maxChars);
-      const content = item.content;
-      return { ...(limitStrings(item, maxChars) as Record<string, unknown>), content };
-    }),
-  };
-}
-
-function fetchResultWithContentLimit(value: { provider?: string; results: any[] }, maxChars: number) {
-  return {
-    ...value,
-    results: value.results.map((item: any) => {
-      if (typeof item.content !== "string" || !item.range) return item;
-      const content = safePrefix(item.content, maxChars);
-      const returned = content.length;
-      const hasNext = item.range.offset + returned < item.range.total;
-      return {
-        ...item,
-        content,
-        range: {
-          ...item.range,
-          returned,
-          truncated: item.range.offset > 0 || hasNext,
-          hasNext,
-          nextOffset: hasNext ? item.range.offset + returned : undefined,
-        },
-      };
-    }),
-  };
-}
-
-function limitStrings(value: unknown, maxChars: number): unknown {
-  if (typeof value === "string") return safePrefix(value, maxChars);
-  if (Array.isArray(value)) return value.map((item) => limitStrings(item, maxChars));
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, limitStrings(item, maxChars)]));
-  return value;
-}
-
-function parseInteger(value: unknown, defaultValue: number, name: string, min: number, max?: number): number {
-  if (value == null) return defaultValue;
-  if (typeof value !== "number" || !Number.isInteger(value) || !Number.isFinite(value) || value < min || (max != null && value > max)) {
-    throw new Error(`${name} must be a finite integer ${max == null ? `>= ${min}` : `between ${min} and ${max}`}.`);
-  }
-  return value;
-}
-
 function requiredString(value: unknown, name: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must be a non-empty string.`);
   return value.trim();
@@ -731,22 +473,6 @@ function requiredString(value: unknown, name: string): string {
 function optionalString(value: unknown, name: string): string | undefined {
   if (value == null) return undefined;
   return requiredString(value, name);
-}
-
-function fetchConfigDefaults(provider: FetchProviderName, config?: any): Record<string, unknown> {
-  if (provider === "markdown_new") return { method: config?.markdownNew?.method ?? "auto", retainImages: config?.markdownNew?.retainImages ?? false };
-  if (provider === "firecrawl") return { onlyMainContent: true, format: "markdown" };
-  return {};
-}
-
-function providerScope(provider: FetchProviderName, config?: any): string {
-  const keyMap: Partial<Record<FetchProviderName, string | undefined>> = {
-    exa: config?.apiKeys?.exa,
-    tinyfish: config?.apiKeys?.tinyfish,
-    firecrawl: config?.apiKeys?.firecrawl,
-  };
-  const key = keyMap[provider];
-  return key ? `key:${createHash("sha256").update(String(key)).digest("hex")}` : "default";
 }
 
 function assertProviderUnchanged(tool: string, startup: string, runtime: string) {
@@ -785,6 +511,7 @@ function librarySearchDetails(value: any) {
     provider: value.provider,
     libraryName: value.libraryName,
     resultCount: value.results.length,
+    omittedResultCount: value.omittedResultCount,
     results: value.results.map((r: any) => ({ id: r.id, title: r.title, state: r.state, trustScore: r.trustScore, versions: r.versions })),
   };
 }
@@ -798,6 +525,9 @@ function libraryDocsDetails(value: any) {
     query: value.query,
     codeSnippetCount: value.codeSnippets.length,
     infoSnippetCount: value.infoSnippets.length,
+    omittedCodeSnippetCount: value.omittedCodeSnippetCount,
+    omittedInfoSnippetCount: value.omittedInfoSnippetCount,
+    message: value.message,
     sources: [...codeSources, ...infoSources].filter(Boolean).slice(0, MAX_NUM_RESULTS),
   };
 }
@@ -907,11 +637,11 @@ function renderWebResult(kind: ProgressKind, result: any, { expanded, isPartial 
     const ok = details.results.filter((r: any) => !r.error).length;
     const failed = details.results.length - ok;
     let text = failed > 0 ? `${theme.fg("warning", "⚠️ Fetch complete")} ${ok}/${details.results.length} succeeded` : `${theme.fg("success", details.results.length === 1 ? "✅ Page fetched" : "✅ Pages fetched")} ${theme.fg("muted", `${ok}/${details.results.length}`)}`;
-    if (expanded) for (const r of details.results) text += `\n   ${r.error ? theme.fg("error", "✕") : theme.fg("success", "✓")} ${theme.fg("accent", truncateMiddle(r.url, 100))}${r.error ? theme.fg("error", ` ${r.error}`) : theme.fg("muted", ` ${r.range?.returned ?? 0}/${r.range?.total ?? 0} chars${r.cached ? " cached" : ""}`)}`;
+    if (expanded) for (const r of details.results) text += `\n   ${r.error ? theme.fg("error", "✕") : theme.fg("success", "✓")} ${theme.fg("accent", truncateMiddle(r.url, 100))}${r.error ? theme.fg("error", ` ${singleLine(r.error)}`) : theme.fg("muted", ` ${r.range?.returned ?? 0}/${r.range?.total ?? 0} chars${r.cached ? " cached" : ""}`)}`;
     return new Text(text, 0, 0);
   }
   const content = result.content?.find?.((c: any) => c.type === "text")?.text ?? "";
-  return new Text(content, 0, 0);
+  return new Text(singleLine(content), 0, 0);
 }
 
 function renderProgress(progress: WebProgress, theme: any, spinner: string, expanded: boolean): string {
@@ -927,7 +657,7 @@ function renderProgress(progress: WebProgress, theme: any, spinner: string, expa
   };
   for (const item of visible) {
     const icon = iconMap[item.status] ?? theme.fg("muted", "·");
-    const note = item.error ? theme.fg("error", ` ${item.error}`) : item.note ? theme.fg("muted", ` ${item.note}`) : "";
+    const note = item.error ? theme.fg("error", ` ${singleLine(item.error)}`) : item.note ? theme.fg("muted", ` ${singleLine(item.note)}`) : "";
     text += `\n   ${icon} ${theme.fg(item.status === "pending" ? "muted" : "accent", quote(truncateMiddle(item.label, 100)))}${note}`;
   }
   if (!expanded && progress.items.length > visible.length) text += `\n   ${theme.fg("muted", `… +${progress.items.length - visible.length} more`)}`;
@@ -963,14 +693,15 @@ function progressBar(completed: number, total: number): string {
 
 function normalizeLabels(single: unknown, multiple: unknown): string[] {
   const raw = Array.isArray(multiple) ? multiple : single ? [single] : [];
-  return raw.map((v) => String(v).trim()).filter(Boolean);
+  return raw.map((v) => singleLine(String(v))).filter(Boolean);
 }
 
 function quote(value: string): string {
-  return `"${value}"`;
+  return `"${singleLine(value)}"`;
 }
 
 function truncateMiddle(value: string, max: number): string {
+  value = singleLine(value);
   if (value.length <= max) return value;
   const head = Math.ceil((max - 1) / 2);
   const tail = Math.floor((max - 1) / 2);

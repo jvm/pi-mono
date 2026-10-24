@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { FetchCache } from "../src/cache.ts";
-import { fetchWithTimeout, mapConcurrent, normalizeUrls } from "../src/http.ts";
+import { requestText, mapConcurrent, normalizeUrls } from "../src/http.ts";
 import { ExaProvider } from "../src/providers/exa.ts";
 import { FirecrawlProvider } from "../src/providers/firecrawl.ts";
 import { MarkdownNewProvider } from "../src/providers/markdown-new.ts";
@@ -23,11 +23,13 @@ test("FetchCache enforces TTL, LRU, max entries, and max bytes", () => {
   assert(entries.get("a", 4));
   assert.equal(entries.get("b", 4), undefined);
 
-  const bytes = new FetchCache({ maxEntries: 10, maxBytes: 5, ttlMs: 1_000 });
+  const entryBytes = Buffer.byteLength(JSON.stringify({ key: "a", page: page("a", "1234", 0) }));
+  const bytes = new FetchCache({ maxEntries: 10, maxBytes: entryBytes, ttlMs: 1_000 });
   bytes.set("a", page("a", "1234", 0), 0);
   bytes.set("b", page("b", "1234", 1), 1);
   assert.equal(bytes.get("a", 2), undefined);
   assert(bytes.get("b", 2));
+  assert.equal(bytes.totalCachedBytes, entryBytes);
 });
 
 test("URL normalization rejects bad URLs and deduplicates fragments", () => {
@@ -52,11 +54,11 @@ test("mapConcurrent bounds active work", async () => {
   assert.equal(maxActive, 2);
 });
 
-test("fetchWithTimeout aborts slow requests", async () => {
+test("requestText aborts slow requests before headers", async () => {
   const oldFetch = globalThis.fetch;
   globalThis.fetch = async (_url, init) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason)));
   try {
-    await assert.rejects(() => fetchWithTimeout("https://slow.test", { timeoutMs: 1 }), /timed out/);
+    await assert.rejects(() => requestText("https://slow.test", { timeoutMs: 1 }), /timed out/);
   } finally {
     globalThis.fetch = oldFetch;
   }

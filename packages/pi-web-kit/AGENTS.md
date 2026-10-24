@@ -46,13 +46,16 @@ Data flow: Pi tool call → `extensions/index.ts` (tool registration) → `src/c
 | `src/code-output.ts` | Strict code-search options, local context budgets, and byte-aware structured-source limits with omission accounting. |
 | `src/limits.ts` | Single source of truth for all hard limits (timeouts, cache size, concurrency, URL count, etc.). |
 | `src/cache.ts` | In-memory fetch cache: TTL, LRU eviction, byte budget. |
+| `src/fetch.ts` | Fetch/cache orchestration, account/default scoping, validated links, range slicing and progress events. |
+| `src/output-budget.ts` | Byte-aware public output limits: preserve identities, continuation and complete documentation snippets; count omissions. |
+| `src/render-text.ts` | Shared terminal sanitization for untrusted display labels across all five tools. |
 | `src/urls.ts` | URL validation, normalization, credential rejection, fragment stripping. All URLs pass through here before provider calls. |
 
 Config precedence (lowest → highest):
 
 1. Hardcoded defaults (`provider_search: "exa"`, `provider_fetch: "exa"`)
 2. Env vars: `PI_WEB_KIT_PROVIDER_SEARCH`, `PI_WEB_KIT_PROVIDER_FETCH`, `EXA_API_KEY`, `TINYFISH_API_KEY`, `BRAVE_SEARCH_API_KEY`, `FIRECRAWL_API_KEY`, `CONTEXT7_API_KEY`
-3. Global config: `~/.pi/agent/pi-web-kit.json`
+3. Global config: `pi-web-kit.json` under Pi's `getAgentDir()` (default `~/.pi/agent`, supports `PI_CODING_AGENT_DIR`)
 4. Project config: `.pi-web-kit.json` (gitignored, never commit)
 5. CLI flags: `--web-provider-search`, `--web-provider-fetch`
 

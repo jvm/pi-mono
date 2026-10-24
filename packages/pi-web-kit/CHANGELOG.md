@@ -8,11 +8,17 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Added
 
+- Expose bounded, validated TinyFish link and image-link arrays with omission counts, including on cached page reads.
+- Report whole-snippet omissions and refinement guidance for oversized library documentation, and whole-candidate omissions for library search.
 - Return bounded Exa retrieval notices to the model and emit safe request/cost/timing and warning-identifier diagnostics on a local, non-model event channel.
 - Add an opt-in, bounded live comparison of fresh-only code search, general Auto/Lite search, and the separately gated Dynamic Highlights request.
 
 ### Changed
 
+- Resolve global config through Pi's agent-directory API, including `PI_CODING_AGENT_DIR`, without weakening project trust.
+- Bound streamed provider bodies to 8 MiB before parsing; account for complete serialized cache entries and stop retaining raw provider metadata.
+- Reject redirects consistently for all provider API requests and reuse terminal-text sanitization across all five tools.
+- Extract fetch/cache orchestration, range slicing, shared validation and output budgeting from the extension entry point into dedicated source modules.
 - Make Exa search highlights-first even with explicit `contextTokens`; send `purpose` as top-level `objective` and retain Auto as the default.
 - Validate Lite compatibility before requests, including rejection of all `maxAgeHours` values. Reject ignored crawl-date filters rather than imply they constrain results.
 - **Breaking:** replace the legacy Exa `/context` code-search backend with `/search`, fixed Auto, live page fetching (`maxAgeHours: 0`), and a 15-second provider crawl timeout. No Lite, cached-only, Deep, synthesis, beta, or Agent override is accepted.
@@ -21,6 +27,13 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Fixed
 
+- Preserve TinyFish/Firecrawl requested identities through redirect collisions, partial failures, Exa fallback and cache reads.
+- Keep markdown.new's request deadline active until its body is consumed, including on Exa fallback paths.
+- Preserve full search/fetch source URLs under output limits; reduce evidence or omit records instead of shortening identities.
+- Keep complete documentation examples and their token metadata together instead of silently reducing oversized code to 1,000 characters.
+- Preserve TinyFish upper-only date/year filters and reorder endpoints only when both are present.
+- Translate Exa freshness into fallback-native controls; skip uncontrolled fallbacks and keep forced-live responses out of cached-only cache keys.
+- Trigger fallback only for structured failures or empty content, not error-like phrases in valid page prose.
 - Render library search, library documentation, and code search as compact summaries with ranked candidates or source lists on expansion, instead of wrapping raw JSON across the terminal. Include pending, empty, error, and output-limit states without changing model-facing results.
 - Preserve complete code-search source URLs and useful excerpts within the serialized 50,000-byte budget, with exact result/context omission counts. Refill the evidence budget after dropping oversized source metadata. Do not silently collapse oversized evidence to 1,000 characters.
 - Never use text/summary-only fallbacks as code evidence or locally cache code-search responses. Count unusable/no-excerpt sources, and surface failures without automatic stale or legacy fallback.

@@ -40,7 +40,7 @@ generic diagnostics; controlled HTTP status/timeout messages remain useful.
 This does not classify all private information in fetched content or sanitize
 Pi's stored caller arguments. Do not send secrets in queries or URLs.
 
-Exa Contents results retain an internal requested-URL association across
+Exa, TinyFish and Firecrawl results retain an internal requested-URL association across
 canonical redirects. Per-URL failure statuses cannot consume another URL's
 content or enter the cache as successful pages. Raw status error details are
 not returned to the model; failed or unidentifiable pages use the bounded
@@ -66,11 +66,38 @@ not an independent attestation of the provider's content. A search's required
 run or an additional request. API errors and cancellation do not expose raw
 abort reasons, and JSON deadlines remain active until the body is consumed.
 
-Exa search API calls reject redirects to prevent forwarding
-their API key to another destination. Normal TLS certificate validation remains
+All provider API calls reject redirects to prevent forwarding
+API keys, custom credential headers or request bodies to another destination.
+Normal TLS certificate validation remains
 enabled. The manual Exa evaluation is opt-in and uses only fixed public queries;
 it sends the documented Dynamic Highlights beta header only in that experiment.
 Evaluation results also mask the configured key before context or excerpt cuts.
+
+Text and JSON bodies are streamed through an 8 MiB decoded-byte limit before
+parsing, output processing or caching. Advertised oversized bodies are rejected
+without consuming them. The request deadline covers body consumption, including
+markdown.new fallback. Oversized streams are cancelled; partial content is not
+published or cached.
+
+The fetch cache charges complete serialized entries, including keys, titles,
+links and any retained metadata, against its 20 MiB budget. The registered tool
+does not retain arbitrary provider metadata. Requested TinyFish links are
+validated as absolute HTTP(S) URLs without credentials, deduplicated and bounded
+before caching; publication also applies a shared link-byte budget and reports
+omissions without shortening URLs.
+
+Explicit Exa freshness requirements are translated into fallback-native controls.
+Backends that cannot preserve them are skipped. Cached-only Exa requests do not
+trigger live fallbacks. Fallback classification never searches document prose
+for error phrases. Search/fetch source identities are preserved under output
+limits, and oversized documentation is omitted as complete snippets with counts
+and refinement guidance rather than silently cutting code.
+
+All five tool renderers strip terminal control sequences and directional control
+characters from untrusted display text before applying theme styling. This
+presentation protection does not make fetched content trusted instructions.
+Global configuration follows Pi's agent-directory resolver, including
+`PI_CODING_AGENT_DIR`; project configuration still requires project trust.
 
 The `web` namespace and read-only/idempotent/open-world annotations are advisory.
 They do not approve provider spending, bypass tool hooks, or make an inactive
