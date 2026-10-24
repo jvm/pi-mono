@@ -21,6 +21,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Fixed
 
+- Render library search, library documentation, and code search as compact summaries with ranked candidates or source lists on expansion, instead of wrapping raw JSON across the terminal. Include pending, empty, error, and output-limit states without changing model-facing results.
 - Preserve complete code-search source URLs and useful excerpts within the serialized 50,000-byte budget, with exact result/context omission counts. Refill the evidence budget after dropping oversized source metadata. Do not silently collapse oversized evidence to 1,000 characters.
 - Never use text/summary-only fallbacks as code evidence or locally cache code-search responses. Count unusable/no-excerpt sources, and surface failures without automatic stale or legacy fallback.
 - Respect Exa Contents per-URL failure statuses and preserve requested document identities through redirects, fallback retrieval, and caching. Never reuse another URL's result for a missing or failed page.

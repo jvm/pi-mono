@@ -153,6 +153,20 @@ Provider CLI flags are temporary for the Pi process. Restart/reload Pi after cha
 
 ## Tools
 
+### Terminal result views
+
+`library_search`, `library_docs`, and `code_search` show compact completion
+summaries instead of raw JSON in the interactive transcript. Expand a tool result
+with Pi's expand-tools action (default: Ctrl+O) to inspect ranked library candidates,
+available versions, documentation sources, or code source titles and URLs.
+Long fields are clipped to the terminal width; version previews show at most two
+entries plus the remaining count. Code-search summaries flag reduced output;
+expanded views show omitted-source and context counts when present.
+
+These views change presentation only. Model-facing JSON and typed codemode
+results retain the same bounded, redacted data, including snippets and code.
+Final print, JSON, and RPC tool results are unchanged.
+
 ### `web_search`
 
 Searches with the active search provider and returns compact results grouped by query.
@@ -474,6 +488,29 @@ npm test
 npm audit --omit=dev
 npm run pack:dry-run
 ```
+
+### Manual terminal smoke test
+
+From the monorepo root, with Context7 and Exa credentials configured:
+
+```bash
+pi -ne -e ./packages/pi-web-kit
+```
+
+Ask Pi to run `library_search` for a library with multiple matches, then
+`library_docs` and `code_search` for a specific API question. Check that:
+
+- Each running tool shows a short pending message without a percentage.
+- Each completed result shows two summary rows rather than raw JSON.
+- The expand-tools action (default: Ctrl+O) reveals candidate IDs and short
+  version previews, the resolved docs library and sources, or ranked code URLs.
+- Narrowing the terminal clips fields rather than adding wrapped output rows.
+- Empty results and provider failures do not show a success heading.
+
+Repeat in regular and fullscreen terminal modes when changing renderer layout.
+Automated tests cover mocked provider calls through the registered renderers,
+data-contract preservation, errors, output limits, Unicode, and narrow widths;
+this manual check covers the host's interactive expansion and redraw behavior.
 
 ### Manual Exa comparison and smoke test
 

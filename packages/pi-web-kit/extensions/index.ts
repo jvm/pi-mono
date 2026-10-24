@@ -13,6 +13,7 @@ import type { FetchProviderName, SearchProviderName, WebFetchResult } from "../s
 import { canonicalWebUrl, normalizeUrlInput } from "../src/urls.js";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import { projectOutput, publicPageError, redactOutput, redactText, WEB_OUTPUT_SCHEMAS, WEB_TOOL_METADATA } from "../src/output.js";
+import { researchProgress, researchRenderers } from "../src/research-render.js";
 
 const REGISTERED_TOOLS_ENTRY = "pi-web-kit:registered-tools";
 
@@ -225,12 +226,14 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
       promptSnippet: "List candidate library IDs; library_docs resolves names on its own.",
       promptGuidelines: ["Use library_search only to inspect matching libraries (official source, versions, forks) before a precise library_docs call.", "Not needed for ordinary doc lookups — library_docs resolves a libraryName for you."],
       parameters: buildLibrarySearchSchema(),
-      async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
+      ...researchRenderers("library_search"),
+      async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
         const params = rawParams as Record<string, any>;
         const libraryName = requiredString(params.libraryName, "libraryName");
         const query = optionalString(params.query, "query") ?? libraryName;
         const limit = parseInteger(params.limit, 10, "limit", 1, MAX_NUM_RESULTS);
         const provider = createContext7Provider(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)));
+        onUpdate?.(researchProgress("library_search"));
         const result = await provider.searchLibraries({ libraryName, query, fast: params.fast === true, limit }, signal);
         return result;
       },
@@ -243,11 +246,13 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
       promptSnippet: "Get current, version-aware library/framework/SDK docs and code examples.",
       promptGuidelines: ["Use library_docs for any library, framework, SDK, API, or CLI — even familiar ones like React, Next.js, Prisma, or Express. Training data may be outdated; this returns version-specific docs.", "Prefer library_docs over web_search or your own knowledge for library/API questions. Pass libraryName and query; you rarely need library_search first."],
       parameters: buildLibraryDocsSchema(),
-      async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
+      ...researchRenderers("library_docs"),
+      async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
         const params = rawParams as Record<string, any>;
         const query = requiredString(params.query, "query");
         const limit = parseInteger(params.limit, 10, "limit", 1, MAX_NUM_RESULTS);
         const provider = createContext7Provider(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)));
+        onUpdate?.(researchProgress("library_docs"));
         let libraryId = optionalString(params.libraryId, "libraryId");
         if (!libraryId) {
           const libraryName = requiredString(params.libraryName, "libraryName");
@@ -274,9 +279,11 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
         ...(startupConfig.apiKeys.context7 ? ["Prefer library_docs for official API/reference documentation."] : []),
       ],
       parameters: buildCodeSearchSchema(),
-      async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
+      ...researchRenderers("code_search"),
+      async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
         const params = rawParams as Record<string, any>;
         const provider = createCodeSearchProvider(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)), diagnostic => pi.events?.emit("pi-web-kit:exa-diagnostics", diagnostic));
+        onUpdate?.(researchProgress("code_search"));
         const result = await provider.searchCode(params as unknown as import("../src/types.js").ExaCodeInput, signal);
         return result;
       },
