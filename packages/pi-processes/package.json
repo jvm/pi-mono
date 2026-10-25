@@ -1,6 +1,6 @@
 {
   "name": "pi-processes",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Codex-inspired process execution for Pi on macOS and Linux.",
   "type": "module",
   "license": "MIT",
@@ -10,18 +10,45 @@
     "url": "git+https://github.com/jvm/pi-mono.git",
     "directory": "packages/pi-processes"
   },
-  "bugs": { "url": "https://github.com/jvm/pi-mono/issues" },
+  "bugs": {
+    "url": "https://github.com/jvm/pi-mono/issues"
+  },
   "homepage": "https://github.com/jvm/pi-mono/tree/main/packages/pi-processes#readme",
-  "keywords": ["pi-package", "pi-extension", "pi", "process", "pty", "codex"],
-  "pi": { "extensions": ["./index.ts"] },
-  "files": ["index.ts", "extensions", "src", "README.md", "LICENSE", "CHANGELOG.md", "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md"],
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "process",
+    "pty",
+    "codex"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "files": [
+    "index.ts",
+    "extensions",
+    "src",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md"
+  ],
   "scripts": {
     "check": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.mjs",
     "pack:dry-run": "npm pack --dry-run"
   },
-  "peerDependencies": { "@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-tui": "*", "typebox": "*" },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.1.0",
     "@earendil-works/pi-tui": "1.1.0",
@@ -30,9 +57,20 @@
     "typebox": "^1.3.34",
     "typescript": "^7.0.2"
   },
-  "dependencies": { "@mocito/install-telemetry": "0.1.1" },
-  "optionalDependencies": { "node-pty": "1.2.0-beta.15" },
-  "publishConfig": { "access": "public" },
-  "engines": { "node": ">=22.19.0" },
-  "os": ["darwin", "linux"]
+  "dependencies": {
+    "@mocito/install-telemetry": "0.1.1"
+  },
+  "optionalDependencies": {
+    "node-pty": "1.2.0-beta.15"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ]
 }

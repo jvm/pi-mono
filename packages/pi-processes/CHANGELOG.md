@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-25
+
 ### Fixed
 
 - Preserve effective shell path and command-prefix settings when delegating ordinary bash calls.
