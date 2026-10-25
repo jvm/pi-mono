@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-10-25
+
 ### Fixed
 
 - Preserve tool access during Pi 1.4 automatic server compaction with a stable namespace base and chronological inline `additional_tools` updates. Adapt eligible requests automatically, with no tool-strategy flag.
