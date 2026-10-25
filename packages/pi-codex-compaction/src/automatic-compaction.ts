@@ -7,6 +7,7 @@ import {
   type ExtensionContext,
   type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
+import { hybridTools } from "./inline-tools.js";
 
 const KIND = "pi-codex-compaction:automatic:v1";
 const CONFIG = `${KIND}:config`;
@@ -137,7 +138,7 @@ function summaryText(item: unknown): string | undefined {
   return record(part) && part.type === "input_text" && typeof part.text === "string" ? part.text : undefined;
 }
 
-function replay(payload: Item, checkpoint: Checkpoint, ctx: ExtensionContext): Item | undefined {
+function replay(payload: Item, checkpoint: Checkpoint, ctx: ExtensionContext, preserveInline = false): Item | undefined {
   if (!Array.isArray(payload.input)) return undefined;
   const projected = ctx.sessionManager.buildSessionProjection().entries
     .find((entry) => entry.sourceEntry.id === checkpoint.assistantEntryId);
@@ -151,23 +152,36 @@ function replay(payload: Item, checkpoint: Checkpoint, ctx: ExtensionContext): I
   const serialized = payload.input.slice(start, start + checkpoint.outputHashes.length);
   if (serialized.length !== checkpoint.outputHashes.length ||
       serialized.some((item, i) => outputHash(item) !== checkpoint.outputHashes[i])) return undefined;
-  // Keep current system/tool declarations before the marker and all later tool
-  // results/messages. Never search-and-delete arbitrary matching output IDs.
+  // A checkpoint does not restore inline tool declarations that preceded it.
+  // Pi 1.4 sends the initial loadout in additional_tools, not top-level tools.
+  // Reintroduce those exact current declarations after the checkpoint and before
+  // its output suffix. Preserve later tool changes/results and top-level tools.
+  const prefix = payload.input.slice(0, index);
+  if (preserveInline) return { ...payload, input: [
+    ...prefix, ...structuredClone(checkpoint.replay), ...payload.input.slice(start + serialized.length),
+  ] };
+  const inlineTools = (item: unknown) => record(item) && item.type === "additional_tools";
+  const [saved, ...suffix] = structuredClone(checkpoint.replay);
   return { ...payload, input: [
-    ...payload.input.slice(0, index),
-    ...structuredClone(checkpoint.replay),
+    ...prefix.filter((item) => !inlineTools(item)),
+    saved,
+    ...prefix.filter(inlineTools),
+    ...suffix,
     ...payload.input.slice(start + serialized.length),
   ] };
 }
 
-function incompatible(payload: Item): boolean {
+function incompatible(payload: Item, supportedInline = false): boolean {
   return payload.previous_response_id != null || payload.conversation != null ||
     payload.context_management != null || payload.truncation != null ||
     payload.background === true || payload.generate === false ||
     (record(payload.multi_agent) && payload.multi_agent.enabled === true) ||
     !Array.isArray(payload.input) ||
     payload.input.some((item) => record(item) &&
-      (item.type === "configuration_update" || item.type === "compaction_trigger"));
+      // Automatic server compaction can discard these declarations during the
+      // same response, before turn_end/replay can repair tool availability.
+      ((!supportedInline && item.type === "additional_tools") ||
+        item.type === "configuration_update" || item.type === "compaction_trigger"));
 }
 
 function fallbackSummary(entries: SessionEntry[], ctx: ExtensionContext): string {
@@ -227,6 +241,7 @@ export function registerAutomaticCompaction(pi: ExtensionAPI): void {
   let attempt: Attempt | undefined;
   let blocked = false;
   let warmingModel: string | undefined;
+  let currentToolNames: string[] | undefined;
   const modelKey = (model: Model<any>) => JSON.stringify([model.provider, model.api, model.id, model.baseUrl]);
 
   const enabled = () => override?.enabled ?? pi.getFlag("server-compaction") === true;
@@ -236,6 +251,7 @@ export function registerAutomaticCompaction(pi: ExtensionAPI): void {
     attempt = undefined;
     blocked = false;
     warmingModel = undefined;
+    currentToolNames = undefined;
     override = undefined;
     for (const entry of ctx.sessionManager.getBranch()) {
       if (entry.type === "custom" && entry.customType === CONFIG && record(entry.data) &&
@@ -249,11 +265,16 @@ export function registerAutomaticCompaction(pi: ExtensionAPI): void {
   pi.on("session_start", reset);
   pi.on("session_tree", reset);
   pi.on("session_shutdown", () => { attempt = undefined; inTurn = false; warmingModel = undefined; });
-  pi.on("turn_start", () => { inTurn = true; attempt = undefined; });
+  pi.on("turn_start", () => { inTurn = true; attempt = undefined; currentToolNames = undefined; });
   pi.on("session_before_compact", () => { compacting = true; attempt = undefined; });
   pi.on("session_compact", () => { compacting = false; });
   pi.on("session_compact_failed", () => { compacting = false; });
   pi.on("agent_end", () => { inTurn = false; attempt = undefined; });
+  pi.on("context_with_system", (event, ctx) => {
+    if (!inTurn || compacting || !enabled() || !supports(ctx.model)) return;
+    // Observation only. The serialized payload later filters hidden declarations.
+    currentToolNames = getCurrentSystemMessage(event.messages)?.toolsAdded?.map(tool => tool.name);
+  });
   // Warming replays the previous request. Stop only if that actual request used
   // automatic compaction, even if the user subsequently switched the toggle off.
   // Other providers and requests skipped by the compatibility guard are unchanged.
@@ -288,22 +309,26 @@ export function registerAutomaticCompaction(pi: ExtensionAPI): void {
     let payload = event.payload;
     if (payload.previous_response_id != null || payload.conversation != null) return;
     const checkpoint = activeCheckpoint(ctx);
-    // Disabled mode with no saved checkpoint must not cause extra auth resolution.
-    if (!checkpoint && (!enabled() || blocked || !inTurn || compacting || incompatible(payload))) return;
-    const credential = await identity(ctx);
-    if (!credential) return;
-    if (checkpoint && checkpoint.identity === credential && checkpoint.model === ctx.model.id) {
-      payload = replay(payload, checkpoint, ctx) ?? payload;
-    }
-    // Do not configure standalone summarization, cache warming, or foreign nested calls.
-    if (!enabled() || blocked || !inTurn || compacting || incompatible(payload)) return payload;
     const settings = pi.getSettings().compaction;
     const perModel = settings?.modelOverrides?.[`${ctx.model.provider}/${ctx.model.id}`];
     const reserve = perModel?.reserveTokens ?? settings?.reserveTokens ?? 16_384;
     const trigger = ctx.model.contextWindow - reserve;
     const raw = override?.threshold ?? pi.getFlag("server-compaction-threshold");
     const threshold = raw === undefined ? Math.floor(trigger * 0.6) : Number(raw);
-    if (!Number.isSafeInteger(threshold) || threshold < 1000 || threshold >= trigger) return payload;
+    const validThreshold = Number.isSafeInteger(threshold) && threshold >= 1000 && threshold < trigger;
+    const snapshot = enabled() && !blocked && inTurn && !compacting && validThreshold && !incompatible(payload, true)
+      ? hybridTools(payload, currentToolNames)
+      : undefined;
+    // Disabled mode with no saved checkpoint must not cause extra auth resolution.
+    if (!checkpoint && (!enabled() || blocked || !inTurn || compacting || incompatible(payload, !!snapshot))) return;
+    const credential = await identity(ctx);
+    if (!credential) return;
+    if (snapshot) payload = snapshot;
+    if (checkpoint && checkpoint.identity === credential && checkpoint.model === ctx.model.id) {
+      payload = replay(payload, checkpoint, ctx, !!snapshot) ?? payload;
+    }
+    // Do not configure standalone summarization, cache warming, or foreign nested calls.
+    if (!enabled() || blocked || !inTurn || compacting || incompatible(payload, !!snapshot) || !validThreshold) return payload;
     attempt = { sessionId: ctx.sessionManager.getSessionId(), model: ctx.model.id, identity: credential,
       leafId: ctx.sessionManager.getLeafId(), invalid: false, completed: false,
       items: new Map(), itemBytes: 0, started: performance.now() };

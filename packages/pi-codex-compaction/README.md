@@ -12,6 +12,12 @@ and continue inference without Pi stopping for a separate summary request.
 - Keeps `/server-compaction off`, manual `/compact`, and Pi's standard compactor
   as recovery options.
 
+**Pi 1.4 compatibility:** inline `additional_tools` are adapted automatically.
+A stable namespace base keeps tools available during compaction; later inline
+updates retain their original positions and preserve cached prefixes. Each
+compaction starts a fresh base from Pi's current tool state. There is no
+tool-strategy setting or opt-in.
+
 Requires **Pi 1.1.0 or later**. The package name is unchanged, but the legacy
 `openai-codex` provider is no longer supported.
 
@@ -42,7 +48,7 @@ Select a GPT-5/GPT-6 model on provider `openai`, API `openai-responses`, at
 `off` setting on the current session branch remains respected.
 
 Load this package **after extensions that transform provider requests**. Pi
-orders handlers by extension load order. The compatibility guard cannot prevent
+orders handlers by extension load order. The compatibility check cannot prevent
 a later extension from adding incompatible fields.
 
 ## Controls and thresholds
@@ -77,16 +83,31 @@ ordinary long sessions.
 The extension adds
 `context_management: [{ type: "compaction", compact_threshold: ... }]`,
 `store: false`, and `stream: true` to eligible ordinary requests. It does not
-construct a separate compaction request or reconstruct tool declarations.
-Pi's actual request retains grammar tools, hidden loadouts, reasoning options,
-Fast settings, and declarations carried through `additional_tools`.
+construct a separate compaction request. Compatible requests retain Pi's grammar
+tools, hidden loadouts, reasoning options, and Fast settings.
+
+For Pi 1.4's inline tool declarations, the extension derives the initial visible
+function/custom tools from the provider's exact serialization and supplies them
+in top-level namespaces, removing that redundant leading declaration from input.
+It keeps later `additional_tools` items and all system messages in place.
+Later additions and updates to inline-only tools do
+not change the top-level base. A changed, removed or hidden base tool starts a
+new base with the current effective loadout.
+
+Pi folds the effective tool state into its system checkpoint after compaction.
+The next request uses that current state as a new namespace base. Keeping an
+older base across checkpoints was tested and rejected: it preserved some cache
+but lost an inline-only tool during a later compacted response.
 
 Text streams normally. After successful completion, the extension commits a
 Pi compaction entry at `turn_end`, before the next assistant response. It stores
 the latest encrypted checkpoint and the exact provider output following it.
 On subsequent requests, it replaces the readable fallback and the retained
 assistant's serialized items with that checkpoint and output suffix. Later
-tool results and messages remain.
+tool results and messages remain. While automatic adaptation is active, native
+inline positions are preserved. When automatic mode is off or adaptation is
+unavailable, current leading inline declarations are moved after the checkpoint,
+before its output suffix, to repair replay from existing sessions.
 
 Before adopting a checkpoint, the extension verifies the retained assistant
 through the configured provider's public `streamSimple` / `onPayload` boundary.
@@ -114,8 +135,8 @@ RemoteCompactionV2 protocol.
 
 | Route | Behavior |
 | --- | --- |
-| `openai` + `openai-responses`, official endpoint, GPT-5/GPT-6 | Automatic compaction on by default; server/model availability still applies |
-| Same route with ChatGPT sign-in | Live checkpoint/replay verified with `gpt-6-astra` |
+| `openai` + `openai-responses`, official endpoint, GPT-5/GPT-6 | Automatic compaction on by default, including safely mapped Pi inline declarations |
+| Same route with ChatGPT sign-in | Live protocol checks on Astra and Sol; exact-model and repeated-compaction measurements are recorded in the benchmark |
 | Same route with an API key | Mocked contract coverage; no live billing test |
 | Legacy `openai-codex`, custom endpoints, other providers, routed model mismatch | Left unchanged; no compaction or auth hooks for those routes |
 
@@ -126,14 +147,19 @@ Existing checkpoints use their bounded readable fallback rather than opaque
 replay. Pi's ordinary routed context-limit checks and standard compaction remain
 available; no checkpoint identity is inferred from the payload's model name.
 
-GPT-6.1 Sol matches the GPT-6 candidate guard, but the existing live replay
-evidence is Astra-only. Model eligibility is not proof of account availability.
+Live checks do not cover every GPT-5/GPT-6 variant.
+Model eligibility is not proof of account availability.
 No default model is changed. See the [provider migration assessment](../pi-openai-reasoning/README.md#provider-migration-assessment)
 for the separate reasoning-update limitation.
 
-- Requests with `configuration_update`, `compaction_trigger`, an existing
+- Requests with unmappable inline tools, `configuration_update`, `compaction_trigger`, an existing
   `context_management`, stateful continuation, truncation, background processing,
   or enabled multi-agent mode are not opted in.
+- Pi 1.4's inline tools need the automatic namespace base. Inline-only requests
+  lost tool access in direct Responses tests without Pi, before client replay.
+  Unknown tool shapes, conflicting namespaces, foreign top-level declarations,
+  missing effective loadouts, and inputs over 4 MiB leave ordinary inference
+  unchanged rather than guessing a tool mapping.
 - Keep Pi's normal automatic compaction enabled. If no checkpoint is adopted,
   its normal threshold and overflow recovery remain available. Manual `/compact`,
   including custom instructions, uses Pi's standard summarizer.
@@ -155,9 +181,28 @@ for the separate reasoning-update limitation.
   automatic compaction. Turning the toggle off does not make an already-cached
   automatic request safe to replay; a new ordinary non-automatic request clears
   that restriction. Unrelated providers retain their normal warming behavior.
+- Cache reuse is a measured optimization, not a guarantee. Additive inline
+  changes preserve the base; changes to that base or a new compaction epoch can
+  invalidate cached prefixes. Stable subsequent requests can reuse cache again.
+  The extension preserves Pi's existing affinity/cache fields and does not
+  enable explicit-cache options rejected by the tested ChatGPT sign-in route.
 - Usage stays on the ordinary assistant response and is counted once. Bounded
   success diagnostics stay local; they contain timing and size counters, not
   conversation content.
+
+### Recovering a session that reports missing tools
+
+Stop an active goal's continuation loop with `/goal pause`, if applicable.
+Turning `/server-compaction off` stops new automatic checkpoints, but older
+package versions still replay a saved checkpoint with declarations before it;
+the command alone does not repair that case.
+
+With the fixed package loaded, compatible saved checkpoints replay with the
+current inline tools after the checkpoint. Reload the extension, then test one
+harmless tool call before resuming work. Without the fix, start a fresh session
+with server compaction off, or navigate to an entry before the faulty checkpoint,
+turn server compaction off on that branch, and use standard `/compact`.
+Do not delete or edit the original session file.
 
 ## Migration from the legacy provider
 
@@ -207,6 +252,30 @@ npm test -w packages/pi-codex-compaction
 npm run -w packages/pi-codex-compaction pack:dry-run
 ```
 
+Run the additional **offline** host contracts against an installed
+Pi SDK through its public entry point:
+
+```bash
+PI_COMPACTION_HOST_ENTRY=/path/to/pi-coding-agent/dist/index.js \
+  npm test -w packages/pi-codex-compaction
+```
+
+The additional host suites mock all transport. They check native function/grammar declarations,
+namespaced calls, calls before and after checkpoints, tool removal/redefinition,
+mode-off, reload, branches, codemode-hidden tools, multiple compaction epochs,
+cache-prefix stability, user-fact recall and Pi's threshold safety net.
+Host suites are skipped by ordinary `npm test` unless the host entry is supplied.
+The installed Pi 1.4.0 SDK passed these contracts; the pinned Pi 1.1 baseline
+alone does not exercise its native inline serializer.
+
+Earlier subscription comparisons reproduced inline tool loss and tested
+full-snapshot alternatives. The selected implementation instead keeps native
+system/tool history intact and preserves a stable namespace base between
+checkpoints. The comparison harness retains rejected alternatives for research;
+the published extension has one automatic implementation. Measurements in
+`tests/AUTOMATIC_BENCHMARK.md` distinguish cache gains from unavoidable resets
+and do not claim a globally optimal cost or latency result.
+
 Before releasing, also install the candidate tarball outside the checkout with
 host-peer installation suppressed, then load it through the installed Pi CLI.
 `pi -ne -e /path/to/installed/package --offline --help` must show both
@@ -217,6 +286,14 @@ For an approved TUI smoke test, cross the configured threshold in a synthetic
 session, then check facts from earlier turns and a tool continuation. Check replay
 after `/reload`, mode-off, and branch navigation. Successful adoption should
 not start Pi's separate compaction lifecycle.
+
+For Pi 1.4's inline-tool route, check a harmless tool call in a fresh synthetic
+session, after several server checkpoints, and after reloading a saved checkpoint.
+Automatic mode must promote the leading namespace base without moving later inline updates.
+With automatic mode off, leading declarations must follow the saved checkpoint.
+Tool results must remain after their calls. Keep standard Pi compaction enabled.
+Use the actual installed host for this smoke test, not only the pinned development
+SDK: their tool serialization differs.
 
 References:
 

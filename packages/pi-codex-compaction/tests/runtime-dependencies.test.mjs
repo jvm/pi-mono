@@ -11,7 +11,8 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 
 const run = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const hostDist = dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
+const hostDist = process.env.PI_COMPACTION_HOST_ENTRY ? dirname(resolve(process.env.PI_COMPACTION_HOST_ENTRY))
+  : dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")));
 const hostManifest = JSON.parse(await readFile(join(hostDist, "..", "package.json"), "utf8"));
 const hostCli = resolve(hostDist, "..", hostManifest.bin.pi);
 // The npm CLI uses embedded virtual modules, unlike the ordinary SDK entry's
@@ -35,6 +36,7 @@ before(async () => {
   const [packed] = JSON.parse(stdout);
   await run("tar", ["-xzf", join(temp, packed.filename), "-C", temp]);
   assert.ok(packed.files.some((file) => file.path === "src/automatic-compaction.ts"));
+  assert.ok(packed.files.some((file) => file.path === "src/inline-tools.ts"));
   assert.equal(packed.files.some((file) => /^(tests|node_modules)\//.test(file.path)), false);
 
   const manifest = JSON.parse(await readFile(join(temp, "package", "package.json"), "utf8"));
@@ -81,6 +83,7 @@ test("loads the packed entry through Pi without physically installed host peers"
   assert.equal(result.extensions.length, 1);
   assert.ok(result.extensions[0].commands.has("server-compaction"));
   assert.ok(result.extensions[0].flags.has("server-compaction"));
+  assert.equal(result.extensions[0].flags.has("server-compaction-tools"), false);
 });
 
 test("Pi CLI loads the packed extension and shows its flags outside the repository", async () => {
@@ -125,9 +128,14 @@ for (const mode of ["print", "json", "rpc"]) {
     await credentials.modify("openai", async () => ({ type: "api_key", key: "sk-fixture-not-a-real-key" }));
     const runtime = await ModelRuntime.create({ credentials, modelsPath: null,
       modelsStorePath: join(temp, `models-${mode}.json`), refreshOnCreate: false });
-    const model = runtime.getModel("openai", "gpt-6-astra");
+    const catalogModel = runtime.getModel("openai", "gpt-6-astra");
+    // Bundled static catalogs can advertise effort transitions that the public
+    // compaction route rejects. This contract exercises the compatible route;
+    // separate request-policy tests prove configuration_update is left alone.
+    const model = { ...catalogModel, compat: { ...catalogModel.compat, supportsMidConvoEffort: false } };
     const settingsManager = SettingsManager.inMemory({
       compaction: { enabled: false }, retry: { enabled: false },
+      defaultTools: ["packed_fixture"],
     });
     const manager = SessionManager.inMemory(temp);
     const loader = resourceLoader(settingsManager, [(pi) => pi.registerTool({
@@ -138,14 +146,18 @@ for (const mode of ["print", "json", "rpc"]) {
     await loader.reload();
     assert.deepEqual(loader.getExtensions().errors, []);
     const { session } = await createAgentSession({ cwd: temp, agentDir: join(temp, "agent"),
-      model, modelRuntime: runtime, settingsManager, sessionManager: manager, resourceLoader: loader });
+      model, modelRuntime: runtime, settingsManager, sessionManager: manager, resourceLoader: loader, thinkingLevel: "low" });
     const errors = [];
     try {
       await session.bindExtensions({ mode, onError: (error) => errors.push(error) });
       await session.prompt("/server-compaction on 1000");
       await session.prompt("synthetic old context");
+      assert.deepEqual(errors.map(error => ({ event: error.event, error: error.error })), []);
       assert.equal(requests.length, 2, "ordinary inference plus tool continuation only");
-      assert.deepEqual(requests[0].context_management, [{ type: "compaction", compact_threshold: 1000 }]);
+      assert.deepEqual(requests[0].context_management, [{ type: "compaction", compact_threshold: 1000 }],
+        JSON.stringify({ route: [model.provider, model.api, model.baseUrl], input: requests[0].input.map(i => ({
+          type: i.type, role: i.role, tools: i.tools?.map(t => [t.type, t.name]),
+        })), tools: requests[0].tools?.map(t => [t.type, t.name]) }));
       assert.equal(manager.getBranch().some((item) => item.type === "compaction" && item.details?.kind === kind), true);
       assert.deepEqual(requests[1].input.find((item) => item.type === "compaction"), checkpoint);
       assert.deepEqual(requests[1].input.find((item) => item.type === "function_call"), call);
