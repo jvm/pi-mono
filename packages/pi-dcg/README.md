@@ -82,7 +82,7 @@ Pi's separate RPC control-channel `{"type":"bash"}` command does not emit either
 
 For every non-empty command, the extension starts dcg directly without a shell, sends a Claude-compatible `PreToolUse` payload on stdin, and waits for dcg's decision before Pi executes the command.
 
-Pi allows `tool_call` handlers to rewrite tool arguments in sequence. `pi-dcg` checks **in-place** mutations made by earlier handlers, then seals the approved `command`, freezes all startup arguments, and seals their input reference. Changes during asynchronous checks or later changes to mode, cwd, or command block execution. Managed bash working directories are canonicalized before policy checks and execution. Pi 1.1.0 has a separate argument-identity limitation when an earlier handler replaces the entire input object; see [Limitations](#limitations).
+Pi allows `tool_call` handlers to rewrite tool arguments in sequence. `pi-dcg` checks **in-place** mutations made by earlier handlers, then seals the approved `command`, freezes all startup arguments, and seals their input reference. Changes during asynchronous checks or later changes to mode, cwd, or command block execution. Managed bash working directories are canonicalized before policy checks and execution, but only when the registered executor advertises the local `pi-processes.bash-workdir.v1` capability and the call uses an explicit managed mode. Ordinary bash ignores extra `workdir` arguments, so those arguments never select its policy directory. Pi 1.1.0 has a separate argument-identity limitation when an earlier handler replaces the entire input object; see [Limitations](#limitations).
 
 DCG does not replace the bash executor, activate excluded tools, or bypass another extension's approval hooks.
 

@@ -1,4 +1,4 @@
-import { createBashToolDefinition, type BashToolDetails, type ExtensionAPI, type ExtensionContext, type ExtensionToolContext, type SessionBoundaryDraft } from "@earendil-works/pi-coding-agent";
+import { createBashToolDefinition, SettingsManager, type BashToolDetails, type ExtensionAPI, type ExtensionContext, type ExtensionToolContext, type SessionBoundaryDraft } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import { ProcessRuntime, resolveWorkdir, type ProcessResult } from "../src/runtime.js";
@@ -216,6 +216,13 @@ export default function piProcesses(pi: ExtensionAPI): void {
   });
 
   const builtin = createBashToolDefinition(process.cwd());
+  const bashParameters = Type.Object({
+    ...builtin.parameters.properties,
+    mode: Type.Optional(RunMode),
+    ...ManagedOptions.properties,
+  }, { additionalProperties: false });
+  // Local executor/guard contract, not model-supplied input or a provider schema keyword.
+  Object.defineProperty(bashParameters, Symbol.for("pi-processes.bash-workdir.v1"), { value: true });
   pi.registerTool({
     name: "bash", label: "Bash",
     description: "Execute a local shell command. Without mode, preserves built-in bash output, errors, and timeout behavior. Explicit foreground/background/service modes use managed processes. Background returns promptly and delivers final output automatically to this task: continue independent work, do not poll for completion. Service does not auto-resume. macOS/Linux; not a sandbox.",
@@ -236,11 +243,7 @@ export default function piProcesses(pi: ExtensionAPI): void {
     ],
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     executionMode: "parallel",
-    parameters: Type.Object({
-      ...builtin.parameters.properties,
-      mode: Type.Optional(RunMode),
-      ...ManagedOptions.properties,
-    }, { additionalProperties: false }),
+    parameters: bashParameters,
     outputSchema: Type.Union([builtin.outputSchema!, ResultSchema]),
     renderCall,
     renderResult(output, options, theme, context) {
@@ -257,7 +260,10 @@ export default function piProcesses(pi: ExtensionAPI): void {
         if ([title, workdir, tty, max_output_tokens].some(value => value !== undefined)) {
           throw new Error("Managed bash options require an explicit mode");
         }
-        return createBashToolDefinition(ctx.cwd).execute(_id, { command, timeout }, signal, _update, ctx);
+        const settings = SettingsManager.inMemory(pi.getSettings());
+        return createBashToolDefinition(ctx.cwd, {
+          shellPath: settings.getShellPath(), commandPrefix: settings.getShellCommandPrefix(),
+        }).execute(_id, { command, timeout }, signal, _update, ctx);
       }
       if (!command.length || command.length > 65_536) {
         throw new Error("Managed bash command must contain 1 to 65536 characters");

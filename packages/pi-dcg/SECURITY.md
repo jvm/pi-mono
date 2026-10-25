@@ -19,6 +19,7 @@ The bridge:
 - starts the configured dcg executable directly without a shell;
 - sends command text to that local child process on stdin;
 - sets the DCG child cwd to Pi's current working directory for ordinary bash, or the canonical command directory for managed bash and `exec_command`;
+- honors managed bash cwd only through a non-serialized capability on the registered executor schema, never through agent-supplied arguments alone; extra `workdir` fields on ordinary bash do not change its policy directory;
 - validates dcg's structured stdout decision;
 - seals an approved agent `bash` command, freezes all startup arguments (including mode and cwd), and seals its input reference so later `tool_call` handlers cannot change them unchecked; detects argument changes during asynchronous policy checks;
 - keeps allow-once commands out of model-visible denial results and shows them only through user-facing UI notifications;

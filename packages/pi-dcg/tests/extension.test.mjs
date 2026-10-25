@@ -23,6 +23,7 @@ function makePi() {
   return {
     handlers,
     commands,
+    getAllTools: () => [],
     on(event, handler) {
       const eventHandlers = handlers.get(event) ?? [];
       eventHandlers.push(handler);
