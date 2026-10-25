@@ -6,10 +6,11 @@ import { setTimeout as delay } from "node:timers/promises";
 import piProcesses from "../extensions/index.ts";
 import { CompletionCoordinator } from "../src/completion.ts";
 import { ProcessRuntime } from "../src/runtime.ts";
-import { fixture, textOf, deferred } from "../../pi-dcg/tests/session-fixture.mjs";
+import { fixture as dcgFixture, textOf, deferred } from "../../pi-dcg/tests/session-fixture.mjs";
 import { requestBody, textResponse } from "../../../tests/codex-harness.mjs";
 
 const dataOf = result => result.structuredContent ?? result.details ?? JSON.parse(textOf(result));
+const fixture = (t, options = {}) => dcgFixture(t, { ...options, omitShell: true });
 const notices = h => h.session.messages.filter(m => m.customType === "pi-processes-completed");
 async function eventually(check) {
   for (let n = 0; n < 150; n++) { if (check()) return; await delay(20); }
@@ -43,13 +44,13 @@ async function scripted(t, steps, extra = {}) {
   };
   return { ...h, requests, next: step => { steps[n] = step; } };
 }
-const command = (cmd, mode = "background", extra = {}) => [{ name: "exec_command", args: { cmd, mode, ...extra } }];
-const lastJob = h => dataOf(h.session.messages.findLast(m => m.role === "toolResult" && m.toolName === "exec_command")).session_id;
+const command = (command, mode = "background", extra = {}) => [{ name: "bash", args: { command, mode, ...extra } }];
+const lastJob = h => dataOf(h.session.messages.findLast(m => m.role === "toolResult" && m.toolName === "bash")).session_id;
 
 test("background idle resumes once with bounded sanitized output, never a visible bookkeeping message", async t => {
   const h = await scripted(t, [command("sleep 0.25; printf '\\033[31mfinal-result\\033[0m\\007'; exit 7")]);
   await h.session.prompt("Run validation.");
-  const launched = dataOf(h.session.messages.find(m => m.role === "toolResult" && m.toolName === "exec_command"));
+  const launched = dataOf(h.session.messages.find(m => m.role === "toolResult" && m.toolName === "bash"));
   assert.equal(launched.completion_delivery, "automatic");
   await eventually(() => notices(h).length === 1);
   await h.session.waitForIdle();
@@ -83,8 +84,8 @@ test("simultaneous completions batch, while independent foreground calls run con
     ...command("sleep 0.15; printf first"),
     ...command("sleep 0.15; printf second"),
     ...command("sleep 0.15; printf third"),
-    ...command("printf ready > a.ready; while ! test -f b.ready; do sleep 0.02; done; printf independent-a", "foreground", { timeout_ms: 2000 }),
-    ...command("printf ready > b.ready; while ! test -f a.ready; do sleep 0.02; done; sleep 0.4; printf independent-b", "foreground", { timeout_ms: 2000 }),
+    ...command("printf ready > a.ready; while ! test -f b.ready; do sleep 0.02; done; printf independent-a", "foreground", { timeout: 2 }),
+    ...command("printf ready > b.ready; while ! test -f a.ready; do sleep 0.02; done; sleep 0.4; printf independent-b", "foreground", { timeout: 2 }),
   ]]);
   const start = Date.now();
   await h.session.prompt("Parallel operations.");
@@ -147,7 +148,7 @@ test("new user task disarms old auto-resume but retains output", async t => {
   const tool = h.api.getAllTools().find(t => t.name === "process_output");
   assert.ok(tool);
   assert.deepEqual(h.errors, []);
-  const next = h.api.getAllTools().find(t => t.name === "exec_command");
+  const next = h.api.getAllTools().find(t => t.name === "bash");
   assert.ok(next.description.includes("do not poll"));
   assert.ok(id);
   h.next([{ name: "process_output", args: { session_id: id } }]);
@@ -161,7 +162,7 @@ test("new user task disarms old auto-resume but retains output", async t => {
 test("foreground attachment yields to a user steer without killing its newly created process", async t => {
   const started = deferred();
   const h = await scripted(t, [command("while ! test -f finish; do sleep 0.02; done; printf foreground-final", "foreground")]);
-  h.session.subscribe(e => { if (e.type === "tool_execution_start" && e.toolName === "exec_command") started.resolve(); });
+  h.session.subscribe(e => { if (e.type === "tool_execution_start" && e.toolName === "bash") started.resolve(); });
   const run = h.session.prompt("Foreground command.");
   await Promise.race([started.promise, delay(3000).then(() => { throw new Error("foreground did not start"); })]);
   await h.session.steer("Change direction.");
@@ -222,7 +223,7 @@ test("queued SDK steer releases a long dependency wait without stopping the proc
 
 test("service mode is immediate, silent on exit, and does not promise readiness", async t => {
   const h = await fixture(t, { after: [piProcesses] });
-  const launched = await h.run("exec_command", { cmd: "sleep 0.2; printf service-output", mode: "service", title: "Development server" });
+  const launched = await h.run("bash", { command: "sleep 0.2; printf service-output", mode: "service", title: "Development server" });
   assert.equal(dataOf(launched).status, "running");
   assert.equal(dataOf(launched).completion_delivery, "manual");
   assert.match(textOf(launched), /Check readiness separately/);
@@ -238,7 +239,7 @@ test("service mode is immediate, silent on exit, and does not promise readiness"
 for (const acknowledge of [false, true]) {
   test(`codemode nested final result ${acknowledge ? "explicitly consumes" : "does not silently consume"} auto-delivery`, async t => {
     const h = await fixture(t, { after: [piProcesses] });
-    const code = `const j=await tools.exec_command({cmd:"sleep 0.15; printf nested-result",mode:"background"});
+    const code = `const j=await tools.bash({command:"sleep 0.15; printf nested-result",mode:"background"});
       const r=await tools.process_wait({session_ids:[j.session_id],acknowledge:${acknowledge}});
       ${acknowledge ? "text(r);" : "text('Result deliberately not exposed');"}`;
     await h.script(code);
@@ -277,9 +278,9 @@ for (const nested of [false, true]) {
     t.after(() => { ProcessRuntime.prototype.start = start; });
     const h = await fixture(t, { after: [piProcesses] });
     if (nested) {
-      await h.script('const job=await tools.exec_command({cmd:"printf quick-result",mode:"background"}); text({id:job.session_id});');
+      await h.script('const job=await tools.bash({command:"printf quick-result",mode:"background"}); text({id:job.session_id});');
     } else {
-      const result = dataOf(await h.run("exec_command", { cmd: "printf quick-result", mode: "background" }));
+      const result = dataOf(await h.run("bash", { command: "printf quick-result", mode: "background" }));
       assert.equal(result.status, "exited");
       assert.equal(result.output, "quick-result");
     }
@@ -293,8 +294,8 @@ for (const nested of [false, true]) {
 test("explicit mode/legacy ambiguity is rejected before a process starts, including codemode", async t => {
   const h = await fixture(t, { after: [piProcesses] });
   for (const nested of [false, true]) {
-    const args = { cmd: "printf bad > started", mode: "background", yield_time_ms: 0 };
-    const r = nested ? await h.script(`text(await tools.exec_command(${JSON.stringify(args)}));`) : await h.run("exec_command", args);
+    const args = { command: "printf bad > started", mode: "background", yield_time_ms: 0 };
+    const r = nested ? await h.script(`text(await tools.bash(${JSON.stringify(args)}));`) : await h.run("bash", args);
     assert.equal(r.isError, true);
   }
   assert.deepEqual(dataOf(await h.run("process_list", {})).processes, []);

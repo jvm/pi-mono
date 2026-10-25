@@ -1,8 +1,39 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { setImmediate as tick } from "node:timers/promises";
+import { access, mkdir } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { DcgProcessError } from "../src/dcg-client.ts";
 import { COMMAND, SECOND_COMMAND, deferred, fixture, hookResponse, onBash, textOf } from "./session-fixture.mjs";
+
+for (const nested of [false, true]) {
+  test(`ordinary bash ${nested ? "codemode" : "direct"} cannot select a more permissive policy with extra fields`, async t => {
+    let permissive;
+    const h = await fixture(t, { omitShell: true,
+      process: async ({ request }) => hookResponse(request.cwd === permissive ? "allow" : "deny"),
+    });
+    permissive = join(h.ctx.cwd, "permissive");
+    await mkdir(permissive);
+    const args = { command: "printf unchecked > protected-marker", workdir: permissive, mode: "foreground" };
+    const result = nested ? await h.script(`text(await tools.bash(${JSON.stringify(args)}));`) : await h.run("bash", args);
+    assert.equal(result.isError, true);
+    assert.equal(h.checks[0].request.cwd, h.ctx.cwd);
+    await assert.rejects(access(join(h.ctx.cwd, "protected-marker")));
+    await assert.rejects(access(join(permissive, "protected-marker")));
+  });
+}
+
+test("ordinary bash really ignores extra workdir; DCG checks the directory the executor uses", async t => {
+  const h = await fixture(t, { omitShell: true });
+  const extra = join(h.ctx.cwd, "other");
+  await mkdir(extra);
+  const result = await h.run("bash", { command: "pwd; printf checked > actual-marker", workdir: extra });
+  assert.equal(result.isError, false);
+  assert.equal(h.checks[0].request.cwd, h.ctx.cwd);
+  await access(join(h.ctx.cwd, "actual-marker"));
+  await assert.rejects(access(join(extra, "actual-marker")));
+  assert.match(textOf(result), new RegExp(resolve(h.ctx.cwd)));
+});
 
 // Top-level tests are sequential: each fixture owns fetch and its disposable profile.
 for (const mode of ["off", "on", "only", "orchestrator"]) {

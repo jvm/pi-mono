@@ -26,6 +26,7 @@ const HEALTH_ICONS = {
 } as const;
 const MAX_COMMAND_PREVIEW_CHARS = 4_000;
 const CHECKED_BASH_SEAL = Symbol.for("pi-dcg.checked-bash-seal");
+const MANAGED_BASH_WORKDIR = Symbol.for("pi-processes.bash-workdir.v1");
 
 type GuardOutcome = { block: false } | { block: true; reason: string };
 type Health = "active" | "degraded" | "unknown";
@@ -279,13 +280,34 @@ export default function piDcg(
       return undefined;
     }
     if (!isToolCallEventType("bash", event)) return undefined;
-    const command = event.input.command;
-    const outcome = await guard(command, ctx.cwd, ctx);
+    const input = event.input as { command: string; workdir?: string } & Record<string, unknown>;
+    const snapshot = { ...input };
+    const command = input.command;
+    const schema = pi.getAllTools().find(tool => tool.name === "bash")?.parameters;
+    const managed = schema && Reflect.get(schema, MANAGED_BASH_WORKDIR) === true &&
+      (input.mode === "foreground" || input.mode === "background" || input.mode === "service");
+    // Built-in bash accepts extra fields but ignores workdir. Only an attested
+    // executor may change the policy directory; agent arguments cannot opt in.
+    const workdir = managed ? input.workdir : undefined;
+    if (workdir !== undefined && typeof workdir !== "string") {
+      return { block: true, reason: "dcg received invalid bash workdir" };
+    }
+    const cwd = workdir === undefined ? ctx.cwd : await realpath(resolve(ctx.cwd, workdir));
+    if (workdir !== undefined && !(await stat(cwd)).isDirectory()) {
+      return { block: true, reason: "Bash workdir is not a directory" };
+    }
+    const outcome = await guard(command, cwd, ctx);
     if (outcome.block) return { block: true, reason: outcome.reason };
+    if (event.input !== input || Object.keys(input).length !== Object.keys(snapshot).length ||
+      Object.keys(snapshot).some(key => input[key] !== snapshot[key])) {
+      return { block: true, reason: "dcg blocked bash arguments changed during the safety check" };
+    }
+    if (workdir !== undefined) input.workdir = cwd;
 
     // Seal against later mutations. Pi 1.1.0 cannot reconcile an input reference
     // replaced by an earlier handler; see the documented upstream limitation.
     sealCheckedBashCommand(event, command);
+    Object.freeze(input);
     return undefined;
   });
 

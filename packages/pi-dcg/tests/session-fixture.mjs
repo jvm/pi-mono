@@ -111,7 +111,7 @@ export async function fixture(t, options = {}) {
   try {
     h = await codexHarness([
       ...(options.mode === "off" ? [] : [createCodemodeExtension({ mode: options.mode ?? "only" })]),
-      ...(!options.shellLast ? [shell] : []),
+      ...(!options.shellLast && !options.omitShell ? [shell] : []),
       pi => {
         pi.on("tool_call", event => {
           if (event.toolName === "bash") calls.push({ ...event, input: { ...event.input } });
@@ -130,7 +130,7 @@ export async function fixture(t, options = {}) {
       ...(options.before ?? []),
       ...(options.omitDcg ? [] : [pi => piDcg(pi, { client, config })]),
       ...(options.after ?? []),
-      ...(options.shellLast ? [shell] : []),
+      ...(options.shellLast && !options.omitShell ? [shell] : []),
     ], {
       defaultTools: ["bash", ...(options.mode === "off" ? [] : ["codemode"])],
       ...(options.tools ? { tools: options.tools } : {}),

@@ -4,13 +4,13 @@ import { access, mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import piProcesses from "../extensions/index.ts";
-import { fixture, textOf, deferred } from "../../pi-dcg/tests/session-fixture.mjs";
+import { fixture, textOf, deferred } from "./process-fixture.mjs";
 import { DcgProcessError } from "../../pi-dcg/src/dcg-client.ts";
 
 const proc = (handler) => pi => pi.on("tool_call", (event, ctx) => {
-  if (event.toolName === "exec_command") return handler(event, ctx);
+  if (event.toolName === "bash") return handler(event, ctx);
 });
-const dataOf = result => result.structuredContent ?? JSON.parse(textOf(result));
+const dataOf = result => result.structuredContent ?? result.details ?? JSON.parse(textOf(result));
 const processes = async (t, opts = {}) => fixture(t, { ...opts, after: [piProcesses, ...(opts.after ?? [])] });
 
 for (const nested of [false, true]) {
@@ -19,8 +19,8 @@ for (const nested of [false, true]) {
       const h = await processes(t, { decision });
       const cmd = "printf guarded > started; printf result";
       const result = nested
-        ? await h.script(`const r=await tools.exec_command({cmd:${JSON.stringify(cmd)}}); text(r);`)
-        : await h.run("exec_command", { cmd });
+        ? await h.script(`const r=await tools.bash({command:${JSON.stringify(cmd)},mode:"foreground"}); text(r);`)
+        : await h.run("bash", { command: cmd, mode: "foreground" });
       assert.equal(h.checks.length, 1);
       assert.equal(h.checks[0].command, cmd);
       assert.equal(result.isError, decision !== "allow");
@@ -41,18 +41,18 @@ test("DCG uses canonical command cwd and seals later cwd/command mutations", asy
   const dir = join(h.ctx.cwd, "work");
   await mkdir(dir);
   const canonical = await realpath(dir);
-  const result = await h.run("exec_command", { cmd: "pwd", workdir: "work" });
+  const result = await h.run("bash", { command: "pwd", mode: "foreground", workdir: "work" });
   assert.equal(h.checks[0].request.cwd, canonical);
   assert.equal(dataOf(result).output.trim(), canonical);
 });
 
-for (const field of ["cmd", "workdir", "tty", "input"]) {
+for (const field of ["command", "workdir", "tty", "input"]) {
   test(`DCG blocks a later ${field} mutation before process startup`, async t => {
     const h = await processes(t, { after: [proc(event => {
-      if (field === "input") event.input = { cmd: "printf bad > started" };
+      if (field === "input") event.input = { command: "printf bad > started", mode: "foreground" };
       else event.input[field] = field === "tty" ? true : "changed";
     })] });
-    const result = await h.run("exec_command", { cmd: "printf ok > started" });
+    const result = await h.run("bash", { command: "printf ok > started", mode: "foreground" });
     assert.equal(result.isError, true);
     assert.equal(h.checks.length, 1);
     await assert.rejects(access(join(h.ctx.cwd, "started")));
@@ -61,7 +61,7 @@ for (const field of ["cmd", "workdir", "tty", "input"]) {
 
 test("negative control: without DCG the same denied command starts", async t => {
   const h = await processes(t, { omitDcg: true, decision: "deny" });
-  const result = await h.run("exec_command", { cmd: "printf ok" });
+  const result = await h.run("bash", { command: "printf ok", mode: "foreground" });
   assert.equal(result.isError, false);
   assert.equal(dataOf(result).output, "ok");
   assert.equal(h.checks.length, 0);
@@ -71,8 +71,8 @@ for (const uiMode of ["tui", "rpc"]) {
   test(`${uiMode} confirms exact input, rejection writes nothing, empty poll asks nothing`, async t => {
     let approve = false;
     const h = await processes(t, { uiMode, confirm: async () => approve });
-    const launch = dataOf(await h.run("exec_command", {
-      cmd: "read -r answer; printf 'received:%s\\n' \"$answer\"", tty: true, yield_time_ms: 0,
+    const launch = dataOf(await h.run("bash", {
+      command: "read -r answer; printf 'received:%s\\n' \"$answer\"", tty: true, mode: "service",
     }));
     assert.equal(launch.status, "running");
     const denied = await h.run("write_stdin", { session_id: launch.session_id, chars: "rejected\n" });
@@ -94,7 +94,7 @@ for (const uiMode of ["tui", "rpc"]) {
 
 test("print blocks input but allows polling; control characters also require approval", async t => {
   const h = await processes(t);
-  const launch = dataOf(await h.run("exec_command", { cmd: "sleep 30", tty: true, yield_time_ms: 0 }));
+  const launch = dataOf(await h.run("bash", { command: "sleep 30", tty: true, mode: "service" }));
   const denied = await h.run("write_stdin", { session_id: launch.session_id, chars: "\x03" });
   assert.equal(denied.isError, true);
   assert.match(textOf(denied), /requires interactive or RPC/);
@@ -106,7 +106,7 @@ test("print blocks input but allows polling; control characters also require app
 
 test("dialog exception fails closed and leaves process running", async t => {
   const h = await processes(t, { uiMode: "rpc", confirm: async () => { throw new Error("dialog unavailable"); } });
-  const launch = dataOf(await h.run("exec_command", { cmd: "read -r answer", tty: true, yield_time_ms: 0 }));
+  const launch = dataOf(await h.run("bash", { command: "read -r answer", tty: true, mode: "service" }));
   const denied = await h.run("write_stdin", { session_id: launch.session_id, chars: "never\n" });
   assert.equal(denied.isError, true);
   assert.equal(dataOf(await h.run("write_stdin", { session_id: launch.session_id, yield_time_ms: 0 })).status, "running");
@@ -115,7 +115,7 @@ test("dialog exception fails closed and leaves process running", async t => {
 test("reload cleans live processes and invalidates their IDs", async t => {
   const h = await processes(t);
   const listenerCount = process.listenerCount("exit");
-  const launch = dataOf(await h.run("exec_command", { cmd: "sleep 30", yield_time_ms: 0 }));
+  const launch = dataOf(await h.run("bash", { command: "sleep 30", mode: "service" }));
   await h.session.reload();
   assert.equal(process.listenerCount("exit"), listenerCount);
   const poll = await h.run("write_stdin", { session_id: launch.session_id, yield_time_ms: 0 });
@@ -126,16 +126,16 @@ test("reload cleans live processes and invalidates their IDs", async t => {
 
 test("structured codemode results and terminal sanitization survive the real tool path", async t => {
   const h = await processes(t);
-  const result = await h.script(`const r = await tools.exec_command({cmd:"printf '\\\\033[31mred\\\\033[0m\\\\007'"}); text({status:r.status,output:r.output});`);
+  const result = await h.script(`const r = await tools.bash({command:"printf '\\\\033[31mred\\\\033[0m\\\\007'",mode:"foreground"}); text({status:r.status,output:r.output});`);
   assert.equal(result.isError, false);
   assert.match(textOf(result), /"output":\s*"red"/);
   assert.doesNotMatch(textOf(result), /\\u001b|\\u0007/);
 });
 
-test("legacy default completion is silent even on the next prompt; final output remains available", async t => {
+test("service completion is silent even on the next prompt; final output remains available", async t => {
   const h = await processes(t);
-  const launch = dataOf(await h.run("exec_command", {
-    cmd: "sleep 0.2; printf private-completion-output", yield_time_ms: 0,
+  const launch = dataOf(await h.run("bash", {
+    command: "sleep 0.2; printf private-completion-output", mode: "service",
   }));
   await delay(400);
   await h.run("process_list", {});
@@ -150,7 +150,7 @@ test("turn cancellation releases an input dialog even when UI ignores abort; lat
   const answer = deferred();
   const shown = deferred();
   const h = await processes(t, { uiMode: "rpc", confirm: async () => { shown.resolve(); return answer.promise; } });
-  const launch = dataOf(await h.run("exec_command", { cmd: "read -r answer; printf 'unexpected:%s' \"$answer\"", tty: true, yield_time_ms: 0 }));
+  const launch = dataOf(await h.run("bash", { command: "read -r answer; printf 'unexpected:%s' \"$answer\"", tty: true, mode: "service" }));
   const writing = h.run("write_stdin", { session_id: launch.session_id, chars: "cancelled\n" });
   await shown.promise;
   await h.session.abort();
@@ -170,7 +170,7 @@ test("parallel codemode input writes queue separate approvals and never share a 
     if (count === 1) { shown.resolve(); return first.promise; }
     return false;
   } });
-  const launch = await h.script(`text(await Promise.all([tools.exec_command({cmd:"read -r answer",tty:true,yield_time_ms:0}),tools.exec_command({cmd:"read -r answer",tty:true,yield_time_ms:0})]));`);
+  const launch = await h.script(`text(await Promise.all([tools.bash({command:"read -r answer",tty:true,mode:"service"}),tools.bash({command:"read -r answer",tty:true,mode:"service"})]));`);
   assert.equal(launch.isError, false);
   const records = dataOf(await h.run("process_list", {})).processes;
   const writing = h.script(`text(await Promise.allSettled([tools.write_stdin({session_id:${JSON.stringify(records[0].session_id)},chars:"approved\\n"}),tools.write_stdin({session_id:${JSON.stringify(records[1].session_id)},chars:"denied\\n"})]));`);
@@ -184,20 +184,16 @@ test("parallel codemode input writes queue separate approvals and never share a 
   assert.equal(dataOf(await h.run("write_stdin", { session_id: records[1].session_id, yield_time_ms: 0 })).status, "running");
 });
 
-test("requested completion triggers exactly one follow-up and carries no output", async t => {
+test("removed legacy completion options are rejected before startup", async t => {
   const h = await processes(t);
-  const launch = dataOf(await h.run("exec_command", {
-    cmd: "sleep 0.2; printf secret-output", yield_time_ms: 0, notify_on_exit: true,
-  }));
-  for (let i = 0; i < 50; i++) {
-    await delay(20);
-    if (h.session.messages.some(message => message.customType === "pi-processes-completed")) break;
+  for (const extra of [{ notify_on_exit: true }, { completion_mode: "steer" }, { yield_time_ms: 0 }]) {
+    const r = await h.run("bash", { command: "printf bad > started", mode: "background", ...extra });
+    assert.equal(r.isError, true);
+    await assert.rejects(access(join(h.ctx.cwd, "started")));
   }
-  await h.session.waitForIdle();
   const completion = h.session.messages.filter(message => message.customType === "pi-processes-completed");
-  assert.equal(completion.length, 1);
-  assert.ok(JSON.stringify(completion[0]).includes(launch.session_id));
-  assert.ok(!JSON.stringify(completion[0]).includes("secret-output"));
+  assert.equal(completion.length, 0);
+  assert.equal(h.checks.length, 0);
 });
 
 for (const [onError, allowed] of [["allow", true], ["block", false]]) {
@@ -206,7 +202,7 @@ for (const [onError, allowed] of [["allow", true], ["block", false]]) {
       config: { onError },
       process: async () => { throw new DcgProcessError("fixture unavailable", "spawn_failed"); },
     });
-    const result = await h.run("exec_command", { cmd: "printf marker > started" });
+    const result = await h.run("bash", { command: "printf marker > started", mode: "foreground" });
     assert.equal(result.isError, !allowed);
     if (allowed) await access(join(h.ctx.cwd, "started"));
     else await assert.rejects(access(join(h.ctx.cwd, "started")));
@@ -216,7 +212,7 @@ for (const [onError, allowed] of [["allow", true], ["block", false]]) {
 for (const approved of [false, true]) {
   test(`RPC DCG ask startup approval=${approved} is preserved`, async t => {
     const h = await processes(t, { uiMode: "rpc", decision: "ask", confirm: async () => approved });
-    const result = await h.run("exec_command", { cmd: "printf approved > started" });
+    const result = await h.run("bash", { command: "printf approved > started", mode: "foreground" });
     assert.equal(result.isError, !approved);
     assert.equal(h.confirmations.length, 1);
     if (approved) await access(join(h.ctx.cwd, "started"));
@@ -226,13 +222,13 @@ for (const approved of [false, true]) {
 
 test("earlier in-place rewrites are checked and executed, and later approval hooks can block", async t => {
   const h = await processes(t, {
-    before: [proc(event => { event.input.cmd = "printf rewritten"; })],
+    before: [proc(event => { event.input.command = "printf rewritten"; })],
     after: [proc(event => { if (event.input.tty) return { block: true, reason: "other policy denied PTY" }; })],
   });
-  const first = await h.run("exec_command", { cmd: "printf original" });
+  const first = await h.run("bash", { command: "printf original", mode: "foreground" });
   assert.equal(dataOf(first).output, "rewritten");
   assert.equal(h.checks[0].command, "printf rewritten");
-  const blocked = await h.run("exec_command", { cmd: "printf original", tty: true });
+  const blocked = await h.run("bash", { command: "printf original", mode: "foreground", tty: true });
   assert.equal(blocked.isError, true);
   assert.match(textOf(blocked), /other policy denied/);
 });
@@ -242,7 +238,7 @@ test("process_kill never waits behind an unresolved input approval", async t => 
   const killed = deferred();
   t.after(() => answer.resolve(false));
   const h = await processes(t, { uiMode: "rpc", confirm: () => answer.promise });
-  const launch = dataOf(await h.run("exec_command", { cmd: "read -r answer", tty: true, yield_time_ms: 0 }));
+  const launch = dataOf(await h.run("bash", { command: "read -r answer", tty: true, mode: "service" }));
   h.session.subscribe(event => {
     if (event.type === "tool_execution_end" && event.toolName === "process_kill") killed.resolve(event);
   });
@@ -255,7 +251,7 @@ test("process_kill never waits behind an unresolved input approval", async t => 
 
 test("input confirmation escapes Unicode bidi characters without changing approved input", async t => {
   const h = await processes(t, { uiMode: "rpc", confirm: async () => true });
-  const launch = dataOf(await h.run("exec_command", { cmd: "read -r answer; printf '%s' \"$answer\"", tty: true, yield_time_ms: 0 }));
+  const launch = dataOf(await h.run("bash", { command: "read -r answer; printf '%s' \"$answer\"", tty: true, mode: "service" }));
   const chars = "界\u202e\n";
   const end = dataOf(await h.run("write_stdin", { session_id: launch.session_id, chars, yield_time_ms: 1000 }));
   assert.match(h.confirmations[0].message, /\\u754c\\u202e\\n/);

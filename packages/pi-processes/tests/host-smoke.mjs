@@ -29,10 +29,14 @@ try {
     requests.push(body);
     if (calls++) return textResponse("Smoke result handled.");
     const script = `
-      const job=await tools.exec_command({cmd:"sleep 0.1; seq 1 100",mode:"background",title:"Background smoke"});
-      await tools.exec_command({cmd:"sleep 0.3; printf independent",mode:"foreground"});
+      const ordinary=await tools.bash({command:"printf ordinary"});
+      if (ordinary.output !== "ordinary") throw new Error("Built-in bash result changed");
+      const job=await tools.bash({command:"sleep 0.1; seq 1 100",mode:"background",title:"Background smoke"});
+      await tools.bash({command:"sleep 0.3; printf independent",mode:"foreground"});
       text({session_id:job.session_id});`;
-    const custom = body.tools.find(t => t.name === "codemode")?.type === "custom";
+    const tools = [...(body.tools ?? []),
+      ...body.input.flatMap(item => item.type === "additional_tools" ? item.tools : [])];
+    const custom = tools.find(t => t.name === "codemode")?.type === "custom";
     const args = custom ? script : JSON.stringify({ code: script });
     const item = custom
       ? { type: "custom_tool_call", id: "ct_smoke", call_id: "call_smoke", name: "codemode", input: args }
@@ -54,7 +58,7 @@ try {
     credentials, modelsPath: null, modelsStorePath: join(dir, "models.json"),
   });
   const settingsManager = host.SettingsManager.inMemory({
-    transport: "sse", defaultTools: ["codemode"],
+    transport: "sse", defaultTools: ["bash", "codemode"],
     compaction: { enabled: false }, retry: { enabled: false },
   });
   const loader = new host.DefaultResourceLoader({
@@ -74,7 +78,9 @@ try {
   await session.prompt("Start background validation; do independent work before consuming the result.");
   await session.waitForIdle();
   const completions = session.messages.filter(m => m.customType === "pi-processes-completed");
-  assert.equal(completions.length, 1);
+  assert.equal(completions.length, 1, JSON.stringify(session.messages
+    .filter(m => m.role === "toolResult" || m.errorMessage)
+    .map(m => ({ role: m.role, error: m.errorMessage, content: m.content }))));
   assert.equal(completions[0].display, false);
   assert.equal(completions[0].details.processes[0].exit_code, 0);
   assert.ok(completions[0].details.processes[0].output.includes("100"));
