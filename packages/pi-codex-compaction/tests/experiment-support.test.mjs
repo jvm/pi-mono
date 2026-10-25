@@ -1,9 +1,29 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import test from "node:test";
 import { initializeLedger, reserveRequest, readEvents, summarizeUsage } from "./live-experiments/support.mjs";
+
+for (const missing of ["PI_COMPACTION_HOST_ENTRY", "PI_COMPACTION_LEDGER"]) {
+  test(`cache controls reject missing ${missing} before host import or request reservation`, async () => {
+    const env = { ...process.env, PI_LIVE_COMPACTION: "1",
+      PI_COMPACTION_HOST_ENTRY: join(tmpdir(), "pi-missing-experiment-host.mjs"),
+      PI_COMPACTION_LEDGER: join(tmpdir(), "pi-unused-experiment-ledger.json") };
+    delete env[missing];
+    await assert.rejects(promisify(execFile)(process.execPath, [
+      fileURLToPath(new URL("./live-experiments/cache-control.mjs", import.meta.url)),
+    ], { env, timeout: 10000, maxBuffer: 16384 }), error => {
+      assert.equal(error.code, 1);
+      assert.match(error.stderr, /Set PI_COMPACTION_HOST_ENTRY and PI_COMPACTION_LEDGER/);
+      assert.doesNotMatch(error.stderr, /ERR_MODULE_NOT_FOUND|Raw error withheld/);
+      return true;
+    });
+  });
+}
 
 test("live experiment allowance is explicit, persistent, bounded and never overwritten", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-experiment-budget-test-"));

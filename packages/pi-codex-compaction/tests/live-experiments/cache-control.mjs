@@ -7,6 +7,8 @@ import { pathToFileURL } from "node:url";
 import { ENDPOINT, reserveRequest, readEvents, developer, user, stableNotes,
   namespace, functionTool, rawTool } from "./support.mjs";
 assert.equal(process.env.PI_LIVE_COMPACTION, "1");
+assert.ok(process.env.PI_COMPACTION_HOST_ENTRY && process.env.PI_COMPACTION_LEDGER,
+  "Set PI_COMPACTION_HOST_ENTRY and PI_COMPACTION_LEDGER");
 process.env.PI_OFFLINE = "1";
 const { ModelRuntime, ModelRegistry } = await import(pathToFileURL(process.env.PI_COMPACTION_HOST_ENTRY).href);
 const originalFetch = globalThis.fetch;
