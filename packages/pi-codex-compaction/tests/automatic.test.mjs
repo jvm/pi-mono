@@ -139,6 +139,84 @@ test("real Pi tool continuation retains raw calls and tool results around the ch
   } finally { await h.close(); }
 });
 
+// Pi 1.4 carries even the initial declarations in input.additional_tools rather
+// than the top-level tools field used by our Pi 1.1 development dependency.
+// Emulate that public payload shape, not the host's private serializer.
+function inlineTools(payload) {
+  if (!payload.tools?.length) return;
+  payload.input.unshift({ type: "additional_tools", role: "developer", tools: payload.tools });
+  delete payload.tools;
+}
+
+test("inline tool declarations automatically gain a stable namespace base and adopt checkpoints", async (t) => {
+  const requests = mockResponses(t, [[checkpoint(), text("msg_1", "answer")]]);
+  const h = await harness({ extensionLast: true, factories: [(pi) =>
+    pi.on("before_provider_request", (event) => inlineTools(event.payload))] });
+  try {
+    await h.session.prompt("use the current tools");
+    assert.ok(requests[0].context_management);
+    assert.equal(requests[0].tools[0].type, "namespace");
+    assert.ok(requests[0].tools[0].tools.length > 0);
+    assert.equal(requests[0].input.some(i => i.type === "additional_tools"), false);
+    assert.equal(h.manager.getBranch().some((entry) => entry.type === "compaction"), true);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
+test("checkpoint continuation preserves inline positions and tools during new automatic compaction", async (t) => {
+  const call = { type: "function_call", id: "fc_inline", call_id: "call_inline", name: "inline_fixture",
+    arguments: "{}", status: "completed" };
+  const requests = mockResponses(t, [[checkpoint(), call], [text("msg_final", "done")]]);
+  let calls = 0;
+  const h = await harness({ extensionLast: true, factories: [(pi) => {
+    pi.registerTool({
+      name: "inline_fixture", label: "Inline fixture", description: "Harmless fixture",
+      parameters: { type: "object", properties: {} },
+      async execute() { return { content: [{ type: "text", text: "fixture result" }], details: undefined }; },
+    });
+    pi.on("before_provider_request", (event) => {
+      if (++calls > 1) inlineTools(event.payload);
+    });
+  }] });
+  try {
+    await h.session.prompt("use the fixture");
+    assert.equal(requests.length, 2);
+    assert.ok(requests[0].context_management);
+    assert.ok(requests[1].context_management);
+    assert.deepEqual(requests[1].tools[0].tools, requests[0].tools);
+    const input = requests[1].input;
+    const index = input.findIndex((item) => item.type === "compaction");
+    assert.ok(index >= 0);
+    assert.deepEqual(input[index + 1], call);
+    assert.equal(input[index + 2].type, "function_call_output");
+    assert.equal(input[index + 2].output, "fixture result");
+    assert.equal(input.filter((item) => item.type === "additional_tools").length, 0);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
+test("mode-off and reload repair saved checkpoint replay with inline tool declarations", async (t) => {
+  const requests = mockResponses(t, [[checkpoint(), text("msg_1", "answer")], [text("msg_2", "next")]]);
+  let calls = 0;
+  const h = await harness({ extensionLast: true, factories: [(pi) =>
+    pi.on("before_provider_request", (event) => {
+      if (++calls > 1) inlineTools(event.payload);
+    })] });
+  try {
+    await h.session.prompt("old");
+    await h.session.prompt("/server-compaction off");
+    await h.session.reload();
+    await h.session.prompt("call a current tool");
+    const input = requests[1].input;
+    const index = input.findIndex((item) => item.type === "compaction");
+    assert.ok(index >= 0);
+    assert.equal(input[index + 1].type, "additional_tools");
+    assert.deepEqual(input[index + 1].tools, requests[0].tools);
+    assert.equal(requests[1].context_management, undefined);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
 test("last checkpoint wins, including a checkpoint after all assistant output", async (t) => {
   const requests = mockResponses(t, [
     [checkpoint("cmp_old"), text("msg_between", "between"), checkpoint("cmp_last")],
@@ -426,20 +504,25 @@ test("invalid or too-late thresholds leave ordinary inference unchanged", async 
 test("Pi's enabled threshold safety net still summarizes when the server returns no checkpoint", async (t) => {
   const h = await harness({ settings: { compaction: { enabled: true, reserveTokens: 8192, keepRecentTokens: 1 } } });
   const requests = mockResponses(t, [
+    [text("msg_initial", "ready")],
     response([text("msg_answer", "done")], { usage: { ...usage,
       input_tokens: h.model.contextWindow - 4096, total_tokens: h.model.contextWindow - 3996 } }),
     [text("msg_summary", "small summary")],
     [text("msg_prefix", "small turn prefix")],
   ]);
   try {
+    // Persist the initial loadout before adding old history. Otherwise Pi must
+    // declare its tools inline after that history, which is now ineligible.
+    await h.session.prompt("initialize the session");
     h.manager.appendMessage({ role: "user", content: "old context ".repeat(3000), timestamp: 1 });
     h.manager.appendMessage({ role: "user", content: "recent", timestamp: 2 });
     h.session.agent.state.messages = h.manager.buildSessionProjection().messages;
     await h.session.prompt("continue");
-    assert.equal(requests.length, 3, "ordinary inference plus Pi's two split-span summaries");
+    assert.equal(requests.length, 4, "initialization, ordinary inference and Pi's two split-span summaries");
     assert.ok(requests[0].context_management);
-    assert.equal(requests[1].context_management, undefined);
+    assert.ok(requests[1].context_management);
     assert.equal(requests[2].context_management, undefined);
+    assert.equal(requests[3].context_management, undefined);
     assert.ok(h.manager.getBranch().some((e) => e.type === "compaction" && e.details?.kind !== kind));
     assert.deepEqual(h.errors, []);
   } finally { await h.close(); }

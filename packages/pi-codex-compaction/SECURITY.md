@@ -66,6 +66,21 @@ constrain a later trusted extension that changes the payload. It skips observed
 reasoning configuration updates, stateful continuation, truncation, multi-agent
 requests, and preexisting compaction policies.
 
+For Pi's inline declarations, the adapter derives a namespace base exclusively
+from the provider-serialized, currently visible function/custom tools. It does
+not execute tools, broaden Pi's active loadout, read tool definitions from project
+files, or invent function/grammar schemas. Only the redundant leading inline
+declaration is removed after promotion. Later inline updates and system messages
+retain their positions. A changed, removed or hidden base tool starts a new base,
+as does Pi's tool-state checkpoint after compaction. Missing, ambiguous, oversized
+or unsupported inline state is not opted into automatic compaction.
+
+Checkpoint replay preserves native declaration positions when the namespace
+adapter is active. When automatic mode is off or adaptation is unavailable,
+current leading inline declarations are moved after the saved checkpoint as a
+recovery workaround. That does not repair tool loss inside an already running
+response and does not enable an additional inference request.
+
 Cache warming is stopped only for a cached request that actually enabled
 automatic compaction, because replay could produce an uncommitted checkpoint.
 Other providers and skipped requests retain Pi's normal warming behavior.

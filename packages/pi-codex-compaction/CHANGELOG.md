@@ -6,6 +6,13 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve tool access during Pi 1.4 automatic server compaction with a stable namespace base and chronological inline `additional_tools` updates. Adapt eligible requests automatically, with no tool-strategy flag.
+- Start a fresh tool base at each compaction boundary or base-tool change; retain the base across additive updates to preserve cached prefixes without carrying stale definitions across checkpoints.
+- Restore current inline tool declarations after saved checkpoints on replay, including when automatic mode is off and after reload.
+- Cover repeated compaction, schema changes, tool visibility, replay, reload and branches through the actual Pi 1.4 host and packed extension, not only the Pi 1.1 development baseline.
+
 ## [0.2.3] - 2026-10-09
 
 ### Fixed
