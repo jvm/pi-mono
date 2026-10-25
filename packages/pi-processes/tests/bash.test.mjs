@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { access, mkdir, realpath } from "node:fs/promises";
+import { access, mkdir, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
 import piProcesses from "../extensions/index.ts";
 import { fixture, textOf, deferred, hookResponse } from "../../pi-dcg/tests/session-fixture.mjs";
@@ -58,6 +59,27 @@ test("ordinary bash preserves the built-in structured result, cwd, and error beh
   assert.match(textOf(nested), /"output":"structured","exit_code":0/);
   assert.equal(dataOf(await h.run("process_list", {})).processes.length, 0);
 });
+
+for (const [shell, prefix] of [[true, false], [false, true], [true, true]]) {
+  test(`ordinary bash preserves configured shell=${shell} and prefix=${prefix}, including codemode`, async t => {
+    const h = await setup(t);
+    const wrapper = join(h.ctx.cwd, "fixture-shell");
+    await writeFile(wrapper, '#!/bin/sh\nexport PI_SHELL_FIXTURE=custom\nexec /bin/bash "$@"\n', { mode: 0o700 });
+    if (shell) h.session.settingsManager.setShellPath(pathToFileURL(wrapper).href);
+    if (prefix) h.session.settingsManager.setShellCommandPrefix("export PI_PREFIX_FIXTURE=configured");
+    const args = { command: 'printf "%s/%s" "${PI_SHELL_FIXTURE:-default}" "${PI_PREFIX_FIXTURE:-none}"' };
+    const expected = `${shell ? "custom" : "default"}/${prefix ? "configured" : "none"}`;
+    const result = await h.run("bash", args);
+    assert.equal(result.isError, false);
+    assert.equal(textOf(result), expected);
+    const nested = await h.script(`text((await tools.bash(${JSON.stringify(args)})).output);`);
+    assert.equal(nested.isError, false);
+    assert.ok(textOf(nested).includes(expected));
+    // Effective settings are read per call, not cached in a stale executor.
+    h.session.settingsManager.setShellCommandPrefix("export PI_PREFIX_FIXTURE=updated");
+    assert.equal(textOf(await h.run("bash", args)), `${shell ? "custom" : "default"}/updated`);
+  });
+}
 
 for (const mode of [undefined, "foreground"]) {
   test(`bash ${mode ?? "built-in"} timeout uses seconds`, async t => {

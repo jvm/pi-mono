@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve effective shell path and command-prefix settings when delegating ordinary bash calls.
+- Keep a return cursor when entering tail/follow output, including before navigating the first log segment.
+
 ### Added
 
 - One live `/processes` manager with attention-first ordering, direct output navigation, line/page/segment scrolling, follow/pause, mode labels, inline confirmations, and keyboard help.

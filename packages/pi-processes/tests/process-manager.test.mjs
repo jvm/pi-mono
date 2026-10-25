@@ -180,6 +180,31 @@ test("follow is live and bounded; scrolling pauses it; refresh retains the selec
   assert.match(panel.render(100).join("\n"), /not-followed/);
 });
 
+for (const key of ["t", "f"]) {
+  test(`${key === "t" ? "tail" : "follow"} keeps a return cursor even before the first segment change`, async t => {
+    const rt = new ProcessRuntime();
+    t.after(() => rt.close());
+    const job = await spawn(rt, "seq 1 5000");
+    const panel = new ProcessPanel((cursor, tail) => rt.output(job.session_id, cursor, 1024, tail),
+      () => {}, () => {}, () => 12);
+    assert.match(panel.render(80).join("\n"), /\n1\n2\n/);
+    panel.handleInput(key);
+    assert.match(panel.render(80).join("\n"), /5000/);
+    panel.handleInput("p");
+    assert.equal(panel.followsOutput, false);
+    assert.match(panel.render(80).join("\n"), /\n1\n2\n/);
+    panel.handleInput("n");
+    const segment = panel.render(80).join("\n");
+    assert.doesNotMatch(segment, /\n1\n2\n/);
+    panel.handleInput(key);
+    panel.handleInput(key);
+    panel.handleInput("p");
+    assert.equal(panel.render(80).join("\n"), segment, "return to the selected segment, not an empty tail history");
+    panel.handleInput("p");
+    assert.match(panel.render(80).join("\n"), /\n1\n2\n/);
+  });
+}
+
 test("live screen coalesces output updates, honors selection keys, bounds rows and releases timers", async t => {
   const h = setup(t);
   const job = await spawn(h.rt, "printf first; sleep 0.2; printf latest", "service");

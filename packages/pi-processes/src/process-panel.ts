@@ -23,6 +23,14 @@ export class ProcessPanel implements Component {
   private get lines(): string[] { return displayText(this.data.output).split(/\r?\n/); }
   private get height(): number { return Math.max(1, Math.min(20, this.rows() - 4)); }
   get followsOutput(): boolean { return this.following; }
+  private rememberCursor(): void {
+    this.previous.push(this.cursor);
+    if (this.previous.length > 128) this.previous.shift();
+  }
+  private enterTail(): void {
+    if (!this.tail) this.rememberCursor();
+    this.tail = true;
+  }
 
   updateStatus(status: Pick<ProcessResult, "status" | "exit_code" | "signal" | "timed_out" | "stopped">): void {
     this.data = { ...this.data, ...status };
@@ -61,8 +69,7 @@ export class ProcessPanel implements Component {
     else if (matchesKey(input, Key.left)) this.column = Math.max(0, this.column - 10);
     else if (matchesKey(input, Key.right)) this.column = Math.min(64_000, this.column + 10);
     else if (input === "n" && this.data.next_cursor !== undefined && this.data.unread_bytes) {
-      this.previous.push(this.cursor);
-      if (this.previous.length > 128) this.previous.shift();
+      this.rememberCursor();
       this.cursor = this.data.next_cursor;
       this.tail = this.following = false;
       this.data = this.read(this.cursor, false);
@@ -73,7 +80,7 @@ export class ProcessPanel implements Component {
       this.data = this.read(this.cursor, false);
       this.row = this.column = 0;
     } else if (input === "t") {
-      this.tail = true;
+      this.enterTail();
       this.following = false;
       this.refresh();
       this.row = Math.max(0, this.lines.length - this.height);
@@ -83,7 +90,7 @@ export class ProcessPanel implements Component {
     } else if (input === "f") {
       this.following = !this.following;
       if (this.following) {
-        this.tail = true;
+        this.enterTail();
         this.column = 0;
         this.refresh();
       }

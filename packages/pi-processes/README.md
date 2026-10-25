@@ -70,7 +70,7 @@ If no independent work remains, use one event-driven wait or end the response an
 {"command":"git status"}
 ```
 
-Omit `mode` for built-in behavior: the same output, nonzero-exit errors, truncation, and optional `timeout` in seconds, with no default timeout. These calls are not retained in `/processes`.
+Omit `mode` for built-in behavior: the same output, nonzero-exit errors, truncation, effective `shellPath`/`shellCommandPrefix` settings, and optional `timeout` in seconds, with no default timeout. These calls are not retained in `/processes`.
 
 Set `mode` explicitly for managed processes:
 
@@ -191,7 +191,7 @@ The widget shows at most three process rows plus an overflow count. Successful c
 | `f` | Toggle live output following; scrolling pauses it |
 | ← / → | Pan output by ten columns |
 | `n` / `p` | Next/previous retained log segment |
-| `t` | Latest-output snapshot without following |
+| `t` | Latest-output snapshot without following; `p` returns to the prior log segment |
 | `r` | Refresh the current log segment or tail |
 | `a` / `A` | Acknowledge selected/all current failures |
 | `s` | Stop selected running process; retain its output |
