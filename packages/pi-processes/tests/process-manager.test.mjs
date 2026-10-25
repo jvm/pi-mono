@@ -157,6 +157,30 @@ test("unacknowledged failures are not silently evicted to admit new work", async
   assert.equal(h.rt.views().length, 1);
 });
 
+for (const tty of [false, true]) {
+  for (const phase of ["launch", "wait"]) {
+    test(`initial ${tty ? "PTY" : "pipe"} cancellation during ${phase} is an intentional stop and permits eviction`, async t => {
+      const h = setup(t, { active: 1, retained: 1, outputBytes: 1024, killGraceMs: 10 });
+      const controller = new AbortController();
+      const pending = h.rt.start("sleep 30", process.cwd(), tty, 5000, false, 6000, 1024,
+        controller.signal, undefined, { mode: "foreground",
+          started: phase === "wait" ? () => controller.abort() : undefined });
+      if (phase === "launch") controller.abort();
+      await assert.rejects(pending, /cancel/);
+      const [job] = h.rt.views();
+      assert.equal(job.status, "exited");
+      assert.equal(job.stopped, true);
+      assert.equal(job.timed_out, false);
+      assert.equal(job.attention, "none");
+      assert.equal(h.statuses.get("pi-processes-results"), undefined);
+      const next = await spawn(h.rt, "printf admitted");
+      assert.equal(next.output, "admitted");
+      assert.equal(h.rt.views().length, 1);
+      assert.notEqual(h.rt.views()[0].session_id, job.session_id);
+    });
+  }
+}
+
 test("follow is live and bounded; scrolling pauses it; refresh retains the selected tail", () => {
   let output = "first\nsecond\nthird", reads = [];
   const panel = new ProcessPanel((cursor, tail) => {

@@ -6,6 +6,7 @@
 
 - Preserve effective shell path and command-prefix settings when delegating ordinary bash calls.
 - Keep a return cursor when entering tail/follow output, including before navigating the first log segment.
+- Treat initial-call cancellation as an intentional stop, not a failure that needs attention or blocks record eviction. Timeouts remain failures.
 
 ### Added
 

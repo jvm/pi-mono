@@ -189,3 +189,25 @@ test("print sessions do not require terminal-only acknowledgment to admit more f
   assert.equal(r.isError, false);
   assert.match(textOf(r), /"count":32,"lastExit":1/);
 });
+
+test("aborting managed bash in a TUI session retains an intentional stop without an attention warning", { timeout: 10_000 }, async t => {
+  const statuses = new Map();
+  const h = await setup(t, { uiMode: "tui",
+    uiContext: { setStatus: (key, value) => statuses.set(key, value) } });
+  let abort;
+  const unsubscribe = h.session.subscribe(event => {
+    if (event.type === "tool_execution_update" && event.toolName === "bash" && !abort) {
+      abort = h.session.abort();
+    }
+  });
+  t.after(unsubscribe);
+  await h.run("bash", { command: "sleep 30", mode: "foreground" });
+  assert.ok(abort, "abort only after the registered bash executor reports process progress");
+  await abort;
+  const records = dataOf(await h.run("process_list", {})).processes;
+  assert.equal(records.length, 1);
+  assert.equal(records[0].status, "exited");
+  assert.equal(records[0].stopped, true);
+  assert.equal(records[0].timed_out, false);
+  assert.equal(statuses.get("pi-processes-results"), undefined);
+});

@@ -162,6 +162,7 @@ export class ProcessRuntime {
       this.launching--;
       reserved = false;
       if (this.closed || signal?.aborted) {
+        if (!job.exited && !job.timedOut) job.stopRequested = true;
         await this.stop(job);
         throw new Error("Process operation cancelled");
       }
@@ -180,7 +181,10 @@ export class ProcessRuntime {
       this.evict();
       return result;
     } catch (error) {
-      if (job.transport) await this.stop(job);
+      if (job.transport) {
+        if (!job.exited && !job.timedOut && (signal?.aborted || this.closed)) job.stopRequested = true;
+        await this.stop(job);
+      }
       if (!this.jobs.has(job.id)) this.logs.remove(job.id);
       throw error;
     } finally {
