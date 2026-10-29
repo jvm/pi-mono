@@ -12,6 +12,21 @@ and continue inference without Pi stopping for a separate summary request.
 - Keeps `/server-compaction off`, manual `/compact`, and Pi's standard compactor
   as recovery options.
 
+### Codemode and current-host compatibility
+
+Compatibility tests exercise Pi 1.1.0 and 1.4.0 in isolated installations,
+including zero-inline-budget discovery, deferred activation, reload and
+checkpoint replay. Consumed structured intermediates do not enter conversation
+history unless the script prints them. Hidden/model-only tools stay outside
+nested discovery.
+
+Pi 1.4 emits chronological `configuration_update` items for reasoning effort.
+The adapter preserves exact updates with only `type` and `reasoning.effort`
+(`none`, `minimal`, `low`, `medium`, `high`, `xhigh`), including between a
+summary and retained assistant output. Unknown configuration remains
+unsupported and disables automatic adaptation. No host serializer or private
+API is patched.
+
 **Pi 1.4 compatibility:** inline `additional_tools` are adapted automatically.
 A stable namespace base keeps tools available during compaction; later inline
 updates retain their original positions and preserve cached prefixes. Each

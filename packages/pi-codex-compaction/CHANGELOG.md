@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve Pi 1.4's exact reasoning-effort configuration updates around automatic checkpoints while rejecting unknown configuration shapes.
+
 ## [0.2.4] - 2026-10-25
 
 ### Fixed

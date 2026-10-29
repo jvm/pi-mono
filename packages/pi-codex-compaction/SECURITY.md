@@ -1,5 +1,10 @@
 # Security Policy
 
+Reasoning-effort configuration updates from Pi 1.4 are accepted only in their
+exact bounded shape (`type`, `reasoning: {effort}` with a known string enum).
+They stay chronological across replay and do not weaken assistant-output hash
+verification. Unknown configuration fields remain fail-closed.
+
 ## Supported versions
 
 Security fixes are provided for the latest released version of `pi-codex-compaction`.

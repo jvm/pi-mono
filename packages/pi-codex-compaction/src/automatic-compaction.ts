@@ -148,7 +148,10 @@ function replay(payload: Item, checkpoint: Checkpoint, ctx: ExtensionContext, pr
   const indices = payload.input.flatMap((item, index) => summaryText(item) === wrapped ? [index] : []);
   if (indices.length !== 1) return undefined;
   const index = indices[0]!;
-  const start = index + 1;
+  let start = index + 1;
+  while (start < payload.input.length && record(payload.input[start]) &&
+      payload.input[start].type === "configuration_update" && reasoningUpdate(payload.input[start])) start++;
+  const effortUpdates = payload.input.slice(index + 1, start);
   const serialized = payload.input.slice(start, start + checkpoint.outputHashes.length);
   if (serialized.length !== checkpoint.outputHashes.length ||
       serialized.some((item, i) => outputHash(item) !== checkpoint.outputHashes[i])) return undefined;
@@ -157,18 +160,28 @@ function replay(payload: Item, checkpoint: Checkpoint, ctx: ExtensionContext, pr
   // Reintroduce those exact current declarations after the checkpoint and before
   // its output suffix. Preserve later tool changes/results and top-level tools.
   const prefix = payload.input.slice(0, index);
+  const [saved, ...suffix] = structuredClone(checkpoint.replay);
   if (preserveInline) return { ...payload, input: [
-    ...prefix, ...structuredClone(checkpoint.replay), ...payload.input.slice(start + serialized.length),
+    ...prefix, saved, ...effortUpdates, ...suffix, ...payload.input.slice(start + serialized.length),
   ] };
   const inlineTools = (item: unknown) => record(item) && item.type === "additional_tools";
-  const [saved, ...suffix] = structuredClone(checkpoint.replay);
   return { ...payload, input: [
     ...prefix.filter((item) => !inlineTools(item)),
     saved,
     ...prefix.filter(inlineTools),
+    ...effortUpdates,
     ...suffix,
     ...payload.input.slice(start + serialized.length),
   ] };
+}
+
+/** Pi 1.4 emits exact reasoning-effort updates at turn boundaries. Keep them
+ * chronological; unknown configuration remains unsupported/fail-closed. */
+function reasoningUpdate(item: Item): boolean {
+  return Object.keys(item).length === 2 && record(item.reasoning) &&
+    Object.keys(item.reasoning).length === 1 &&
+    typeof item.reasoning.effort === "string" &&
+    ["none", "minimal", "low", "medium", "high", "xhigh"].includes(item.reasoning.effort);
 }
 
 function incompatible(payload: Item, supportedInline = false): boolean {
@@ -181,7 +194,7 @@ function incompatible(payload: Item, supportedInline = false): boolean {
       // Automatic server compaction can discard these declarations during the
       // same response, before turn_end/replay can repair tool availability.
       ((!supportedInline && item.type === "additional_tools") ||
-        item.type === "configuration_update" || item.type === "compaction_trigger"));
+        (item.type === "configuration_update" && !reasoningUpdate(item)) || item.type === "compaction_trigger"));
 }
 
 function fallbackSummary(entries: SessionEntry[], ctx: ExtensionContext): string {
