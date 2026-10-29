@@ -81,10 +81,17 @@ validated, bounded to fixed tool names, excluded from model context, and not
 appended again for unchanged selections. Packed files include the new runtime
 module but exclude tests and agent files.
 
+Pre-merge regression tests also cover native CLI flags applied after extension
+registration, first-prompt/reload compact Scout context with exclusion fallback,
+UTF-16 finding that starts inside a surrogate pair, and overlapping HTTP 429
+responses that extend an already-waiting request's cooldown.
+
 Use `PI_OFFLINE=1 PI_TELEMETRY=0 npm run validate` for reproducible local
 acceptance without best-effort install telemetry entering fetch-count fixtures.
 These controls disable telemetry, not research providers. Run both isolated
 compatibility lanes with `node scripts/test-pi-compat.mjs <version>`.
+Run root validation and compatibility lanes sequentially on a shared host:
+their image OAuth fixtures use the same loopback callback port, 1455.
 
 ## Local acceptance results (initial implementation batch)
 

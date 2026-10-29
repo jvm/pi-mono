@@ -69,3 +69,34 @@ test("queue capacity and HTTP total deadline fail without late dispatch", async 
   await Promise.all(running);
   assert.equal(dispatched, false);
 });
+
+test("a later Retry-After extends the cooldown of already-waiting HTTP requests", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
+  const url = "https://extended-cooldown.invalid/";
+  let calls = 0;
+  let secondResponse;
+  t.mock.method(globalThis, "fetch", async () => {
+    calls++;
+    if (calls === 1) return new Response("limited", { status: 429, headers: { "retry-after": "1" } });
+    if (calls === 2) return new Promise(resolve => { secondResponse = resolve; });
+    return new Response("permitted");
+  });
+  const first = assert.rejects(requestText(url), /HTTP 429/);
+  const second = assert.rejects(requestText(url), /HTTP 429/);
+  await first;
+  assert.equal(typeof secondResponse, "function");
+  const waiting = requestText(url);
+  await new Promise(setImmediate);
+  t.mock.timers.tick(500);
+  secondResponse(new Response("limited", { status: 429, headers: { "retry-after": "2" } }));
+  await second;
+  t.mock.timers.tick(500);
+  await new Promise(setImmediate);
+  assert.equal(calls, 2, "the original 1-second timer must not bypass the extended cooldown");
+  t.mock.timers.tick(1499);
+  await new Promise(setImmediate);
+  assert.equal(calls, 2);
+  t.mock.timers.tick(1);
+  assert.equal((await waiting).text, "permitted");
+  assert.equal(calls, 3);
+});

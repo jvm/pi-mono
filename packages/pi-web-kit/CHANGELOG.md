@@ -14,6 +14,11 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - Bound aggregate provider HTTP requests and share equivalent in-flight fetch misses with independent waiter cancellation.
 - Find literal text in cached redacted pages without another provider request.
 
+### Fixed
+
+- Keep cached finder matches at or after the requested UTF-16 offset, including continuation inside a surrogate pair.
+- Honor later `Retry-After` extensions before dispatching an already-waiting request, without retrying or extending its total HTTP deadline.
+
 ## [0.4.2] - 2026-10-25
 
 ### Fixed

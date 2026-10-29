@@ -40,6 +40,7 @@ export async function fetchWithCache(providerName: FetchProviderName, params: Re
       }
       const content = redactText(page.content, secrets);
       // Escaping the complete term makes this a bounded literal, never caller regex.
+      // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
       const pattern = new RegExp(params.find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), params.findCaseSensitive === false ? "giu" : "gu");
       pattern.lastIndex = from;
       const matches = [];
@@ -47,6 +48,9 @@ export async function fetchWithCache(providerName: FetchProviderName, params: Re
       let nextFrom: number | undefined;
       const max = Math.max(1, Math.floor(MAX_FIND_MATCHES / urls.length));
       for (let match = pattern.exec(content); match; match = pattern.exec(content)) {
+        // Unicode RegExp can rewind a start inside a surrogate pair. The
+        // caller's continuation is still an exact UTF-16 lower bound.
+        if (match.index < from) continue;
         count++;
         if (matches.length === max) { nextFrom ??= match.index; continue; }
         const start = Math.max(0, match.index - FIND_CONTEXT);

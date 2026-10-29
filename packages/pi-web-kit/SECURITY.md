@@ -4,7 +4,8 @@
 
 HTTP admission is bounded per provider origin and account/header scope using
 process-random HMAC identities, never public credential keys. Queue wait counts
-toward request deadlines. HTTP 429 cooldowns are bounded; no retry is added.
+toward request deadlines. HTTP 429 cooldowns are bounded; waiting requests
+recheck extensions within their original deadline, and no retry is added.
 Equivalent misses share transport only within the existing cache/account/options
 identity; waiter cancellation is independent. Last-waiter cancellation aborts
 shared work. Reload cancellation uses Pi's normal tool cancellation signal.

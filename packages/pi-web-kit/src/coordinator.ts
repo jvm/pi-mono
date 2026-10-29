@@ -45,13 +45,17 @@ export async function coordinate<T>(identity: string, signal: AbortSignal, work:
     else state.queue.push(admit);
   });
   try {
-    const remaining = Math.max(0, state.cooldown - Date.now());
-    if (remaining) await new Promise<void>((resolve, reject) => {
-      const abort = () => { clearTimeout(timer); reject(signal.reason); };
-      const timer = setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, remaining);
-      signal.addEventListener("abort", abort, { once: true });
-      if (signal.aborted) abort();
-    });
+    // Another in-flight response can extend Retry-After while this timer is
+    // pending. Recheck the shared deadline before dispatch, without retrying.
+    while (state.cooldown > Date.now()) {
+      signal.throwIfAborted();
+      await new Promise<void>((resolve, reject) => {
+        const abort = () => { clearTimeout(timer); signal.removeEventListener("abort", abort); reject(signal.reason); };
+        const timer = setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, state.cooldown - Date.now());
+        signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) abort();
+      });
+    }
     signal.throwIfAborted();
     return await work(ms => { state.cooldown = Math.max(state.cooldown, Date.now() + Math.min(30_000, Math.max(0, ms))); });
   } finally {

@@ -284,6 +284,25 @@ test("cached literal finding reaches omitted content without a provider request"
   validates(h, h.events.filter(e => e.toolName === "web_fetch")[1]);
 });
 
+test("cached finding never returns a Unicode match before the requested UTF-16 offset", async t => {
+  const h = await fixture(t);
+  h.setProvider(async () => new Response("😀😀"));
+  succeeds(await h.script(`
+    await tools.web_fetch({url:"https://fixture.invalid/unicode-find"});
+    for(const findCaseSensitive of [true,false]) {
+      const next=await tools.web_fetch({url:"https://fixture.invalid/unicode-find",find:"😀",findFrom:1,findCaseSensitive});
+      if(next.results[0].find.count!==1 || next.results[0].find.matches[0].offset!==2)
+        throw new Error("Match before requested UTF-16 offset");
+      const end=await tools.web_fetch({url:"https://fixture.invalid/unicode-find",find:"😀",findFrom:3,findCaseSensitive});
+      if(end.results[0].find.count!==0 || end.results[0].find.matches.length)
+        throw new Error("Final surrogate-pair boundary repeated an earlier match");
+    }
+    text("bounded Unicode offsets");
+  `));
+  assert.equal(h.providerRequests.length, 1);
+  for(const event of h.events.filter(e => e.toolName === "web_fetch")) validates(h, event);
+});
+
 test("Scout listing uses public records, stable revision and stale-page rejection", async t => {
   const h = await fixture(t);
   const now = new Date().toISOString();

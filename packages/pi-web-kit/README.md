@@ -29,7 +29,8 @@ Across calls, provider/account/header scopes allow three HTTP requests at once,
 up to 100 queued requests, and 128 live scopes. Deadlines include queue wait and
 body reads. Batch endpoints count as one HTTP request, not one logical URL.
 HTTP 429 `Retry-After` cooldowns are capped at 30 seconds; requests are not
-automatically retried. Separate permitted requests still overlap.
+automatically retried. Later responses can extend an existing cooldown; waiting
+requests recheck it within their original total HTTP deadline. Separate permitted requests still overlap.
 Equivalent fetch misses share in-flight work, including across extension
 instances loaded from this package module. Cache identity includes account,
 URL, provider defaults and material options. Refresh has its own flight identity.
