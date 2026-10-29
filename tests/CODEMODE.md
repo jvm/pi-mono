@@ -15,8 +15,10 @@ The user approved these outcomes before implementation:
 This work does not authorize publishing, pushing, image generation, or inference spend.
 
 These decisions describe the initial implementation batch. D1 was subsequently
-approved and implemented in `pi-web-kit` as optional `toolExposure: "deferred"`
-with an independent hard disable; see its README and registered-tool tests.
+approved and implemented in `pi-web-kit`, then refined to automatic behavior:
+active native codemode defers enabled web tools; otherwise tools stay direct.
+There is no exposure setting. An independent hard disable and native
+exclusions remain available; see its README and registered-tool tests.
 D2/D3 remain deferred, and D4 was removed from follow-up work. Image generation
 remains subscription-only.
 
@@ -63,7 +65,28 @@ updates. Only their exact known shape is accepted and preserved chronologically;
 unknown configuration remains fail-closed. This is a package adapter change,
 not a host patch or new serializer.
 
-## Local acceptance results
+## Automatic exposure follow-up
+
+`structured-tools.test.mjs` now exercises real native registrations in normal,
+`on`, and `only` interactions. It covers both toggle directions, same-script
+changes, zero-budget discovery, native-search declarations, manual choices,
+settings/CLI exclusions, hard disables, late credentials, model changes,
+reload/resume/fork, and old tree snapshots with pending optional definitions.
+Live executor guards also reject a deferred executor captured before a later
+tool-call hook changes its selection. No private host API is patched.
+
+The short `web_research` section composes with unrelated sections and respects
+native full-prompt overrides at provider projection. Branch bookkeeping is
+validated, bounded to fixed tool names, excluded from model context, and not
+appended again for unchanged selections. Packed files include the new runtime
+module but exclude tests and agent files.
+
+Use `PI_OFFLINE=1 PI_TELEMETRY=0 npm run validate` for reproducible local
+acceptance without best-effort install telemetry entering fetch-count fixtures.
+These controls disable telemetry, not research providers. Run both isolated
+compatibility lanes with `node scripts/test-pi-compat.mjs <version>`.
+
+## Local acceptance results (initial implementation batch)
 
 - `npm run validate`: passed all package checks/tests, package consistency,
   production audit (zero vulnerabilities), and pack dry runs. Two existing

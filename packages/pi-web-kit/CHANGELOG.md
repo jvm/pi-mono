@@ -8,7 +8,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Added
 
-- Opt-in `toolExposure: "deferred"` using native codemode/tool-search discovery, with independent `enabled: false` hard disable and fail-closed missing-discovery handling.
+- Automatically defer enabled web tools when native codemode is active; keep direct exposure otherwise, without an exposure setting. Add a compact discovery hint and preserve manual selections through mode switches, native-search activation, reload and session history.
+- Independent `enabled: false` hard disable; retain explicit settings and CLI exclusions in both modes.
 - Preserve successful queries in partial/all-failed search batches with explicit status and bounded errors.
 - Bound aggregate provider HTTP requests and share equivalent in-flight fetch misses with independent waiter cancellation.
 - Find literal text in cached redacted pages without another provider request.

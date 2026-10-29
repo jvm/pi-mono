@@ -7,8 +7,9 @@ Root `AGENTS.md` applies.
 - Keep tool schemas, runtime validation, config, docs, and tests synchronized.
 - Validate URLs before provider calls; preserve shared limits, timeouts, truncation, and cache scope.
 - Never expose API keys or secret-bearing cache keys.
-- Project config requires trust. Provider schema changes apply at startup/reload.
-- Direct exposure is the default. Deferred exposure requires active native discovery; hard disables use hidden exposure, not inactive selection. Reconcile exposure before prompts and guard execution against runtime disables.
+- Project config requires trust. Keep provider-tailored schemas synchronized at lifecycle boundaries; reject a stale executor if its configured provider changed.
+- Active codemode defers enabled web tools; otherwise keep direct exposure. Do not add an exposure setting or activate discovery automatically. Preserve manual selections across mode changes; hard disables use hidden exposure or host exclusions.
+- Reconcile exposure at prompt, turn/tool and session boundaries. Advertise deferred research with the composable `web_research` prompt section; keep branch selection bookkeeping bounded and outside model context. Guard execution against runtime disables.
 - Mock network calls deterministically and restore globals after tests.
 
 ## Validation
@@ -43,6 +44,7 @@ Data flow: Pi tool call → `extensions/index.ts` (tool registration) → `src/c
 |---|---|
 | `extensions/index.ts` | Registers the five research tools plus `--web-provider-search`/`--web-provider-fetch` CLI flags. Keep focused on wiring only. |
 | `src/config.ts` | Multi-layer config resolution (see precedence below). |
+| `src/exposure.ts` | Bounded registration-history parsing and direct-selection reconciliation for automatic exposure. |
 | `src/providers/` | Backend implementations, Context7, and fetch fallbacks. `exa-contract.ts` isolates Exa request validation, notices, and diagnostic projection; `exa-contents.ts` maps per-document statuses and result identities. |
 | `src/code-output.ts` | Strict code-search options, local context budgets, and byte-aware structured-source limits with omission accounting. |
 | `src/limits.ts` | Single source of truth for all hard limits (timeouts, cache size, concurrency, URL count, etc.). |

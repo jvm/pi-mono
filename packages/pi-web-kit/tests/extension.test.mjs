@@ -87,6 +87,25 @@ test("session config changes disable retained research definitions when keys dis
   assert.ok(!active.includes("library_docs") && !active.includes("code_search"));
 });
 
+test("automatic exposure tolerates malformed native default selections without bypassing valid negatives", () => {
+  for (const defaults of [null, "codemode", [null, 1, "+web_search", "-web_fetch"]]) {
+    const tools = new Map();
+    let start;
+    extension({
+      registerFlag() {},
+      getFlag() {},
+      getActiveTools: () => ["codemode"],
+      setActiveTools() {},
+      getSettings: () => ({ defaultTools: defaults }),
+      registerTool: tool => tools.set(tool.name, tool),
+      on(name, handler) { if (name === "session_start") start = handler; },
+    });
+    start({}, { cwd: mkdtempSync(join(tmpdir(), "pi-web-kit-")), isProjectTrusted: () => false });
+    assert.equal(tools.get("web_search").exposure, "deferred");
+    assert.equal(tools.get("web_fetch").exposure, Array.isArray(defaults) ? "hidden" : "deferred");
+  }
+});
+
 test("configuration errors do not publish raw JSON containing credentials", () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-web-kit-"));
   writeFileSync(join(cwd, ".pi-web-kit.json"), '{"private-configuration-value": not-valid-json}');
