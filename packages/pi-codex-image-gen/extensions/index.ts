@@ -8,7 +8,8 @@
 
 import { readFileSync } from "node:fs";
 import { constants } from "node:fs";
-import { mkdir, open, writeFile } from "node:fs/promises";
+import { mkdir, open, writeFile, lstat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -18,6 +19,7 @@ import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import { extractImageAccountId, imageAuthProvider, IMAGE_AUTH_PROVIDER } from "../src/image-oauth.js";
 import { abortable, httpFailure, MAX_IMAGE_BYTES, parseCodexSse, withRequestDeadline, type ParsedCodexResponse } from "../src/codex-response.js";
 import { ARTIFACT_ENTRY, RESERVATION_ENTRY, artifactRecord, artifactReservation, readArtifactManifest, branchArtifacts, reserveArtifact, type ImageArtifact } from "../src/artifacts.js";
+import { admitGeneration } from "../src/admission.js";
 
 const PACKAGE_NAME = "pi-codex-image-gen";
 const LEGACY_PROVIDER = "openai-codex";
@@ -127,6 +129,16 @@ const ARTIFACT_OUTPUT = Type.Object({
 	}),
 	savedPath: Type.Optional(Type.String()),
 	saveWarning: Type.Optional(Type.String()),
+	generationDurationMs: Type.Optional(Type.Integer()),
+	routingProvider: Type.Optional(Type.String()),
+	routingModel: Type.Optional(Type.String()),
+	responseId: Type.Optional(Type.String()),
+	imageGenerationId: Type.Optional(Type.String()),
+	reportedImage: Type.Optional(Type.Object({
+		model: Type.Optional(Type.String()), size: Type.Optional(Type.String()),
+		quality: Type.Optional(Type.String()), background: Type.Optional(Type.String()),
+		outputFormat: Type.Optional(Type.String()),
+	})),
 });
 
 // --- Config types ---
@@ -489,6 +501,9 @@ async function requestImage(
 // --- Extension entry point ---
 
 export default function codexImageGen(pi: ExtensionAPI) {
+	let imageLifetime = new AbortController();
+	pi.on("session_start", () => { imageLifetime = new AbortController(); });
+	pi.on("session_shutdown", () => { imageLifetime.abort(); });
 	reportInstallTelemetry();
 	pi.registerProvider(imageAuthProvider);
 
@@ -527,7 +542,13 @@ export default function codexImageGen(pi: ExtensionAPI) {
 		artifactMode: boolean, toolCallId: string, params: ToolParams, signal: AbortSignal | undefined,
 		onUpdate: AgentToolUpdateCallback<unknown> | undefined, ctx: ExtensionToolContext,
 	): Promise<AgentToolResult<unknown>> {
+		// Preserve hook-approved arguments across auth, queue and file I/O waits.
+		params = structuredClone(params);
+		const lifetimeSignal = imageLifetime.signal;
+		signal = AbortSignal.any([...(signal ? [signal] : []), lifetimeSignal, AbortSignal.timeout(300_000)]);
 		let reservation: Awaited<ReturnType<typeof reserveArtifact>> | undefined;
+		let release: (() => void) | undefined;
+		let dispatched = false;
 		let originEntryId: string | null = null;
 		try {
 			if (typeof params.prompt !== "string" || !params.prompt.trim() || params.prompt.length > MAX_PROMPT_CHARS) {
@@ -569,8 +590,14 @@ export default function codexImageGen(pi: ExtensionAPI) {
 					}
 				}
 			}
-			const inputImages = await resolveInputImages(params, ctx.cwd, messages);
 			signal?.throwIfAborted();
+			const auth = await resolveImageAuth(ctx.modelRegistry);
+			release = await admitGeneration(auth.accountId, signal);
+			signal.throwIfAborted();
+			// Queued calls retain approved selectors, not up to 50 MiB of decoded
+			// references each. Resolve bytes only while holding an admission slot.
+			const inputImages = await resolveInputImages(params, ctx.cwd, messages);
+			signal.throwIfAborted();
 			if (artifactMode) {
 				try {
 					reservation = await reserveArtifact(extensionForFormat(outputFormat));
@@ -585,7 +612,6 @@ export default function codexImageGen(pi: ExtensionAPI) {
 				});
 				originEntryId = ctx.sessionManager.getLeafId();
 			}
-			const auth = await resolveImageAuth(ctx.modelRegistry);
 			const provider = auth.provider;
 			const model = ctx.modelRegistry.find(provider, requestedModel)?.id || requestedModel;
 
@@ -595,6 +621,8 @@ export default function codexImageGen(pi: ExtensionAPI) {
 			});
 
 			const started = Date.now();
+			signal.throwIfAborted();
+			dispatched = true;
 			const parsed = await requestImage(params, auth, model, outputFormat, sessionId, inputImages, signal, (stage) => {
 				onUpdate?.({
 					content: [{ type: "text", text: `Codex image stage: ${stage}.` }],
@@ -669,6 +697,11 @@ export default function codexImageGen(pi: ExtensionAPI) {
 				],
 				...(artifact ? { structuredContent: {
 					summary, artifact: { ...artifact },
+					generationDurationMs: Date.now() - started,
+					routingProvider: provider, routingModel: model,
+					...(parsed.responseId ? { responseId: parsed.responseId } : {}),
+					imageGenerationId: parsed.image.id,
+					reportedImage: Object.fromEntries(Object.entries(reportedImage).filter((entry): entry is [string, string] => typeof entry[1] === "string")),
 					...(savedPath ? { savedPath } : {}),
 					...(saveWarning ? { saveWarning } : {}),
 				} } : {}),
@@ -693,9 +726,18 @@ export default function codexImageGen(pi: ExtensionAPI) {
 					usage: parsed.usage,
 				},
 			};
+		} catch (error) {
+			if (signal.aborted) {
+				const reason = signal.reason?.name === "TimeoutError" ? "timed out" : "was aborted";
+				throw new Error(dispatched
+					? `Image generation ${reason} after dispatch. Image quota may have been consumed. No automatic retry was made.`
+					: `Image generation ${reason} before dispatch. No generation request was made.`);
+			}
+			throw error;
 		} finally {
 			// Cleanup only reservations made by this call, never completed originals.
 			await reservation?.dispose().catch(() => undefined);
+			release?.();
 		}
 	}
 
@@ -704,7 +746,7 @@ export default function codexImageGen(pi: ExtensionAPI) {
 		namespace: {
 			name: "codex_images",
 			description: "Quota-consuming image generation and private original artifacts.",
-			instructions: "Generate only on an explicit image request. codex_generate_image is model-only and returns an inline image. Scripts use codex_generate_image_artifact and receive metadata with artifact.path, never base64; read that path and use image(block) only for requested display. Completed originals survive script failures/reload; save=none still creates temporary originals. Calls consume quota and may write files, so do not automatically retry failures. Await each artifact before using it for an edit. Existing OAuth, approval and exposure rules still apply.",
+			instructions: "Generate only on an explicit image request. codex_generate_image is model-only and returns an inline image. Scripts use codex_generate_image_artifact and receive metadata with artifact.path, never base64; read that path and use image(block) only for requested display. After later script failure use codex_list_image_artifacts({}) to recover current-branch metadata without quota use, then read only a selected returned path. Inspect availability; present is not proof of original contents. Continue with revision/nextOffset. Completed originals survive script failures/reload; save=none still creates temporary originals. Two active/eight queued operations per account share a five-minute total deadline. Calls consume quota and may write files, so do not automatically retry failures. Await each artifact before using it for an edit. Reported image metadata is not measured pixel properties or verified charges; backend usage counters are informational, not Pi usage. Existing OAuth, approval and exposure rules still apply.",
 		},
 		annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
 	};
@@ -735,6 +777,48 @@ export default function codexImageGen(pi: ExtensionAPI) {
 		outputSchema: ARTIFACT_OUTPUT,
 		executionMode: "parallel",
 		execute: (id, params, signal, update, ctx) => executeImage(true, id, params, signal, update, ctx),
+	});
+	pi.registerTool({
+		name: "codex_list_image_artifacts", label: "List image artifacts",
+		namespace: metadata.namespace,
+		description: "Recover bounded current-branch image artifact metadata without generation or quota use. No bytes. File availability is not proof of original contents.",
+		annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+		executionMode: "parallel",
+		parameters: Type.Object({
+			offset: Type.Optional(Type.Integer({ minimum: 0 })),
+			limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+			revision: Type.Optional(Type.String({ maxLength: 64 })),
+		}, { additionalProperties: false }),
+		outputSchema: Type.Object({
+			artifacts: Type.Array(Type.Object({
+				artifact: ARTIFACT_OUTPUT.properties.artifact, toolCallId: Type.String(),
+				availability: StringEnum(["present", "missing", "unavailable"]),
+			})),
+			total: Type.Integer(), revision: Type.String(), nextOffset: Type.Optional(Type.Integer()),
+		}),
+		async execute(_id, { offset = 0, limit = 8, revision }, _signal, _update, ctx) {
+			const records = await branchArtifacts(ctx.sessionManager.getBranch());
+			_signal?.throwIfAborted();
+			const current = createHash("sha256").update(JSON.stringify(records)).digest("hex");
+			if ((offset > 0 && !revision) || (revision && revision !== current)) throw new Error("Artifact list changed or revision missing; restart at offset 0.");
+			const artifacts = [];
+			let bytes = 512;
+			for (const record of records.slice(offset, offset + limit)) {
+				_signal?.throwIfAborted();
+				let availability: "present" | "missing" | "unavailable" = "unavailable";
+				try { availability = (await lstat(record.artifact.path)).isFile() ? "present" : "unavailable"; }
+				catch (error: any) { if (error?.code === "ENOENT") availability = "missing"; }
+				const item = { artifact: { ...record.artifact }, toolCallId: record.toolCallId, availability };
+				const size = Buffer.byteLength(JSON.stringify(item));
+				if (bytes + size > 50_000) break;
+				bytes += size;
+				artifacts.push(item);
+			}
+			const next = offset + artifacts.length;
+			_signal?.throwIfAborted();
+			const data = { artifacts, total: records.length, revision: current, ...(next < records.length ? { nextOffset: next } : {}) };
+			return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data, details: data };
+		},
 	});
 	pi.registerCommand("image-artifacts", {
 		description: "List the last 20 generated original artifact paths on the current branch (no generation).",

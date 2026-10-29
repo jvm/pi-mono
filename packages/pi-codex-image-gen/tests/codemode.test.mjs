@@ -22,6 +22,21 @@ function eventsResponse(events) {
 }
 
 function callResponse(name, args) {
+  if (name === "fixture_parallel") {
+    const items = [
+      { type: "function_call", id: "fc_direct", call_id: "direct", name: "codex_generate_image", arguments: JSON.stringify({ prompt: "fixture", save: "none" }) },
+      { type: "custom_tool_call", id: "ct_nested", call_id: "nested", name: "codemode", input: args },
+    ];
+    return eventsResponse([
+      ...items.flatMap((item, output_index) => [
+        { type: "response.output_item.added", output_index, item: { ...item, ...(item.type === "custom_tool_call" ? { input: "" } : { arguments: "" }) } },
+        { type: item.type === "custom_tool_call" ? "response.custom_tool_call_input.delta" : "response.function_call_arguments.delta",
+          output_index, item_id: item.id, delta: item.input ?? item.arguments },
+        { type: "response.output_item.done", output_index, item },
+      ]),
+      { type: "response.completed", response: { status: "completed", output: items, usage: { input_tokens: 10, output_tokens: 1, total_tokens: 11 } } },
+    ]);
+  }
   const custom = name === "codemode";
   const item = custom
     ? { type: "custom_tool_call", id: "ct_fixture", call_id: "call_fixture", name, input: args }
@@ -158,6 +173,88 @@ test("nested artifact metadata reaches the parent; explicit read/image delivers 
   assert.deepEqual(await readFile(record.artifact.path), PNG);
   assert.equal((await stat(record.artifact.path)).mode & 0o777, 0o600);
   assert.equal((await stat(join(record.artifact.path, ".."))).mode & 0o777, 0o700);
+});
+
+test("typed recovery survives later script failure without a new generation", async t => {
+  const h = await fixture(t);
+  const failed = await h.script(`
+    await tools.codex_generate_image_artifact({prompt:"fixture",save:"none"});
+    throw new Error("later script failure");
+  `);
+  assert.equal(failed.isError, true);
+  const result = await h.script(`
+    const r=await tools.codex_list_image_artifacts({});
+    if(r.total!==1 || r.artifacts[0].availability!=="present") throw new Error("Recovery lost");
+    text(r.artifacts[0]);
+  `);
+  assert.equal(result.isError, false, JSON.stringify(result));
+  assert.equal(h.imageRequests.length, 1);
+  const generated = h.nested.find(e => e.toolName === "codex_generate_image_artifact");
+  assert.equal(generated.structuredContent.responseId, "response-fixture");
+  assert.equal(typeof generated.structuredContent.generationDurationMs, "number");
+  await unlink(h.records()[0].data.artifact.path);
+  const missing = await h.script(`text((await tools.codex_list_image_artifacts({})).artifacts[0].availability);`);
+  assert.match(JSON.stringify(missing.content), /missing/);
+});
+
+test("parallel direct and nested generation share account admission without deduplication", async t => {
+  const h = await fixture(t, "on");
+  let active = 0;
+  let peak = 0;
+  h.setImageHandler(async () => {
+    peak = Math.max(peak, ++active);
+    await delay(25);
+    active--;
+    return imageResponse();
+  });
+  const result = await h.run("fixture_parallel", `
+    const r=await Promise.all([1,2,3].map(()=>tools.codex_generate_image_artifact({prompt:"fixture",save:"none"})));
+    text(r.map(x=>x.artifact.path));
+  `);
+  assert.equal(result.isError, false, JSON.stringify(result.content));
+  assert.equal(h.imageRequests.length, 4);
+  assert.equal(peak, 2);
+  assert.equal(h.records().length, 3);
+});
+
+test("cancellation releases queued generation before dispatch and reload cannot start it late", async t => {
+  const h = await fixture(t);
+  let opened;
+  const twoStarted = new Promise(resolve => { opened = resolve; });
+  h.setImageHandler(() => {
+    if (h.imageRequests.length === 2) opened();
+    return new Promise(() => {});
+  });
+  const running = h.script(`
+    text(await Promise.allSettled([1,2,3].map(()=>tools.codex_generate_image_artifact({prompt:"fixture",save:"none"}))));
+  `);
+  await twoStarted;
+  await h.session.abort();
+  await running;
+  await h.session.reload();
+  assert.equal(h.imageRequests.length, 2);
+  assert.equal(h.records().length, 0);
+  h.setImageHandler(() => imageResponse());
+  const fresh = await h.script(`text((await tools.codex_generate_image_artifact({prompt:"fresh fixture",save:"none"})).artifact.path);`);
+  assert.equal(fresh.isError, false, JSON.stringify(fresh.content));
+  assert.equal(h.imageRequests.length, 3);
+});
+
+test("a quota-failed sibling is not retried and cannot delete a successful original", async t => {
+  const h = await fixture(t);
+  h.setImageHandler(() => h.imageRequests.length === 1
+    ? imageResponse() : new Response(JSON.stringify({ error: { code: "insufficient_quota" } }), { status: 429 }));
+  const result = await h.script(`
+    const r=await Promise.allSettled([1,2].map(()=>tools.codex_generate_image_artifact({prompt:"fixture",save:"none"})));
+    if(r.filter(x=>x.status==="fulfilled").length!==1 || r.filter(x=>x.status==="rejected").length!==1)
+      throw new Error("Mixed outcomes lost");
+    const listed=await tools.codex_list_image_artifacts({});
+    if(listed.total!==1 || listed.artifacts[0].availability!=="present") throw new Error("Successful original lost");
+    text(listed.total);
+  `);
+  assert.equal(result.isError, false, JSON.stringify(result.content));
+  assert.equal(h.imageRequests.length, 2);
+  assert.equal(h.records().length, 1);
 });
 
 test("artifact tool supports other orchestrators and explicit direct activation", async t => {
@@ -491,7 +588,7 @@ test("artifact network deadline fails once and cleans reserved storage", async t
     await rm(root, { recursive: true, force: true });
   });
   let tool;
-  imageExtension({ registerProvider() {}, registerCommand() {}, appendEntry() {}, registerTool(value) {
+  imageExtension({ on() {}, registerProvider() {}, registerCommand() {}, appendEntry() {}, registerTool(value) {
     if (value.name === "codex_generate_image_artifact") tool = value;
   } });
   const original = globalThis.fetch;

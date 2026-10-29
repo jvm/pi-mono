@@ -1,5 +1,20 @@
 # Security Policy
 
+## Admission and metadata recovery
+
+Direct/artifact operations share bounded account admission. The queue uses
+process-random HMAC identities, snapshots arguments, includes wait time in a
+total deadline, and cancels queued requests on shutdown/reload. Originals are
+reserved only after admission and before network generation. Cancellation after
+dispatch may already consume quota; a queue is not authorization to do more work.
+
+`codex_list_image_artifacts` reads the same validated current-branch records and
+bounded private manifests as `/image-artifacts`. It returns byte/count-bounded
+metadata, never image bytes or arbitrary file contents. Availability uses
+non-following file metadata and is a snapshot, not content validation.
+Returned backend metadata is allowlisted and is not proof of pixel properties,
+served models, charges, or remaining quota. It is not inserted into Pi usage.
+
 ## Supported versions
 
 Security fixes are provided for the latest released version of `pi-codex-image-gen`.

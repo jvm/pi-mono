@@ -25,6 +25,8 @@ Within CLI fallback, the CLI exposes three subcommands:
 - `generate-batch`
 
 Rules:
+- Recover existing current-branch artifacts with `tools.codex_list_image_artifacts({})` after a later script failure; inspect availability and use returned paths instead of generating again. Listing consumes no image quota. Continue paginated listings with revision/nextOffset.
+- Direct and artifact requests share bounded account admission (two active, eight queued). Queue time counts toward the five-minute total deadline. Queueing does not authorize extra assets; cancellation after dispatch can still consume quota. Reported metadata is not measured pixel properties or verified cost.
 - Use the Pi `codex_generate_image` tool by default for new image generation requests.
 - `codex_generate_image` is model-only; call it directly, never through codemode. For scripted workflows use `tools.codex_generate_image_artifact(...)`, which returns `{ summary, artifact: { path, mimeType, byteCount }, savedPath?, saveWarning? }` without image bytes. Both tools support the same generation/edit parameters and subscription login. Use Pi >=1.1.0.
 - To display an artifact, call `tools.read({path: result.artifact.path})`, then `image(block)` if the returned value is an image block. Pi can resize or omit an un-decodable display image; the original remains unchanged. Never print or store base64 image bytes. Pass artifact paths directly through `referencedImagePaths` for chained edits.
