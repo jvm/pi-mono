@@ -219,8 +219,10 @@ test("real Pi requests hide native editing only while apply_patch is active", as
       const supported = supportsOpenAIGrammarTools(selected);
       const names = (await getDeclaredTools(t, harness)).map((tool) => tool.name);
       const hasInlineHistory = harness.lastDeclarationRequest.input.some(item => item.type === "additional_tools");
-      const removal = name => assert.match(JSON.stringify(harness.lastDeclarationRequest.input),
-        new RegExp(`(?:no longer available|Still unavailable)[\\s\\S]*${name}`));
+      const removal = name => {
+        const notice = JSON.stringify(harness.lastDeclarationRequest.input).match(/(?:no longer available|Still unavailable)[\s\S]*/)?.[0];
+        assert.ok(notice?.includes(name), `Missing removal notice for ${name}`);
+      };
       if (!supported && hasInlineHistory && names.includes("apply_patch")) {
         assert.ok(!session.getActiveToolNames().includes("apply_patch"));
         removal("apply_patch");
