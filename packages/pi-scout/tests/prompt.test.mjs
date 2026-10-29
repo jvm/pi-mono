@@ -10,12 +10,14 @@ process.env.PI_OFFLINE = "1";
 const { default: scout } = await import("../extensions/index.ts");
 const { saveState, loadState } = await import("../src/state.ts");
 
-function promptHandler() {
+function promptHandler(mode = "full", initial = []) {
   const handlers = new Map();
-  let active = [];
+  let active = initial;
   scout({
     on: (name, handler) => handlers.set(name, handler),
     registerCommand() {},
+    registerFlag() {},
+    getFlag: () => mode,
     registerTool() {},
     getActiveTools: () => active,
     setActiveTools: names => { active = names; },
@@ -50,6 +52,22 @@ test("Scout owns one named section without changing explicit prompt policy or ex
   await handler(event);
   assert.deepEqual((await loadState()).repos, []);
   assert.deepEqual(sections, { unrelated: "Keep me." }, "remove stale sections, not other extensions' content");
+});
+
+test("compact Scout context requires reachable listing, otherwise full paths remain", async () => {
+  await saveState({ repos: [{
+    id: "compact", name: "reference", path: profile, source: "private-origin",
+    createdAt: "fixture", lastSeenAt: "fixture",
+  }] });
+  const event = () => ({ systemPromptOptions: { sections: { skillful: "keep" } } });
+  const compact = event();
+  await promptHandler("compact", ["scout_list"])(compact);
+  assert.match(compact.systemPromptOptions.sections.scout_repos, /Use scout_list/);
+  assert.ok(!compact.systemPromptOptions.sections.scout_repos.includes(profile));
+  assert.equal(compact.systemPromptOptions.sections.skillful, "keep");
+  const fallback = event();
+  await promptHandler("compact")(fallback);
+  assert.ok(fallback.systemPromptOptions.sections.scout_repos.includes(profile));
 });
 
 test.after(async () => { await rm(profile, { recursive: true, force: true }); });

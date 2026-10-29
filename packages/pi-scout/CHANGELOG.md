@@ -6,6 +6,11 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Add typed `scout_list` with public-field filtering, byte-bounded pages and revision-checked continuation.
+- Add opt-in `--scout-context compact`, with full context fallback when listing is inactive.
+
 ## [0.2.0] - 2026-10-09
 
 ### Added
