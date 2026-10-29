@@ -59,7 +59,7 @@ export async function evaluateExa(key) {
           rawCharacters = raw.results.reduce((sum, r) => sum + (r.content?.length ?? 0), 0);
           sourceCount = raw.results.length;
           const bounded = applySearchContextBudget(redactOutput(raw.results, [key]), CONTEXT_TOKENS * 4);
-          result = jsonToolResult({ provider: "exa", queries: [{
+          result = jsonToolResult({ provider: "exa", status: "success", queries: [{ status: "success",
             query: fixture.query, requestedResultLimit: NUM_RESULTS, effectiveResultLimit: NUM_RESULTS,
             requestedContextTokens: CONTEXT_TOKENS, effectiveContextTokens: CONTEXT_TOKENS,
             contextCharacters: bounded.contextCharacters, omittedContextCharacters: bounded.omittedContextCharacters,

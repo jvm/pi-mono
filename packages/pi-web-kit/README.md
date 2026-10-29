@@ -13,6 +13,61 @@ Give [Pi](https://pi.dev) current web knowledge, authoritative library docs, and
 - **Compose research in scripts** — typed results let codemode filter and join data without parsing model-facing text.
 - **Choose your providers** — mix Exa, TinyFish, Brave, Firecrawl, markdown.new, and Context7 based on coverage, cost, and credentials.
 
+## Partial search and shared resource limits
+
+`web_search` returns top-level `status: "success" | "partial" | "failed"`.
+Each query has `status: "success" | "failed"`; failed queries have empty results
+and `error: {code: "provider_request_failed", message}`. Even all-failed
+batches resolve as unmistakable failure data. Inspect status, not just whether
+the call resolved. Independent queries retain input order and continue after
+operational HTTP/network failures. Invalid arguments, cancellation, policy
+blocks and invalid required provider shapes still reject. Batches validate
+before dispatch and execute queries sequentially.
+
+Across calls, provider/account/header scopes allow three HTTP requests at once,
+up to 100 queued requests, and 128 live scopes. Deadlines include queue wait and
+body reads. Batch endpoints count as one HTTP request, not one logical URL.
+HTTP 429 `Retry-After` cooldowns are capped at 30 seconds; requests are not
+automatically retried. Separate permitted requests still overlap.
+Equivalent fetch misses share in-flight work, including across extension
+instances loaded from this package module. Cache identity includes account,
+URL, provider defaults and material options. Refresh has its own flight identity.
+One cancelled waiter does not cancel work needed by another; the last cancels
+shared transport. Completed caching remains separate from in-flight sharing.
+
+## Find text already in cache
+
+Fetch normally first, then use `web_fetch({url, find: "literal"})`.
+Finding is **cache-only**: a missing/expired page returns an explicit error,
+never a disguised provider request. `findCaseSensitive` defaults to true;
+false uses Unicode case-insensitive literal matching. No caller regex is run.
+
+`find` is limited to 256 UTF-16 code units. Finder results contain `term`,
+`caseSensitive`, `units: "UTF-16"`, `from`, `scanned`, `count`,
+`omittedMatchCount`, `matches`, and optional `nextFrom`. Each match has
+`offset`, `length`, `excerptOffset`, and `excerpt`. Offsets use UTF-16 code
+units, like existing range reads. Counts cover non-overlapping matches at or
+after `findFrom` (default zero); empty pages/no matches produce zero counts.
+At most 20 matches are returned across a batch, with 80 code units of context
+on each side. Continue with `findFrom: nextFrom`. Matching runs after redaction.
+The response/cache size limits still apply, including the 50,000-byte JSON
+budget. Finder options cannot combine with range `offset`/`limit` or `refresh`.
+
+```js
+const search = await tools.web_search({ queries: ["topic A", "topic B"], purpose: "Compare sources" });
+const sources = search.queries.filter(q => q.status === "success").flatMap(q => q.results);
+const pages = await tools.web_fetch({ urls: sources.slice(0, 3).map(r => r.url) });
+text(pages.results.map(r => ({ url: r.url, error: r.error, range: r.range })));
+// Use the exact same material fetch options as the original request.
+const found = await tools.web_fetch({ url: sources[0].url, find: "relevant phrase" });
+text(found.results);
+```
+
+Tools remain direct by default. For codemode-first sessions, prefer Pi's native
+`codemode.mode: "only"` and `codemode.inlineBudget`; use namespace/tool
+discovery at budget zero. Package-level deferred exposure and typed extraction
+are deferred, not silently enabled. No page content is sent to a new inference provider.
+
 ## Installation
 
 Install from npm:

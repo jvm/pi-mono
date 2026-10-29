@@ -1,9 +1,13 @@
 import { DEFAULT_TIMEOUT_MS, MAX_RESPONSE_BYTES } from "./limits.js";
 import { normalizeUrlInput } from "./urls.js";
 import { redactText } from "./output.js";
+import { AdmissionError, coordinate, requestScope } from "./coordinator.js";
 
 const MAX_CHARS = 50_000;
 const MAX_LINES = 2_000;
+
+/** Only operational transport failures may become per-query failure data. */
+export class ProviderRequestError extends Error {}
 
 export function truncateText(text: string, maxChars = MAX_CHARS): string {
   const lines = text.split(/\r?\n/);
@@ -22,12 +26,32 @@ async function withResponseTimeout<T>(url: string, init: RequestInit & { timeout
     signal.throwIfAborted();
     // All destinations are fixed provider endpoints. Never forward API keys,
     // query bodies, or URLs through a provider-controlled redirect.
-    const result = await consume(await fetch(url, { ...rest, signal, redirect: "error" }));
-    signal.throwIfAborted();
-    return result;
+    return await coordinate(requestScope(url, rest.headers), signal, async cooldown => {
+      let response: Response;
+      try { response = await fetch(url, { ...rest, signal, redirect: "error" }); }
+      catch (error) {
+        if (signal.aborted) throw error;
+        // Redirect/policy failures must not be presented as a completed search.
+        if (error instanceof TypeError && !/redirect/i.test(String(error.cause ?? error.message))) {
+          throw new ProviderRequestError("Provider network request failed.");
+        }
+        throw error;
+      }
+      if (response.status === 429) {
+        const retry = response.headers.get("retry-after");
+        if (retry) {
+          const ms = /^\d+(?:\.\d+)?$/.test(retry) ? Number(retry) * 1000 : Date.parse(retry) - Date.now();
+          if (Number.isFinite(ms)) cooldown(ms);
+        }
+      }
+      const result = await consume(response);
+      signal.throwIfAborted();
+      return result;
+    });
   } catch (error) {
     if (init.signal?.aborted) throw new Error("Web tool cancelled.");
-    if (controller.signal.aborted) throw new Error(`Request timed out after ${timeoutMs}ms`);
+    if (controller.signal.aborted) throw new ProviderRequestError(`Request timed out after ${timeoutMs}ms`);
+    if (error instanceof AdmissionError) throw new ProviderRequestError(error.message);
     throw error;
   } finally {
     clearTimeout(timer);
@@ -46,7 +70,7 @@ export function requestText(url: string, init: RequestInit & { timeoutMs?: numbe
   return withResponseTimeout(url, init, async res => {
     if (!res.ok) {
       void res.body?.cancel().catch(() => undefined);
-      throw new Error(`Provider request failed (HTTP ${res.status}).`);
+      throw new ProviderRequestError(`Provider request failed (HTTP ${res.status}).`);
     }
     return { text: await readBoundedText(res), headers: res.headers };
   });

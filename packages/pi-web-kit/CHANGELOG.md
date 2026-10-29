@@ -6,6 +6,12 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Preserve successful queries in partial/all-failed search batches with explicit status and bounded errors.
+- Bound aggregate provider HTTP requests and share equivalent in-flight fetch misses with independent waiter cancellation.
+- Find literal text in cached redacted pages without another provider request.
+
 ## [0.4.2] - 2026-10-25
 
 ### Fixed

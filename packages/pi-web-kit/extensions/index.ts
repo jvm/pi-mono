@@ -13,6 +13,8 @@ import { boundStructuredResult } from "../src/output-budget.js";
 import { parseInteger } from "../src/validation.js";
 import { singleLine } from "../src/render-text.js";
 import { researchProgress, researchRenderers } from "../src/research-render.js";
+import { ProviderRequestError } from "../src/http.js";
+import { buildExaSearchBody } from "../src/providers/exa-contract.js";
 
 // Preserve existing test/library entry points while keeping orchestration in src.
 export { buildCacheKey, fetchWithCache, pageSlice } from "../src/fetch.js";
@@ -152,17 +154,35 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
       const effectiveResultLimit = capSearchResultLimit(config.provider_search, requestedResultLimit);
       const requestedContextTokens = params.contextTokens == null ? undefined : parseInteger(params.contextTokens, 0, "contextTokens", 1);
       const effectiveContextTokens = Math.min(requestedContextTokens ?? DEFAULT_SEARCH_CONTEXT_TOKENS, MAX_SEARCH_CONTEXT_TOKENS);
+      const inputs = queries.map(query => ({ ...params, query, numResults: effectiveResultLimit,
+        contextTokens: requestedContextTokens == null ? undefined : effectiveContextTokens }));
+      // Validate the entire Exa batch before the first request, not query by query.
+      if (config.provider_search === "exa") inputs.forEach(input => buildExaSearchBody(input));
       const provider = createSearchProvider(config, diagnostic => pi.events?.emit("pi-web-kit:exa-diagnostics", diagnostic));
       const grouped = [];
       const progress = createProgress("search", config.provider_search, queries);
       emitProgress(onUpdate, progress);
-      for (const query of queries) {
+      for (const input of inputs) {
+        const { query } = input;
         markProgressCurrent(progress, query);
         emitProgress(onUpdate, progress);
-        const result = await provider.search({ ...params, query, numResults: effectiveResultLimit, contextTokens: requestedContextTokens == null ? undefined : effectiveContextTokens }, signal);
+        let result;
+        try { result = await provider.search(input, signal); }
+        catch (error) {
+          signal?.throwIfAborted();
+          if (!(error instanceof ProviderRequestError)) throw error;
+          grouped.push({ query, status: "failed", requestedResultLimit, effectiveResultLimit,
+            requestedContextTokens, effectiveContextTokens, contextCharacters: 0, resultCount: 0, results: [],
+            error: { code: "provider_request_failed", message: error.message.slice(0, 256) } });
+          markProgressDone(progress, query, "provider request failed");
+          emitProgress(onUpdate, progress);
+          continue;
+        }
+        signal?.throwIfAborted();
         const bounded = applySearchContextBudget(redactOutput(result.results, Object.values(config.apiKeys)), effectiveContextTokens * 4);
         grouped.push({
           query,
+          status: "success",
           requestedResultLimit,
           effectiveResultLimit: result.effectiveResultLimit ?? effectiveResultLimit,
           requestedContextTokens,
@@ -177,7 +197,10 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
         markProgressDone(progress, query, `${bounded.results.length} results`);
         emitProgress(onUpdate, progress);
       }
-      const result = { provider: config.provider_search, queries: grouped };
+      signal?.throwIfAborted();
+      const failed = grouped.filter(query => query.status === "failed").length;
+      const result = { provider: config.provider_search,
+        status: failed === grouped.length ? "failed" : failed ? "partial" : "success", queries: grouped };
       return result;
     },
     renderCall(args, theme) {
@@ -365,6 +388,9 @@ export function buildFetchSchema(provider: FetchProviderName) {
   const props: Record<string, any> = {
     url: Type.Optional(Type.String({ description: "Single URL", maxLength: 2048 })),
     urls: Type.Optional(Type.Array(Type.String({ maxLength: 2048 }), { description: `Multiple URLs (max ${MAX_URL_COUNT})`, maxItems: MAX_URL_COUNT })),
+    find: Type.Optional(Type.String({ minLength: 1, maxLength: 256, description: "Literal text to find in cached redacted content only. A cache miss does not fetch. Incompatible with offset, limit and refresh." })),
+    findCaseSensitive: Type.Optional(Type.Boolean({ description: "Default true. False uses Unicode case-insensitive literal matching." })),
+    findFrom: Type.Optional(int("UTF-16 offset for finding continuation, default 0", 0, MAX_OFFSET)),
     offset: Type.Optional(int("Character offset for cached/ranged reads", 0, MAX_OFFSET)),
     limit: Type.Optional(int("Maximum characters to return", 1, MAX_LIMIT)),
     refresh: Type.Optional(Type.Boolean({ description: "Refetch even if cached" })),
@@ -493,8 +519,11 @@ function boundedDetails(value: any): unknown {
 function searchDetails(value: any) {
   return {
     provider: value.provider,
+    status: value.status,
     queries: value.queries.map((q: any) => ({
       query: q.query,
+      status: q.status,
+      error: q.error,
       requestedResultLimit: q.requestedResultLimit,
       effectiveResultLimit: q.effectiveResultLimit,
       requestedContextTokens: q.requestedContextTokens,
@@ -558,6 +587,7 @@ function fetchDetails(value: any) {
       refreshed: r.refreshed,
       range: r.range,
       error: r.error,
+      ...(r.find ? { find: { count: r.find.count, omittedMatchCount: r.find.omittedMatchCount } } : {}),
     })),
   };
 }
@@ -631,15 +661,16 @@ function renderWebResult(kind: ProgressKind, result: any, { expanded, isPartial 
   const details = result.details as any;
   if (kind === "search" && details?.queries) {
     const total = details.queries.reduce((sum: number, q: any) => sum + (q.resultCount ?? q.results?.length ?? 0), 0);
-    let text = `${theme.fg("success", "✅ Web search complete")} ${theme.fg("muted", `${details.queries.length}/${details.queries.length}`)}\n   results: ${total} total`;
-    if (expanded) for (const q of details.queries) text += `\n   ✓ ${theme.fg("accent", quote(q.query))} ${theme.fg("muted", `${q.resultCount ?? q.results?.length ?? 0} results`)}`;
+    const failed = details.queries.filter((q: any) => q.status === "failed").length;
+    let text = `${theme.fg(failed ? "warning" : "success", failed ? "Web search completed with failures" : "✅ Web search complete")} ${theme.fg("muted", `${details.queries.length - failed}/${details.queries.length}`)}\n   results: ${total} total`;
+    if (expanded) for (const q of details.queries) text += `\n   ${q.status === "failed" ? "✗" : "✓"} ${theme.fg("accent", quote(q.query))} ${theme.fg("muted", q.error?.message ?? `${q.resultCount ?? q.results?.length ?? 0} results`)}`;
     return new Text(text, 0, 0);
   }
   if (kind === "fetch" && details?.results) {
     const ok = details.results.filter((r: any) => !r.error).length;
     const failed = details.results.length - ok;
     let text = failed > 0 ? `${theme.fg("warning", "⚠️ Fetch complete")} ${ok}/${details.results.length} succeeded` : `${theme.fg("success", details.results.length === 1 ? "✅ Page fetched" : "✅ Pages fetched")} ${theme.fg("muted", `${ok}/${details.results.length}`)}`;
-    if (expanded) for (const r of details.results) text += `\n   ${r.error ? theme.fg("error", "✕") : theme.fg("success", "✓")} ${theme.fg("accent", truncateMiddle(r.url, 100))}${r.error ? theme.fg("error", ` ${singleLine(r.error)}`) : theme.fg("muted", ` ${r.range?.returned ?? 0}/${r.range?.total ?? 0} chars${r.cached ? " cached" : ""}`)}`;
+    if (expanded) for (const r of details.results) text += `\n   ${r.error ? theme.fg("error", "✕") : theme.fg("success", "✓")} ${theme.fg("accent", truncateMiddle(r.url, 100))}${r.error ? theme.fg("error", ` ${singleLine(r.error)}`) : theme.fg("muted", r.find ? ` ${r.find.count} matches, ${r.find.omittedMatchCount} omitted (cached)` : ` ${r.range?.returned ?? 0}/${r.range?.total ?? 0} chars${r.cached ? " cached" : ""}`)}`;
     return new Text(text, 0, 0);
   }
   const content = result.content?.find?.((c: any) => c.type === "text")?.text ?? "";

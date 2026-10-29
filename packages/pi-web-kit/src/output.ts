@@ -33,12 +33,26 @@ const searchFields = {
 export const WEB_OUTPUT_SCHEMAS: Record<string, TSchema> = {
   web_search: output(object({
     provider: Type.String(),
-    queries: Type.Array(object(searchFields)),
+    status: Type.Union([Type.Literal("success"), Type.Literal("partial"), Type.Literal("failed")]),
+    queries: Type.Array(object({
+      ...searchFields,
+      status: Type.Union([Type.Literal("success"), Type.Literal("failed")]),
+      error: Type.Optional(object({ code: Type.Literal("provider_request_failed"), message: Type.String({ maxLength: 256 }) })),
+    })),
   })),
   web_fetch: output(object({
     provider: Type.String(),
     results: Type.Array(Type.Union([
       object({ url: Type.String(), error: Type.String() }),
+      object({
+        url: Type.String(), fetchedUrl: Type.String(), cached: Type.Literal(true),
+        find: object({
+          term: Type.String(), caseSensitive: Type.Boolean(), units: Type.Literal("UTF-16"),
+          from: Type.Integer(), scanned: Type.Integer(), count: Type.Integer(), omittedMatchCount: Type.Integer(),
+          nextFrom: Type.Optional(Type.Integer()),
+          matches: Type.Array(object({ offset: Type.Integer(), length: Type.Integer(), excerptOffset: Type.Integer(), excerpt: Type.String() })),
+        }),
+      }),
       object({
         url: Type.String(), fetchedUrl: Type.String(), title: string(), content: Type.String(),
         format: Type.Union([Type.Literal("markdown"), Type.Literal("html"), Type.Literal("json")]),
@@ -86,7 +100,7 @@ export const WEB_TOOL_METADATA = {
   namespace: {
     name: "web",
     description: "Bounded web research, library documentation and code examples.",
-    instructions: "Keep existing tool names: web_search, web_fetch, library_search, library_docs, code_search. Await describeTool(name) for provider-specific inputs and output types. Calls return objects, not JSON strings. Fetch failures are per-item error strings; check them before using content. A top-level truncated:true/message result asks you to refine the request. Validation, cancellation and request failures reject. Parallel independent reads are supported; provider requests can incur costs. Availability depends on configured providers and active tools. These hints do not grant approval.",
+    instructions: "Keep existing tool names: web_search, web_fetch, library_search, library_docs, code_search. Await describeTool(name) for provider-specific inputs and output types. Calls return objects, not JSON strings. Inspect web_search.status and each query.status/error: operational query failures preserve other results, including all-failed status:'failed'. Fetch failures are per-item error strings; check them before using content. A top-level truncated:true/message result asks you to refine the request. Validation, cancellation, policy blocks and invalid required result shapes reject. Parallel independent reads are supported; provider requests can incur costs. Availability depends on configured providers and active tools. These hints do not grant approval.",
   },
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
 } as const;

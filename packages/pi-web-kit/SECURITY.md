@@ -1,5 +1,20 @@
 # Security Policy
 
+## Shared admission and cached finding
+
+HTTP admission is bounded per provider origin and account/header scope using
+process-random HMAC identities, never public credential keys. Queue wait counts
+toward request deadlines. HTTP 429 cooldowns are bounded; no retry is added.
+Equivalent misses share transport only within the existing cache/account/options
+identity; waiter cancellation is independent. Last-waiter cancellation aborts
+shared work. Reload cancellation uses Pi's normal tool cancellation signal.
+
+Cached literal finding does not fetch on a miss. It scans redacted content only,
+with bounded terms, excerpts and match counts. It accepts no regex, path or
+persistent response handle. Search errors contain bounded transport messages,
+not backend response bodies. Validation, policy and cancellation failures are
+not converted into successful empty searches.
+
 ## Supported versions
 
 Security fixes are provided for the latest released version of `pi-web-kit`.
