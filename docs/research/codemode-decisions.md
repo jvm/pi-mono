@@ -1,5 +1,12 @@
 # Codemode decisions: D1, D2 and D3
 
+> **Historical research:** these measurements and recommendations describe
+> `09bef1b`, captured with this harness in `985aa6e`. D1 was later approved and
+> refined to automatic web exposure when native codemode is active; there is
+> no exposure setting. See [the current behavior](../../packages/pi-web-kit/README.md#automatic-tool-exposure).
+> D2 and D3 remain deferred. Reproduce the historical measurements from the
+> pinned snapshot below, not from the current production implementation.
+
 ## Recommendation
 
 | Decision | Recommendation | Reason |
@@ -212,19 +219,27 @@ could be useful later, but would not complete D3.
 
 ## Reproduce
 
-Use a read-only checkout of the pinned reference and the root npm toolchain:
+Use a read-only checkout of the pinned reference and a disposable copy of the
+research snapshot. This does not change the current worktree or dependencies:
 
 ```bash
-PI_WEB_ACCESS_REFERENCE=/path/to/pi-web-access \
-  node --import tsx docs/research/eval-codemode-decisions.mjs
-
-PI_WEB_ACCESS_REFERENCE=/path/to/pi-web-access \
-  node --import tsx docs/research/eval-codemode-decisions.mjs 1.4.0
+snapshot=$(mktemp -d)
+git archive 985aa6e | tar -x -C "$snapshot"
+(
+  cd "$snapshot"
+  PI_OFFLINE=1 PI_TELEMETRY=0 npm ci --ignore-scripts --no-audit --no-fund
+  PI_WEB_ACCESS_REFERENCE=/path/to/pi-web-access \
+    node --import tsx docs/research/eval-codemode-decisions.mjs
+  PI_WEB_ACCESS_REFERENCE=/path/to/pi-web-access \
+    node --import tsx docs/research/eval-codemode-decisions.mjs 1.4.0
+)
+printf 'Research snapshot retained at %s\n' "$snapshot"
 ```
 
-The first command uses the repository's installed dependencies. The second
+The first evaluation uses the snapshot's installed dependencies. The second
 creates a disposable synchronized installation, runs the same evaluation,
-and removes that installation. npm may contact its registry for installation;
+and removes that installation. The outer snapshot is retained for inspection.
+npm may contact its registry for installation;
 the evaluation itself blocks unmocked provider traffic. Optional
 `PI_DECISIONS_OUTPUT` writes a JSON result to a **new** file with mode `0600`.
 

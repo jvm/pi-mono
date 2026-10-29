@@ -128,6 +128,10 @@ try {
     };
     try {
       await run();
+      const expectedExposure = config.hidden ? "hidden" : config.defer ? "deferred" : "direct";
+      assert.ok(h.api.getAllTools().filter(tool => webNames.includes(tool.name))
+        .every(tool => tool.exposure === expectedExposure),
+      "Historical D1 fixtures require the 985aa6e runtime snapshot; use the pinned reproduction instructions in docs/research/codemode-decisions.md.");
       const cold = requests.at(-1);
       let discoveryBytes = 0;
       const unavailable = 'if (await describeTool("web_search") || (await searchTools("web search",{limit:100})).some(t=>t.name==="web_search")) throw new Error("Disabled tool was discoverable"); if ("web_search" in tools) throw new Error("Disabled tool was callable"); text("unreachable");';
