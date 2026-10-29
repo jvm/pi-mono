@@ -7,6 +7,8 @@ import type { FetchProviderName, SearchProviderName, WebKitConfig } from "./type
 const SEARCH = ["exa", "tinyfish", "brave", "firecrawl"] as const;
 const FETCH = ["exa", "tinyfish", "markdown_new", "firecrawl"] as const;
 const DEFAULT_CONFIG: WebKitConfig = {
+  enabled: true,
+  toolExposure: "direct",
   provider_search: "exa",
   provider_fetch: "exa",
   apiKeys: {},
@@ -60,11 +62,17 @@ export function resolveConfig(
   });
   validateSearchProvider(cfg.provider_search);
   validateFetchProvider(cfg.provider_fetch);
+  if (typeof cfg.enabled !== "boolean") throw new Error("enabled must be a boolean.");
+  if (cfg.toolExposure !== "direct" && cfg.toolExposure !== "deferred") {
+    throw new Error("toolExposure must be direct or deferred.");
+  }
   return cfg;
 }
 
 function merge(base: WebKitConfig, patch: PartialConfig): WebKitConfig {
   return {
+    enabled: patch.enabled !== undefined ? patch.enabled : base.enabled,
+    toolExposure: patch.toolExposure !== undefined ? patch.toolExposure : base.toolExposure,
     provider_search: patch.provider_search ?? base.provider_search,
     provider_fetch: patch.provider_fetch ?? base.provider_fetch,
     apiKeys: clean({ ...base.apiKeys, ...patch.apiKeys }),

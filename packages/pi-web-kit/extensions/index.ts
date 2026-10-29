@@ -20,6 +20,18 @@ import { buildExaSearchBody } from "../src/providers/exa-contract.js";
 export { buildCacheKey, fetchWithCache, pageSlice } from "../src/fetch.js";
 
 const REGISTERED_TOOLS_ENTRY = "pi-web-kit:registered-tools";
+const WEB_TOOLS = new Set(Object.keys(WEB_OUTPUT_SCHEMAS));
+type Exposure = "direct" | "deferred" | "hidden";
+
+function disabledBySettings(pi: ExtensionAPI, name: string): boolean {
+  const settings = pi.getSettings?.().defaultTools;
+  return Array.isArray(settings)
+    && settings.filter(entry => entry === `+${name}` || entry === `-${name}`).at(-1) === `-${name}`;
+}
+
+function discoveryAvailable(pi: ExtensionAPI): boolean {
+  return pi.getActiveTools?.().some(name => name === "codemode" || name === "tool_search") ?? false;
+}
 
 export default function (pi: ExtensionAPI) {
   void reportInstallTelemetry();
@@ -34,21 +46,38 @@ export default function (pi: ExtensionAPI) {
 
   let registeredConfig = "";
   let rememberedTools: string[] | undefined;
-  pi.on("session_start", (event, ctx) => {
+  let rememberedExposure: Exposure | undefined;
+  function syncTools(ctx: ExtensionContext, reload = false) {
     const startupConfig = runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx));
-    const signature = toolConfigSignature(startupConfig);
-    if (signature === registeredConfig) return;
+    const missingDiscovery = startupConfig.enabled && startupConfig.toolExposure === "deferred" && !discoveryAvailable(pi);
+    const exposure: Exposure = !startupConfig.enabled || missingDiscovery ? "hidden" : startupConfig.toolExposure;
+    const signature = JSON.stringify([toolConfigSignature(startupConfig), exposure, pi.getSettings?.().defaultTools]);
+    // Tree navigation may restore declarations from a different exposure policy
+    // without replacing this runtime or changing the current configuration.
+    const previousExposure = ctx.sessionManager ? registrationExposure(ctx) : rememberedExposure;
+    const checkDiscovery = () => {
+      if (missingDiscovery) throw new Error("Deferred web tools require active codemode or tool_search. Web tools are hidden until discovery is available.");
+    };
+    // Re-check even when no registration changed: lifecycle errors must never
+    // leave enabled deferred tools silently unreachable.
+    if (signature === registeredConfig && previousExposure === exposure) { checkDiscovery(); return; }
     const available = [
       "web_search", "web_fetch",
       ...(startupConfig.apiKeys.context7 ? ["library_search", "library_docs"] : []),
       ...(startupConfig.apiKeys.exa ? ["code_search"] : []),
     ];
-    const previous = registrationHistory(ctx);
+    const previous = registrationHistory(ctx) ?? rememberedTools;
     // Remember availability, not activation. Pi owns active/pending selection.
     // Without history (an older session), conservatively preserve inactivity on
     // the first reload instead of guessing which tools were manually disabled.
-    registerTools(pi, startupConfig, event.reason === "reload" ? new Set(previous ?? available) : undefined);
-    rememberedTools = recordRegisteredTools(pi, ctx, available);
+    registerTools(pi, startupConfig, exposure, new Set(previous ?? (reload ? available : [])));
+    // Switching from direct/hidden into deferred is an explicit request to stop
+    // declaring these tools. Later native tool_search activations remain intact.
+    if (exposure === "deferred" && previousExposure !== "deferred") {
+      pi.setActiveTools(pi.getActiveTools().filter(name => !WEB_TOOLS.has(name)));
+    }
+    rememberedTools = recordRegisteredTools(pi, ctx, available, exposure);
+    rememberedExposure = exposure;
     // A session change can drop provider credentials without replacing this
     // extension instance. Retained definitions must not remain active then.
     if (typeof pi.getActiveTools === "function" && typeof pi.setActiveTools === "function") {
@@ -60,11 +89,14 @@ export default function (pi: ExtensionAPI) {
       if (active.some(name => unavailable.has(name))) pi.setActiveTools(active.filter(name => !unavailable.has(name)));
     }
     registeredConfig = signature;
-  });
+    checkDiscovery();
+  }
+  pi.on("session_start", (event, ctx) => syncTools(ctx, event.reason === "reload"));
+  pi.on("before_agent_start", (_event, ctx) => syncTools(ctx));
   pi.on("session_shutdown", (event, ctx) => {
     // Tree navigation can restore an older branch record while the live
     // registry still knows newer tools. Save that fact before runtime teardown.
-    if (event.reason === "reload" && rememberedTools) recordRegisteredTools(pi, ctx, rememberedTools);
+    if (event.reason === "reload" && rememberedTools) recordRegisteredTools(pi, ctx, rememberedTools, rememberedExposure);
   });
 }
 
@@ -73,11 +105,18 @@ function registrationHistory(ctx: ExtensionContext): string[] | undefined {
   return entry?.type === "custom" ? registeredToolNames(entry.data) : undefined;
 }
 
-function recordRegisteredTools(pi: ExtensionAPI, ctx: ExtensionContext, tools: readonly string[]): string[] {
+function registrationExposure(ctx: ExtensionContext): Exposure | undefined {
+  const entry = ctx.sessionManager?.getBranch().filter(item => item.type === "custom" && item.customType === REGISTERED_TOOLS_ENTRY).at(-1);
+  if (entry?.type !== "custom" || !registeredToolNames(entry.data)) return undefined;
+  const exposure = (entry.data as { exposure?: unknown }).exposure;
+  return exposure === "direct" || exposure === "deferred" || exposure === "hidden" ? exposure : undefined;
+}
+
+function recordRegisteredTools(pi: ExtensionAPI, ctx: ExtensionContext, tools: readonly string[], exposure?: Exposure): string[] {
   const previous = registrationHistory(ctx);
   const remembered = [...new Set([...(previous ?? []), ...tools])].sort();
-  if (!previous || JSON.stringify(previous) !== JSON.stringify(remembered)) {
-    pi.appendEntry?.(REGISTERED_TOOLS_ENTRY, { version: 1, tools: remembered });
+  if (!previous || JSON.stringify(previous) !== JSON.stringify(remembered) || registrationExposure(ctx) !== exposure) {
+    pi.appendEntry?.(REGISTERED_TOOLS_ENTRY, { version: 1, tools: remembered, exposure });
   }
   return remembered;
 }
@@ -90,38 +129,42 @@ function registeredToolNames(data: unknown): string[] | undefined {
   return [...new Set(data.tools)].sort();
 }
 
-function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolveConfig>, previouslyRegistered?: ReadonlySet<string>) {
-  // All five tools stay direct. Metadata must not make excluded/inactive tools callable.
+function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolveConfig>, exposure: Exposure, previouslyRegistered: ReadonlySet<string>) {
   type DataTool = Omit<ToolDefinition, "execute"> & {
     execute(...args: Parameters<ToolDefinition["execute"]>): Promise<unknown>;
   };
-  const settings = pi.getSettings?.().defaultTools;
-  const disabledByDefault = (name: string) => Array.isArray(settings)
-    && settings.filter(entry => entry === `+${name}` || entry === `-${name}`).at(-1) === `-${name}`;
-  const register = (tool: DataTool) => pi.registerTool({
-    ...WEB_TOOL_METADATA,
-    ...tool,
-    // Late registration must not undo explicit settings or session deactivation.
-    // Pi restores previously active/pending names on reload even when this is false.
-    // Only first availability uses the default; re-registration cannot undo a
-    // manual deactivation, even if settings positively select this tool.
-    defaultActive: !previouslyRegistered?.has(tool.name) && !disabledByDefault(tool.name),
-    outputSchema: WEB_OUTPUT_SCHEMAS[tool.name],
-    async execute(id, args, signal, onUpdate, ctx) {
-      const secrets = Object.values(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)).apiKeys);
-      try {
-        const result = await tool.execute(id, args, signal,
-          onUpdate ? update => onUpdate(redactOutput(update, secrets)) : undefined, ctx);
-        // Some providers represent an aborted fetch as per-page failures.
-        // Cancellation is still a failed call, never a successful data snapshot.
-        if (signal?.aborted) throw new Error("Web tool cancelled.");
-        return jsonToolResult(result, WEB_OUTPUT_SCHEMAS[tool.name], secrets);
-      } catch (error) {
-        if (signal?.aborted) throw new Error("Web tool cancelled.");
-        throw new Error(redactText(error instanceof Error ? error.message : "Web tool failed.", secrets).slice(0, 1000));
-      }
-    },
-  });
+  const register = (tool: DataTool) => {
+    const available = !((tool.name.startsWith("library_") && !startupConfig.apiKeys.context7)
+      || (tool.name === "code_search" && !startupConfig.apiKeys.exa));
+    const selectedExposure = !available || disabledBySettings(pi, tool.name) ? "hidden" : exposure;
+    pi.registerTool({
+      ...WEB_TOOL_METADATA,
+      ...tool,
+      // Pi restores active/pending names on reload. Only first availability
+      // uses the default; re-registration cannot undo manual deactivation.
+      exposure: selectedExposure,
+      defaultActive: selectedExposure === "direct" && !previouslyRegistered.has(tool.name),
+      outputSchema: WEB_OUTPUT_SCHEMAS[tool.name],
+      async execute(id, args, signal, onUpdate, ctx) {
+        const config = runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx));
+        if (!config.enabled || disabledBySettings(pi, tool.name)) throw new Error("Web tool is disabled.");
+        if (selectedExposure === "hidden" || (config.toolExposure === "deferred" && !discoveryAvailable(pi))) {
+          throw new Error("Web tool is unavailable. Enable discovery or reload Pi after changing configuration.");
+        }
+        const secrets = Object.values(config.apiKeys);
+        try {
+          const result = await tool.execute(id, args, signal,
+            onUpdate ? update => onUpdate(redactOutput(update, secrets)) : undefined, ctx);
+          // Providers may return aborted fetches as per-page failures.
+          if (signal?.aborted) throw new Error("Web tool cancelled.");
+          return jsonToolResult(result, WEB_OUTPUT_SCHEMAS[tool.name], secrets);
+        } catch (error) {
+          if (signal?.aborted) throw new Error("Web tool cancelled.");
+          throw new Error(redactText(error instanceof Error ? error.message : "Web tool failed.", secrets).slice(0, 1000));
+        }
+      },
+    });
+  };
   register({
     name: "web_search",
     label: "Web Search",
@@ -243,7 +286,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
     },
   });
 
-  if (startupConfig.apiKeys.context7) {
+  if (startupConfig.apiKeys.context7 || exposure === "hidden" || previouslyRegistered.has("library_search")) {
     register({
       name: "library_search",
       label: "Library Search",
@@ -293,7 +336,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
     });
   }
 
-  if (startupConfig.apiKeys.exa) {
+  if (startupConfig.apiKeys.exa || exposure === "hidden" || previouslyRegistered.has("code_search")) {
     register({
       name: "code_search",
       label: "Code Search",
@@ -324,6 +367,8 @@ function toolConfigSignature(config: ReturnType<typeof resolveConfig>): string {
     fetch: config.provider_fetch,
     context7: !!config.apiKeys.context7,
     exa: !!config.apiKeys.exa,
+    enabled: config.enabled,
+    toolExposure: config.toolExposure,
   });
 }
 

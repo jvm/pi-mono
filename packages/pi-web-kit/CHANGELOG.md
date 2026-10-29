@@ -8,6 +8,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Added
 
+- Opt-in `toolExposure: "deferred"` using native codemode/tool-search discovery, with independent `enabled: false` hard disable and fail-closed missing-discovery handling.
 - Preserve successful queries in partial/all-failed search batches with explicit status and bounded errors.
 - Bound aggregate provider HTTP requests and share equivalent in-flight fetch misses with independent waiter cancellation.
 - Find literal text in cached redacted pages without another provider request.

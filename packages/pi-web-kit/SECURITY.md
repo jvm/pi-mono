@@ -123,9 +123,26 @@ They do not approve provider spending, bypass tool hooks, or make an inactive
 direct tool reachable from nested dispatch. Project trust, URL validation,
 provider request limits and cancellation still apply.
 
+Direct exposure is the default. With explicit `toolExposure: "deferred"`,
+inactive tools remain callable through native codemode and discoverable by
+native tool search; inactivity is not a security boundary in this mode.
+There is no loader or automatic activation of a discovery tool. If neither
+`codemode` nor `tool_search` is active, tools are withdrawn with hidden
+exposure and a bounded configuration error is reported.
+
+The effective configuration's `enabled: false` is a hard disable. Explicit
+`defaultTools` negative entries also hide the corresponding tools. Hidden
+definitions cannot be revived by search, activation, late credentials or
+reload. CLI exclusions remain enforced by Pi. Config is checked at startup,
+before each prompt and again before execution, so stale handlers cannot
+start new requests after a hard disable; already dispatched requests are
+not cancelled by a config edit. These controls do not restrict other
+extensions, tools, or a trusted project configuration override.
+
 Branch-local `pi-web-kit:registered-tools` custom entries remember only this
-package's fixed tool names as they first become available. They contain no
-credentials, configuration values, activation decisions or usage data and do
+package's fixed tool names as they first become available and its effective
+exposure enum. They contain no credentials, provider configuration,
+per-tool activation decisions or usage data and do
 not enter model context. This distinguishes a newly available optional tool
 from re-registration of a manually disabled tool; Pi still owns activation
 and exclusions. Missing or invalid history does not force tools active on reload.

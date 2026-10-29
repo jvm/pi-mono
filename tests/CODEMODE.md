@@ -14,6 +14,12 @@ The user approved these outcomes before implementation:
 
 This work does not authorize publishing, pushing, image generation, or inference spend.
 
+These decisions describe the initial implementation batch. D1 was subsequently
+approved and implemented in `pi-web-kit` as optional `toolExposure: "deferred"`
+with an independent hard disable; see its README and registered-tool tests.
+D2/D3 remain deferred, and D4 was removed from follow-up work. Image generation
+remains subscription-only.
+
 ## Validation
 
 The compatibility runner uses a disposable repository copy and installs synchronized

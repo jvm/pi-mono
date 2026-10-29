@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Check } from "typebox/value";
-import { createCodemodeExtension, createToolSearchExtension } from "@earendil-works/pi-coding-agent";
+import { createCodemodeExtension, createToolSearchExtension, SessionManager } from "@earendil-works/pi-coding-agent";
 import { codexHarness, requestBody, textResponse } from "./codex-harness.mjs";
 
 // No user profiles, credentials, Git remotes or provider requests.
@@ -54,9 +54,15 @@ function responseFor(request, name, args) {
 }
 
 const json = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
-async function fixture(t, { mode = "only", inlineBudget = 0, defaultTools, excludeTools, deferred, withoutWebHistory = false, extra = [], git } = {}) {
+async function fixture(t, { mode = "only", inlineBudget = 0, defaultTools, excludeTools, deferred, webConfig, sessionManager, sessionStartEvent, withoutWebHistory = false, extra = [], git } = {}) {
   t.mock.method(globalThis, "fetch", async () => { throw new Error("Unmocked network blocked"); });
   await mkdir(process.env.PI_SCOUT_TMPDIR, { recursive: true });
+  const configFile = join(process.env.PI_CODING_AGENT_DIR, "pi-web-kit.json");
+  t.after(() => rm(configFile, { force: true }));
+  if (webConfig) {
+    await mkdir(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+    await writeFile(configFile, JSON.stringify(webConfig));
+  }
   await saveState({ repos: [] });
   fetchCache.clear();
   const definitions = new Map();
@@ -92,7 +98,7 @@ async function fixture(t, { mode = "only", inlineBudget = 0, defaultTools, exclu
     pi => {
       pi.on("tool_result", event => { events.push(event); });
     },
-  ], { cwd: root, defaultTools: defaultTools ?? (mode === "off" ? ["read"] : ["read", "codemode", "tool_search"]), excludeTools });
+  ], { cwd: root, defaultTools: defaultTools ?? (mode === "off" ? ["read"] : ["read", "codemode", "tool_search"]), excludeTools, sessionManager, sessionStartEvent });
   t.after(() => h.close());
   h.session.subscribe(event => {
     if (event.type === "tool_execution_update") progress.push(event.partialResult);
@@ -145,6 +151,10 @@ async function fixture(t, { mode = "only", inlineBudget = 0, defaultTools, exclu
   };
   return {
     ...h, definitions, events, requests, providerRequests, progress,
+    async setWebConfig(config) {
+      await mkdir(process.env.PI_CODING_AGENT_DIR, { recursive: true });
+      await writeFile(configFile, JSON.stringify(config));
+    },
     get gitCalls() { return gitCalls; },
     setProvider(value) { provider = value; },
     async run(name, args) {
@@ -536,7 +546,7 @@ for (const explicitlySelected of [false, true]) {
     }
     const history = h.sessionManager.getBranch().filter(e => e.type === "custom" && e.customType === "pi-web-kit:registered-tools");
     assert.equal(history.length, 2, "record only first availability, not every reload");
-    assert.deepEqual(history.at(-1).data, { version: 1, tools: ["code_search", "library_docs", "library_search", "web_fetch", "web_search"] });
+    assert.deepEqual(history.at(-1).data, { version: 1, exposure: "direct", tools: ["code_search", "library_docs", "library_search", "web_fetch", "web_search"] });
     assert.ok(h.requests.every(r => !JSON.stringify(r.input).includes("pi-web-kit:registered-tools")), "metadata stays outside model context");
   });
 }
@@ -622,6 +632,149 @@ test("explicit deferred adapter is discoverable with budget zero and can be acti
   const direct = await h.run("web_search", { query: "fixture", purpose: "Find sources" });
   succeeds(direct);
   validates(h, h.events.findLast(e => e.toolName === "web_search"));
+});
+
+const webToolNames = ["web_search", "web_fetch", "library_search", "library_docs", "code_search"];
+const serializedTools = request => [...(request.tools ?? []),
+  ...(request.input ?? []).filter(item => item.type === "additional_tools").flatMap(item => item.tools ?? [])];
+const webUnavailable = `
+  for (const name of ${JSON.stringify(webToolNames)}) {
+    if (await describeTool(name) || name in tools ||
+        (await searchTools(name,{limit:100})).some(t=>t.name===name))
+      throw new Error("Disabled web tool reachable: "+name);
+  }
+  text("web tools unreachable");
+`;
+
+for (const mode of ["on", "only"]) {
+  test(`configured deferred web tools preserve native discovery and activation (${mode})`, async t => {
+    const h = await fixture(t, { mode, webConfig: { toolExposure: "deferred" } });
+    for (const name of webToolNames) {
+      assert.equal(h.definitions.get(name).exposure, "deferred");
+      assert.ok(!h.api.getActiveTools().includes(name));
+    }
+    succeeds(await h.script(`
+      const ns=await describeNamespace("web");
+      if (!ns || !ns.tools.includes("web_search")) throw new Error("Missing namespace");
+      const hits=await searchTools("queries",{namespace:"web"});
+      if (!hits.some(t=>t.name==="web_search")) throw new Error("Missing discovery");
+      text((await tools.web_search({query:"fixture",purpose:"Test deferred registration"})).status);
+    `));
+    assert.ok(!serializedTools(h.requests[0]).some(tool => webToolNames.includes(tool.name)));
+    assert.ok(!h.api.getActiveTools().includes("web_search"), "nested access must not activate declarations");
+    const direct = await h.run("tool_search", { query: "queries", limit: 1 });
+    succeeds(direct);
+    assert.ok(h.api.getActiveTools().includes("web_search"));
+    assert.ok(!h.api.getActiveTools().includes("web_fetch"));
+    await h.session.reload();
+    assert.ok(h.session.getActiveToolNames().includes("web_search"), "reload preserves explicit activation");
+    assert.ok(!h.session.getActiveToolNames().includes("web_fetch"));
+    succeeds(await h.script(`text((await tools.web_fetch({url:"https://fixture.invalid/page"})).results.length);`));
+  });
+}
+
+test("deferred web tools work without codemode through native tool_search", async t => {
+  const h = await fixture(t, { mode: "off", defaultTools: ["read", "tool_search"],
+    webConfig: { toolExposure: "deferred" } });
+  succeeds(await h.run("tool_search", { query: "queries", limit: 1 }));
+  assert.ok(h.api.getActiveTools().includes("web_search"));
+  assert.ok(!h.api.getActiveTools().includes("web_fetch"));
+  succeeds(await h.run("web_search", { query: "fixture", purpose: "Direct after native discovery" }));
+  assert.ok(serializedTools(h.requests.at(-1)).some(tool => tool.name === "web_search"));
+});
+
+test("deferred config without active discovery withdraws web tools and reports a bounded error", async t => {
+  const h = await fixture(t, { mode: "off", webConfig: { toolExposure: "deferred" } });
+  assert.ok(h.errors.some(error => JSON.stringify(error).includes("require active codemode or tool_search")));
+  for (const name of webToolNames) assert.equal(h.definitions.get(name).exposure, "hidden");
+  h.errors.length = 0;
+  h.api.setActiveTools([...h.api.getActiveTools(), "tool_search"]);
+  succeeds(await h.run("tool_search", { query: "queries", limit: 1 }));
+  assert.ok(h.api.getActiveTools().includes("web_search"));
+});
+
+test("hard-disabled web tools cannot revive by activation, credentials or reload", async t => {
+  const h = await fixture(t, { webConfig: { enabled: false, toolExposure: "deferred",
+    apiKeys: { exa: "", context7: "" } } });
+  for (const name of webToolNames) assert.equal(h.definitions.get(name).exposure, "hidden");
+  h.api.setActiveTools([...h.api.getActiveTools(), ...webToolNames]);
+  succeeds(await h.script(webUnavailable));
+  succeeds(await h.run("tool_search", { query: "web search library docs code", limit: 100 }));
+  succeeds(await h.script(webUnavailable));
+  await h.setWebConfig({ enabled: false, toolExposure: "deferred" });
+  await h.session.reload();
+  succeeds(await h.script(webUnavailable));
+  assert.equal(h.providerRequests.length, 0);
+  // Explicit re-enabling permits discovery, not automatic direct declarations.
+  await h.setWebConfig({ enabled: true, toolExposure: "deferred" });
+  await h.session.reload();
+  assert.ok(!h.session.getActiveToolNames().includes("web_search"));
+  succeeds(await h.script(`text((await tools.web_search({query:"fixture",purpose:"Explicit re-enable"})).status);`));
+});
+
+test("switching direct to deferred withdraws prior declarations, and runtime disable blocks old handlers", async t => {
+  const h = await fixture(t, { mode: "on", webConfig: {} });
+  assert.ok(h.api.getActiveTools().includes("web_search"));
+  succeeds(await h.script(`text("direct snapshot");`));
+  const directLeaf = h.sessionManager.getLeafId();
+  await h.setWebConfig({ toolExposure: "deferred" });
+  await h.session.reload();
+  assert.ok(!h.session.getActiveToolNames().includes("web_search"));
+  succeeds(await h.script(`text((await tools.web_search({query:"fixture",purpose:"New deferred mode"})).status);`));
+  await h.session.navigateTree(directLeaf, { summarize: false });
+  succeeds(await h.script(`text((await tools.web_search({query:"fixture",purpose:"Deferred after tree navigation"})).status);`));
+  assert.ok(!h.session.getActiveToolNames().includes("web_search"), "old direct tree state must not override current deferred policy");
+  const oldHandler = h.definitions.get("web_search");
+  const calls = h.providerRequests.length;
+  await h.setWebConfig({ enabled: false });
+  await assert.rejects(oldHandler.execute("stale", { query: "fixture" }, undefined, undefined,
+    { cwd: root, isProjectTrusted: () => true }), /disabled/);
+  succeeds(await h.script(webUnavailable));
+  assert.equal(h.providerRequests.length, calls);
+});
+
+test("deferred exposure respects settings and CLI exclusions across reload", async t => {
+  const h = await fixture(t, { mode: "on", webConfig: { toolExposure: "deferred" },
+    defaultTools: ["read", "codemode", "tool_search", "-web_fetch"],
+    excludeTools: ["web_search"] });
+  const check = `
+    for(const name of ["web_search","web_fetch"]) {
+      if(await describeTool(name) || name in tools) throw new Error("Excluded tool reachable");
+    }
+    text(await describeTool("library_docs"));
+  `;
+  succeeds(await h.script(check));
+  h.api.setActiveTools([...h.api.getActiveTools(), "web_search", "web_fetch"]);
+  succeeds(await h.run("tool_search", { query: "web fetch search", limit: 100 }));
+  await h.session.reload();
+  succeeds(await h.script(check));
+  assert.equal(h.providerRequests.length, 0);
+});
+
+test("hard-disable survives old tree state, model changes, resume and fork", async t => {
+  const sessions = join(root, "web-exposure-sessions");
+  const h = await fixture(t, { webConfig: { toolExposure: "deferred" },
+    sessionManager: SessionManager.create(root, sessions) });
+  succeeds(await h.script(`text(await describeTool("web_search"));`));
+  const beforeDisable = h.sessionManager.getLeafId();
+  await h.setWebConfig({ enabled: false, toolExposure: "deferred" });
+  succeeds(await h.script(webUnavailable));
+  await h.session.navigateTree(beforeDisable, { summarize: false });
+  succeeds(await h.script(webUnavailable));
+  await h.session.setModel({ ...h.model, id: "gpt-5.6-sol" });
+  succeeds(await h.script(webUnavailable));
+  const file = h.sessionManager.getSessionFile();
+  const fork = h.sessionManager.createBranchedSession(beforeDisable);
+  for (const [path, reason] of [[file, "resume"], [fork, "fork"]]) {
+    assert.ok(path);
+    const restored = await fixture(t, { webConfig: { enabled: false, toolExposure: "deferred" },
+      sessionManager: SessionManager.open(path), sessionStartEvent: { type: "session_start", reason } });
+    succeeds(await restored.script(webUnavailable));
+    succeeds(await restored.run("tool_search", { query: "web search library docs code", limit: 100 }));
+    succeeds(await restored.script(webUnavailable));
+    assert.equal(restored.providerRequests.length, 0);
+  }
+  assert.equal(h.providerRequests.length, 0);
 });
 
 test("errors reject, fetch failures remain data, and all output surfaces exclude credentials/raw metadata", async t => {

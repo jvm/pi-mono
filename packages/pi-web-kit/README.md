@@ -185,6 +185,8 @@ Example:
 
 ```json
 {
+  "enabled": true,
+  "toolExposure": "direct",
   "provider_search": "firecrawl",
   "provider_fetch": "markdown_new",
   "apiKeys": {
@@ -200,6 +202,43 @@ Example:
 ```
 
 Do not commit config files containing secrets. Project `.pi-web-kit.json` is ignored by this repo's `.gitignore`, but other repositories may need their own ignore rule.
+
+### Optional deferred exposure
+
+Direct tools remain the default. To keep only this package's schemas out of
+the initial model request while other file and shell tools stay direct, set:
+
+```json
+{ "toolExposure": "deferred" }
+```
+
+Enable Pi's native `codemode` or `tool_search` in `defaultTools` (for example
+`["+codemode", "+tool_search"]`). No package loader is registered.
+Scripts can use `searchTools("queries", { namespace: "web" })`,
+`describeTool("web_search")`, and then `tools.web_search(...)`. Nested calls do
+not activate direct declarations. Without codemode, native `tool_search`
+loads matching tools for subsequent direct calls, rather than all five.
+
+If neither discovery tool is active, deferred web tools are hidden and a
+configuration error explains the missing route. Activate a discovery tool;
+the next prompt restores deferred access. This works in TUI, print, JSON and RPC.
+
+**Deferred is not disabled.** Removing a deferred tool from the active set only
+removes its direct declaration; scripts and native search can still reach it.
+Set `"enabled": false` to hard-disable this package, use an explicit
+`defaultTools` `-tool_name` entry for one tool, or use Pi's CLI exclusions.
+Hard-disabled tools remain hidden through discovery, activation attempts,
+credential changes and reload. A hard disable blocks new calls, not provider
+requests already dispatched. Config precedence still applies: a trusted
+project config can override global config; CLI exclusions remain host-owned.
+Neither option changes provider billing or authorizes network requests.
+
+Exposure is synchronized at startup/reload and before each prompt.
+Switching from direct or disabled into deferred mode withdraws earlier web
+declarations. Subsequent explicit native-search activation survives reload.
+Direct mode preserves prior inactive selections on reload; after re-enabling
+a previously disabled direct tool, explicit activation may be needed.
+Optional tools still require their provider keys.
 
 ### CLI overrides
 
@@ -544,19 +583,20 @@ The namespace is `web`, not a name prefix: calls remain `tools.web_fetch(…)`.
 hints are read-only, non-destructive, idempotent, and open-world: repeated reads
 can return different content and incur provider charges.
 
-Direct exposure remains the default, and codemode is optional. No package-level
-deferred/codemode exposure switch is added: it would make inactive direct tools
-nested-callable and change the meaning of disabling them. Use Pi's `codemode.mode`
-(`on` or `only`) and `inlineBudget` to reduce declarations while retaining the
-active-tool boundary. Optional research tools still require their provider keys.
+Direct exposure remains the default, and codemode is optional. The opt-in
+`toolExposure: "deferred"` setting changes the inactive-tool boundary as
+described above; use `enabled: false` or explicit exclusions for a hard disable.
+Pi's `codemode.mode` (`on` or `only`) and `inlineBudget` remain independent
+controls. Optional research tools still require their provider keys.
 Explicit `defaultTools` `-name` entries are honored at late registration; reload
 restores Pi's active selection rather than re-enabling manually disabled tools.
 New optional tools activate when credentials first become available on reload,
 including existing positive `defaultTools` selections. Previously registered
 tools are not force-reactivated, even if settings still positively select them.
 The extension records only previously registered tool names in branch-local
-`pi-web-kit:registered-tools` session metadata, outside model context; it does
-not store activation choices or credentials. The record is refreshed before
+`pi-web-kit:registered-tools` session metadata, outside model context, together
+with the effective exposure (`direct`, `deferred`, or `hidden`); it does not
+store per-tool activation choices or credentials. The record is refreshed before
 reload so navigating to older branch history cannot revive a manually disabled
 tool. Older sessions without this metadata preserve inactivity on their first
 reload, so they may require explicit activation or a restart.

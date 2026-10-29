@@ -10,6 +10,28 @@ test("defaults use Exa", () => {
   const cfg = resolveConfig({}, cwd, {});
   assert.equal(cfg.provider_search, "exa");
   assert.equal(cfg.provider_fetch, "exa");
+  assert.equal(cfg.enabled, true);
+  assert.equal(cfg.toolExposure, "direct");
+});
+
+test("exposure and hard-disable config are independent and reject unsupported values", () => {
+  const home = mkdtempSync(join(tmpdir(), "pi-web-exposure-"));
+  const cwd = mkdtempSync(join(tmpdir(), "pi-web-project-"));
+  mkdirSync(join(home, ".pi/agent"), { recursive: true });
+  writeFileSync(join(home, ".pi/agent/pi-web-kit.json"), JSON.stringify({ enabled: false, toolExposure: "deferred" }));
+  const file = join(cwd, ".pi-web-kit.json");
+  writeFileSync(file, JSON.stringify({ enabled: true, toolExposure: "direct" }));
+  assert.equal(resolveConfig({}, cwd, { HOME: home }, { includeProject: false }).enabled, false);
+  assert.equal(resolveConfig({}, cwd, { HOME: home }, { includeProject: false }).toolExposure, "deferred");
+  assert.equal(resolveConfig({}, cwd, { HOME: home }).enabled, true);
+  for (const value of ["hidden", "codemode", "", null, 1, {}]) {
+    writeFileSync(file, JSON.stringify({ toolExposure: value }));
+    assert.throws(() => resolveConfig({}, cwd, { HOME: home }), /toolExposure/);
+  }
+  for (const value of ["false", 0, null, {}]) {
+    writeFileSync(file, JSON.stringify({ enabled: value }));
+    assert.throws(() => resolveConfig({}, cwd, { HOME: home }), /enabled/);
+  }
 });
 
 test("config precedence defaults < env < file < flags", () => {

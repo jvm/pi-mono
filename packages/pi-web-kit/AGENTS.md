@@ -8,6 +8,7 @@ Root `AGENTS.md` applies.
 - Validate URLs before provider calls; preserve shared limits, timeouts, truncation, and cache scope.
 - Never expose API keys or secret-bearing cache keys.
 - Project config requires trust. Provider schema changes apply at startup/reload.
+- Direct exposure is the default. Deferred exposure requires active native discovery; hard disables use hidden exposure, not inactive selection. Reconcile exposure before prompts and guard execution against runtime disables.
 - Mock network calls deterministically and restore globals after tests.
 
 ## Validation

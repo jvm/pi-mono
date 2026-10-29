@@ -3,6 +3,8 @@ export type FetchProviderName = "exa" | "tinyfish" | "markdown_new" | "firecrawl
 export type FetchFormat = "markdown" | "html" | "json";
 
 export interface WebKitConfig {
+  enabled: boolean;
+  toolExposure: "direct" | "deferred";
   provider_search: SearchProviderName;
   provider_fetch: FetchProviderName;
   apiKeys: Partial<Record<"exa" | "tinyfish" | "brave" | "firecrawl" | "context7", string>>;
