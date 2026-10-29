@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Group process tools in the discoverable `processes` namespace, including lifecycle, acknowledgement, and compact script recipes.
+
 ## [0.3.1] - 2026-10-25
 
 ### Fixed

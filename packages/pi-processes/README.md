@@ -13,6 +13,28 @@ Keep long-running commands out of Pi's critical path without losing control of t
 - **Bounded execution:** eight concurrent processes, bounded output and retained sessions, configurable timeouts, and group cleanup.
 - **Provider-neutral:** public Pi tools and structured results work with direct calls and codemode.
 
+### Codemode discovery
+
+All six tools share the `processes` namespace. At inline budget zero, use
+`await describeNamespace("processes")` for lifecycle instructions and
+`await describeTool(name)` for schemas. Excluded tools stay unavailable.
+Inspection and wait guidance remains available when `bash` is excluded.
+
+```js
+const r = await tools.bash({ command: "npm test", mode: "background" });
+text({ id: r.session_id, status: r.status });
+// Continue independent work. When the results become dependencies:
+const done = await tools.process_wait({ session_ids: [r.session_id], acknowledge: true });
+text(done.processes.map(p => ({
+  id: p.session_id, status: p.status, exit: p.exit_code,
+  signal: p.signal, timed_out: p.timed_out, diagnostic: p.output.slice(-1000),
+})));
+```
+
+Check wait interruption/deadline fields before treating results as complete.
+Acknowledgement is explicit for nested results; discarding script results does
+not suppress background delivery. Never use a loop to poll for completion.
+
 This is a process runtime, **not a sandbox or subagent engine**. It replaces the `bash` tool through Pi's public extension API, without provider overrides. Calls without `mode` delegate to Pi's built-in executor.
 
 The tool names and lifecycle are inspired by [OpenAI Codex](https://github.com/openai/codex). The runtime is independently implemented; Codex's sandbox and approval machinery are not ported.
