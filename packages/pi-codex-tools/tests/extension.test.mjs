@@ -126,6 +126,7 @@ async function getDeclaredTools(t, harness) {
     assert.ok(body, "the provider must receive a request");
     assert.equal(harness.session.messages.findLast((message) => message.role === "assistant").stopReason, "stop");
     assert.deepEqual(harness.errors, []);
+    harness.lastDeclarationRequest = body;
     return body.tools;
   } finally {
     t.mock.restoreAll();
@@ -217,10 +218,17 @@ test("real Pi requests hide native editing only while apply_patch is active", as
       await session.setModel(selected);
       const supported = supportsOpenAIGrammarTools(selected);
       const names = (await getDeclaredTools(t, harness)).map((tool) => tool.name);
-      assert.equal(names.includes("apply_patch"), supported);
+      const hasInlineHistory = harness.lastDeclarationRequest.input.some(item => item.type === "additional_tools");
+      const removal = name => assert.match(JSON.stringify(harness.lastDeclarationRequest.input),
+        new RegExp(`(?:no longer available|Still unavailable)[\\s\\S]*${name}`));
+      if (!supported && hasInlineHistory && names.includes("apply_patch")) {
+        assert.ok(!session.getActiveToolNames().includes("apply_patch"));
+        removal("apply_patch");
+      } else assert.equal(names.includes("apply_patch"), supported);
       assert.ok(!session.getCallableToolNames().includes("apply_patch"));
       for (const [name, definition] of definitions) {
-        assert.equal(names.includes(name), !supported);
+        if (supported && hasInlineHistory && names.includes(name)) removal(name);
+        else assert.equal(names.includes(name), !supported);
         assert.ok(session.getActiveToolNames().includes(name));
         assert.ok(session.getCallableToolNames().includes(name));
         assert.equal(session.getToolDefinition(name), definition);

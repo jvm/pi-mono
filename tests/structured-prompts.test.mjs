@@ -31,7 +31,8 @@ function promptState(h) {
 }
 
 function requestSystems(body) {
-  return body.input.filter(message => message.role === "system" || message.role === "developer");
+  return body.input.filter(message => message.type !== "additional_tools"
+    && (message.role === "system" || message.role === "developer"));
 }
 
 function requestText(body) {
@@ -205,7 +206,12 @@ for (const reverse of [false, true]) {
       assert.deepEqual((await loadState()).repos, []);
       assert.equal(systems(h).at(-1).sections.scout_repos, null);
       assert.ok(!promptState(h).includes("Scout repos:"));
-      assert.ok(!removed.tools.some(tool => tool.name === "scout_rm"));
+      assert.ok(!h.api.getActiveTools().includes("scout_rm"));
+      if (removed.input.some(item => item.type === "additional_tools")) {
+        // Current Responses transports retain declarations and announce removals
+        // textually. Test that real wire behavior rather than hiding the history.
+        assert.match(requestText(removed), /no longer available[\s\S]*scout_rm/);
+      } else assert.ok(!removed.tools.some(tool => tool.name === "scout_rm"));
     });
   }
 }

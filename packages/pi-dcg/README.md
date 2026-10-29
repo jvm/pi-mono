@@ -41,7 +41,7 @@ terminal font.
 ## Requirements
 
 - Node.js 22.19.0 or newer
-- Pi, supplied by the host; contract-tested against Pi 1.1.0
+- Pi, supplied by the host; contract-tested against Pi 1.1.0 and 1.4.0
 - A separately installed `dcg` executable; dcg 0.6.8 or newer is recommended
 
 Install dcg using its [upstream installation instructions](https://github.com/Dicklesworthstone/destructive_command_guard#installation), review its release-verification guidance, and confirm that the binary is visible in the same environment as Pi:
@@ -176,10 +176,14 @@ This extension intercepts Pi events, not operating-system process execution. It 
 
 `user_bash` handlers are first-result-wins in Pi. An earlier extension that fully handles `!` commands can prevent later handlers, including `pi-dcg`, from seeing them.
 
-Two Pi 1.1.0 composition limits remain:
+Host composition characterization (Pi 1.1.0 and 1.4.0):
 
 - If an earlier `tool_call` handler assigns a new object to `event.input`, Pi can execute the original arguments while DCG checks the replacement. Integrations must mutate argument fields in place, not replace the input object. DCG cannot repair this host contract after the replacement has occurred.
-- The confirmation queue covers this DCG instance, not other extensions' dialogs. Concurrent dialogs from another extension can still displace a prompt in Pi's shared editor slot. Cross-extension dialog scheduling requires host-level coordination.
+- The confirmation queue covers this DCG instance, not other extensions' dialogs. Pi 1.1.0 can displace a prompt in its shared editor slot. Pi 1.4.0 has a host-owned dialog stack: closing the top prompt restores the preceding prompt. Mixed DCG startup/process-input tests exercise this restoration and separate denials. No local scheduler or executor patch is installed.
+
+The earlier-input-object replacement defect remains reproduced on both lanes.
+This is a known host limitation, not a passing safety guarantee. D4's approved
+outcome is to document/track it at the host ownership layer, not weaken the guard.
 
 Use a container, VM, sandbox, restricted credentials, backups, and review controls when a hard security boundary is required.
 

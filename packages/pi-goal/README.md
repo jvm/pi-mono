@@ -174,6 +174,13 @@ Nested tool usage is already aggregated by Pi onto the parent tool result and
 is counted once, not by walking nested calls. Cached input tokens count too.
 This is a token budget, not a currency or provider-quota budget.
 
+`pi-codex-image-gen` backend counters in renderer `details.usage` are
+informational, not normalized Pi usage entries. The goal does not scrape them
+or estimate charges. Subscription image quota and unknown image costs remain
+unknown, not zero; goal budgets do not enforce them. Image usage normalization
+and typed web extraction are explicitly deferred until their provider/data/usage
+contracts are approved.
+
 Virtual-model selections do not change that rule: Pi records the physical
 assistant's usage, and codemode classifier usage is aggregated onto its parent
 tool result. However, a raw `ctx.modelRegistry.classify()` call inside a router

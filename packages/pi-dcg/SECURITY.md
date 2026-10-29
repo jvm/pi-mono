@@ -39,11 +39,16 @@ This setting cannot detect dcg's internal intentional fail-open paths, which may
 
 Turn abort and runtime shutdown cancel active and queued DCG confirmations. Late UI responses cannot reverse cancellation. Print/JSON sessions without UI block `ask`; RPC clients can answer through the extension UI protocol. This does not extend coverage to RPC control-channel shell commands.
 
-### Pi 1.1.0 composition limits
+### Host composition limits (Pi 1.1.0 and 1.4.0)
 
 Command sealing protects against later `tool_call` mutations, not a replacement of the entire input object by an earlier handler. Pi retains the original execution arguments in that case, but DCG sees the replacement. An upstream argument-identity fix is needed before claiming that every possible hook composition executes exactly the checked command. Earlier handlers must mutate argument fields in place.
 
-The confirmation queue is local to one DCG extension instance. Pi's terminal dialog slot is shared across extensions, and another extension's simultaneous dialog can still displace a pending prompt. This does not grant approval to the displaced call, but it can leave that call waiting until cancellation. General dialog scheduling must be fixed in Pi rather than by replacing the bash executor.
+The confirmation queue is local to one DCG extension instance. Pi 1.1.0 has a
+shared terminal dialog slot, so another extension can displace a pending prompt
+without approving it. Pi 1.4.0 owns a dialog stack that restores the preceding
+prompt when the visible prompt closes. Mixed DCG startup and process-input
+tests characterize both hosts. The input-object replacement issue remains on
+both versions. No local host patch or approval bypass is authorized.
 
 The real-session tests record these host limitations explicitly. They are not passing safety guarantees. No global fail-open switch, model-callable bypass, executor replacement, new credential flow, or additional command logging is introduced.
 

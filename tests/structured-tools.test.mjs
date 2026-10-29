@@ -10,6 +10,7 @@ import { codexHarness, requestBody, textResponse } from "./codex-harness.mjs";
 // No user profiles, credentials, Git remotes or provider requests.
 const root = await mkdtemp(join(tmpdir(), "pi-structured-tools-"));
 const envOverrides = {
+  TMPDIR: root,
   HOME: root, PI_CODING_AGENT_DIR: join(root, "agent"), PI_SCOUT_TMPDIR: join(root, "clones"),
   CI: "1", PI_OFFLINE: "1", PI_TELEMETRY: "0",
   PI_WEB_KIT_PROVIDER_SEARCH: "exa", PI_WEB_KIT_PROVIDER_FETCH: "markdown_new",
@@ -32,6 +33,7 @@ const { saveState } = await import("../packages/pi-scout/src/state.ts");
 const { default: goal } = await import("../packages/pi-goal/extensions/index.ts");
 const { default: patch } = await import("../packages/pi-codex-tools/extensions/index.ts");
 const { default: images } = await import("../packages/pi-codex-image-gen/extensions/index.ts");
+const { default: processes } = await import("../packages/pi-processes/extensions/index.ts");
 const { fetchCache } = await import("../packages/pi-web-kit/src/cache.ts");
 let sequence = 0;
 
@@ -127,6 +129,10 @@ async function fixture(t, { mode = "only", inlineBudget = 0, defaultTools, exclu
   globalThis.fetch = async (url, init) => {
     if (String(url).includes("/codex/responses")) {
       const request = requestBody(init);
+      if (request.tools.some(tool => tool.type === "image_generation")) {
+        providerRequests.push({ url: String(url), image: true });
+        return provider(url, init);
+      }
       requests.push(request);
       if (requests.length > 30) throw new Error("Fixture exceeded bounded model requests");
       if (!next) return textResponse();
@@ -188,6 +194,170 @@ function succeeds(result) { assert.equal(result.isError, false, resultText(resul
 function validates(h, event) {
   assert.ok(Check(h.definitions.get(event.toolName).outputSchema, event.structuredContent),
     `${event.toolName}: ${JSON.stringify(event.structuredContent)}`);
+}
+
+for (const mode of ["off", "only"]) {
+  test(`partial search failures preserve independent queries (${mode})`, async t => {
+    const h = await fixture(t, { mode });
+    h.setProvider(async (_url, init) => {
+      const { query } = JSON.parse(init.body);
+      return query === "fail" ? new Response("private backend body", { status: 503 })
+        : json({ results: [{ url: "https://fixture.invalid/" + query, title: query, highlights: [query] }] });
+    });
+    const args = { queries: ["first", "fail", "last"], purpose: "Test partial search" };
+    succeeds(mode === "off" ? await h.run("web_search", args) : await h.script(`
+      const r=await tools.web_search(${JSON.stringify(args)});
+      if(r.status!=="partial" || r.queries[0].results.length!==1 || r.queries[2].status!=="success")
+        throw new Error("Successful evidence lost");
+      text(r.queries.map(q=>({query:q.query,status:q.status})));
+    `));
+    const event = h.events.findLast(e => e.toolName === "web_search");
+    validates(h, event);
+    assert.equal(event.structuredContent.status, "partial");
+    assert.deepEqual(event.structuredContent.queries.map(q => q.status), ["success", "failed", "success"]);
+    assert.equal(h.providerRequests.length, 3);
+    assert.doesNotMatch(outputSurfaces(h), /private backend body/);
+    succeeds(await h.run("web_search", { query: "fail", purpose: "All failed" }));
+    assert.equal(h.events.findLast(e => e.toolName === "web_search").structuredContent.status, "failed");
+  });
+}
+
+test("nested parallel batches share HTTP admission and equivalent cache misses", async t => {
+  const h = await fixture(t);
+  let active = 0;
+  let peak = 0;
+  let requests = 0;
+  h.setProvider(async () => {
+    requests++;
+    peak = Math.max(peak, ++active);
+    await new Promise(resolve => setTimeout(resolve, 15));
+    active--;
+    return new Response("shared page");
+  });
+  succeeds(await h.script(`
+    const groups=[["a","b","c"],["d","e","f"]];
+    const r=await Promise.all(groups.map(g=>tools.web_fetch({urls:g.map(x=>"https://fixture.invalid/"+x)})));
+    text(r.map(r=>r.results.length));
+  `));
+  assert.equal(requests, 6);
+  assert.equal(peak, 3, "HTTP concurrency must be aggregate, not per batch");
+  requests = 0;
+  succeeds(await h.script(`
+    const r=await Promise.all([1,2,3].map(()=>tools.web_fetch({url:"https://fixture.invalid/same"})));
+    if(r.some(x=>x.results[0].content!=="shared page")) throw new Error("Missing shared page");
+    text(r.length);
+  `));
+  assert.equal(requests, 1, "Equivalent simultaneous misses must share transport");
+});
+
+test("cached literal finding reaches omitted content without a provider request", async t => {
+  const h = await fixture(t);
+  const content = "界".repeat(40_000) + "Needle " + "needle ".repeat(30);
+  h.setProvider(async () => new Response(content));
+  succeeds(await h.script(`
+    await tools.web_fetch({url:"https://fixture.invalid/find",limit:50});
+    const r=await tools.web_fetch({url:"https://fixture.invalid/find",find:"NEEDLE",findCaseSensitive:false});
+    const f=r.results[0].find;
+    if(f.matches[0].offset!==40000 || f.count!==31 || !f.nextFrom || f.omittedMatchCount!==11)
+      throw new Error("Finder contract lost");
+    const missing=await tools.web_fetch({url:"https://fixture.invalid/missing",find:"test"});
+    if(!missing.results[0].error) throw new Error("Cache miss must be explicit");
+    text({offset:f.matches[0].offset,count:f.count});
+  `));
+  assert.equal(h.providerRequests.length, 1);
+  validates(h, h.events.filter(e => e.toolName === "web_fetch")[1]);
+});
+
+test("Scout listing uses public records, stable revision and stale-page rejection", async t => {
+  const h = await fixture(t);
+  const now = new Date().toISOString();
+  await saveState({ repos: [1, 2, 3].map(n => ({
+    id: String(n), name: "duplicate", path: root, source: "https://private-token@fixture.invalid/repo",
+    createdAt: now, lastSeenAt: now,
+  })) });
+  succeeds(await h.script(`
+    const r=await tools.scout_list({limit:1});
+    const next=await tools.scout_list({limit:1,offset:r.nextOffset,revision:r.revision});
+    if(r.repos[0].id!=="1" || next.repos[0].id!=="2" || r.total!==3)
+      throw new Error("Unstable listing");
+    store("scoutRevision",r.revision);
+    text(r.repos[0].id);
+  `));
+  assert.doesNotMatch(outputSurfaces(h), /private-token|source/);
+  for (const event of h.events.filter(e => e.toolName === "scout_list")) validates(h, event);
+  await saveState({ repos: [] });
+  succeeds(await h.script(`
+    const r=await Promise.allSettled([tools.scout_list({offset:1,revision:load("scoutRevision")})]);
+    if(r[0].status!=="rejected") throw new Error("Stale page accepted");
+    text((await tools.scout_list({})).total);
+  `));
+  assert.equal(h.gitCalls, 0);
+});
+
+test("real image backend counters remain informational rather than fabricated goal usage", async t => {
+  const h = await fixture(t);
+  h.setProvider(async () => new Response([
+    { type: "response.output_item.done", item: { type: "image_generation_call", id: "fixture-image",
+      status: "completed", result: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" } },
+    { type: "response.completed", response: { id: "fixture-response", usage: { total_tokens: 999999 } } },
+  ].map(e => `data: ${JSON.stringify(e)}\n\n`).join(""), { headers: { "content-type": "text/event-stream" } }));
+  succeeds(await h.run("create_goal", { objective: "Fixture accounting", token_budget: 1 }));
+  succeeds(await h.script(`
+    const r=await tools.codex_generate_image_artifact({prompt:"fixture only",save:"none"});
+    text({path:r.artifact.path});
+  `));
+  const image = h.events.find(e => e.toolName === "codex_generate_image_artifact");
+  assert.equal(image.details.usage.total_tokens, 999999);
+  assert.equal(image.usage, undefined, "unverified backend usage must not become normalized Pi usage");
+  const result = await h.run("get_goal", {});
+  succeeds(result);
+  const state = h.events.findLast(e => e.toolName === "get_goal").structuredContent.goal;
+  assert.ok(state.tokensUsed > 0 && state.tokensUsed < 1000);
+  const before = state.tokensUsed;
+  await h.session.reload();
+  succeeds(await h.run("get_goal", {}));
+  const after = h.events.findLast(e => e.toolName === "get_goal").structuredContent.goal.tokensUsed;
+  assert.ok(after >= before && after - before < 100, "reload must not import backend counters");
+});
+
+for (const mode of ["off", "on", "only"]) {
+  for (const excludeBash of [false, true]) {
+  test(`declaration measurements and zero-budget process discovery (${mode}, excludeBash=${excludeBash})`, async t => {
+    const h = await fixture(t, { mode, extra: [processes], excludeTools: excludeBash ? ["bash"] : [] });
+    if (mode === "off") succeeds(await h.run("process_list", {}));
+    else succeeds(await h.script(`
+      const ns=await describeNamespace("processes");
+      if (!ns || ns.tools.includes("bash") === ${excludeBash} || !ns.tools.includes("process_wait"))
+        throw new Error("Process discovery violates exclusions");
+      if (!ns.instructions.includes("acknowledge") || !ns.instructions.includes("exit_code"))
+        throw new Error("Missing lifecycle instructions");
+      const r=await tools.process_list({}); text({count:r.processes.length});
+    `));
+    const declarations = h.requests[0].tools;
+    const bytes = Buffer.byteLength(JSON.stringify(declarations));
+    const catalogBytes = Buffer.byteLength(declarations.find(d => d.name === "codemode")?.description ?? "");
+    const coldRetainedBytes = Buffer.byteLength(JSON.stringify(h.session.messages.filter(m => m.role === "toolResult")));
+    const firstUseRequests = h.requests.length;
+    let discoveryOutputBytes = 0;
+    if (mode !== "off") {
+      const discovery = await h.script(`text(await describeNamespace("processes"));`);
+      succeeds(discovery);
+      discoveryOutputBytes = Buffer.byteLength(resultText(discovery));
+    }
+    const warmIndex = h.requests.length;
+    succeeds(mode === "off" ? await h.run("process_list", {}) : await h.script(`text((await tools.process_list({})).processes.length);`));
+    await h.session.reload();
+    const resumedIndex = h.requests.length;
+    succeeds(mode === "off" ? await h.run("process_list", {}) : await h.script(`text((await tools.process_list({})).processes.length);`));
+    t.diagnostic(JSON.stringify({ mode, excludeBash, declarationBytes: bytes, catalogBytes,
+      byteDerivedTokenEstimate: Math.ceil(bytes / 4), coldRetainedOutputBytes: coldRetainedBytes,
+      firstUseRequests, discoveryOutputBytes,
+      warmDeclarationBytes: Buffer.byteLength(JSON.stringify(h.requests[warmIndex].tools)),
+      resumedDeclarationBytes: Buffer.byteLength(JSON.stringify(h.requests[resumedIndex].tools)),
+      retainedOutputBytes: Buffer.byteLength(JSON.stringify(h.session.messages.filter(m => m.role === "toolResult"))),
+      cacheEffects: "not measured" }));
+  });
+  }
 }
 
 for (const mode of ["on", "only"]) {
@@ -308,6 +478,26 @@ test("inactive direct tools and CLI exclusions do not become nested-callable, in
     succeeds(result);
   }
   assert.equal(h.events.filter(e => e.toolName === "web_fetch").length, 0);
+});
+
+test("new read-only recovery/listing tools respect exclusions across reload", async t => {
+  const h = await fixture(t, { excludeTools: ["scout_list", "codex_list_image_artifacts", "process_kill"], extra: [processes] });
+  for (const reload of [false, true]) {
+    if (reload) await h.session.reload();
+    succeeds(await h.script(`
+      for(const name of ["scout_list","codex_list_image_artifacts","process_kill"]) {
+        if(ALL_TOOLS.some(t=>t.name===name) || await describeTool(name)) throw new Error("Excluded tool revived");
+      }
+      const scout=await describeNamespace("scout");
+      const images=await describeNamespace("codex_images");
+      const process=await describeNamespace("processes");
+      if(scout.tools.includes("scout_list") || images.tools.includes("codex_list_image_artifacts") || process.tools.includes("process_kill"))
+        throw new Error("Namespace violates exclusions");
+      text("excluded");
+    `));
+  }
+  assert.equal(h.providerRequests.length, 0);
+  assert.equal(h.gitCalls, 0);
 });
 
 test("defaultTools exclusions remain effective for late-registered optional research tools", async t => {
