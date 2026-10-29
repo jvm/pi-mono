@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Resolve `--scout-context` after native CLI flag initialization so compact context applies on the first prompt and after reload.
+
 ### Added
 
 - Add typed `scout_list` with public-field filtering, byte-bounded pages and revision-checked continuation.

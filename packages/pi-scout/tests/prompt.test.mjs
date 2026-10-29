@@ -70,4 +70,10 @@ test("compact Scout context requires reachable listing, otherwise full paths rem
   assert.ok(fallback.systemPromptOptions.sections.scout_repos.includes(profile));
 });
 
+test("unsupported context flags reject before changing prompt context", async () => {
+  const event = { systemPromptOptions: { sections: { unrelated: "keep" } } };
+  await assert.rejects(promptHandler("invalid")(event), /scout-context must be full or compact/);
+  assert.deepEqual(event.systemPromptOptions.sections, { unrelated: "keep" });
+});
+
 test.after(async () => { await rm(profile, { recursive: true, force: true }); });

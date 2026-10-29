@@ -146,6 +146,7 @@ async function fixture(t, options = {}) {
     if (handles.length) await close(handles.at(-1));
     const h = await codexHarness(factories, {
       cwd, skills, sessionManager, sessionStartEvent: { type: "session_start", reason },
+      extensionFlagValues: options.extensionFlagValues,
       defaultTools: options.codemode ? ["read", "codemode"] : ["read"],
       ...(options.tui ? { bindings: { mode: "tui", uiContext: ui } } : {}),
     });
@@ -214,6 +215,22 @@ for (const reverse of [false, true]) {
       } else assert.ok(!removed.tools.some(tool => tool.name === "scout_rm"));
     });
   }
+}
+
+for (const codemode of [false, true]) {
+  test(`Scout reads compact context flags after native CLI initialization (codemode=${codemode})`, async t => {
+    const h = await fixture(t, { codemode, extensionFlagValues: new Map([["scout-context", "compact"]]) });
+    await h.prompt();
+    const scout = systems(h).at(-1).sections.scout_repos;
+    assert.match(scout, /Use scout_list/);
+    assert.ok(!scout.includes(h.clone));
+    await h.session.reload();
+    await h.prompt();
+    assert.match(promptState(h), /Use scout_list/);
+    h.session.setActiveToolsByName(h.session.getActiveToolNames().filter(name => name !== "scout_list"));
+    await h.prompt();
+    assert.ok(systems(h).at(-1).sections.scout_repos.includes(h.clone), "unreachable listing restores full reference context");
+  });
 }
 
 for (const otherLast of [false, true]) {

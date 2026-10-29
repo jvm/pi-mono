@@ -16,8 +16,6 @@ const RemoveRepoParams = Type.Object({
 export default function piScout(pi: ExtensionAPI) {
   reportInstallTelemetry();
   pi.registerFlag("scout-context", { type: "string", description: "Scout prompt context: full (default) or compact when scout_list is reachable." });
-  const contextMode = pi.getFlag("scout-context") ?? "full";
-  if (contextMode !== "full" && contextMode !== "compact") throw new Error("scout-context must be full or compact.");
 
   pi.registerTool({
     name: "scout_list", label: "List Scout repositories", namespace: SCOUT_NAMESPACE,
@@ -128,6 +126,10 @@ export default function piScout(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (event) => {
+    // Pi applies CLI values after extension registration. Resolve the flag
+    // here, not while the factory is still loading with empty flag values.
+    const contextMode = pi.getFlag("scout-context") ?? "full";
+    if (contextMode !== "full" && contextMode !== "compact") throw new Error("scout-context must be full or compact.");
     await syncScoutRmTool();
     const state = await loadPrunedState();
     const compact = contextMode === "compact" && pi.getActiveTools().includes("scout_list");

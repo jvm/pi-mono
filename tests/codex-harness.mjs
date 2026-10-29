@@ -105,6 +105,11 @@ export async function codexHarness(factories, options = {}) {
     }],
   });
   await loader.reload();
+  // The CLI applies extension flags after resource loading, before session
+  // creation. Factories cannot snapshot their final values during registration.
+  for (const [name, value] of options.extensionFlagValues ?? []) {
+    loader.getExtensions().runtime.flagValues.set(name, value);
+  }
   const { session, extensionsResult } = await createAgentSession({
     cwd, agentDir: dir, model, modelRuntime, sessionManager, settingsManager,
     resourceLoader: loader, thinkingLevel: "low",
