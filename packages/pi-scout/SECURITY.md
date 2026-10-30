@@ -1,5 +1,14 @@
 # Security Policy
 
+## Listing
+
+`scout_list` exposes only the existing public repo allowlist, never origin URLs,
+credentials or internal state. It performs no clone/removal/network operation;
+existing stale-record pruning still applies. Pages are byte/count bounded and
+revision-checked to reject stale continuation. Compact context is explicit and
+falls back to full paths if listing is not reachable; it does not grant new
+tool access or bypass exclusions.
+
 ## Supported versions
 
 Security fixes are provided for the latest released version of `pi-scout`.

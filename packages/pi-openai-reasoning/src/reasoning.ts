@@ -49,9 +49,15 @@ export function rewriteReasoning(
   if (compacting && (!isRecord(trigger) || trigger.type !== "compaction_trigger")) return;
   if (!compacting && rawInput.some((item) => isRecord(item) && item.type === "compaction_trigger")) return;
   const input = compacting ? rawInput.slice(0, -1) : rawInput;
+  if (input.length === 0 || input.length > MAX_ITEMS) return;
   const window = [...entries].reverse().find((entry) => entry.type === "compaction")?.id ?? "root";
-  const hashes = fingerprintPrefixes(input, window !== "root");
-  if (!hashes || input.length === 0) return;
+  // Pi 1.4 can put inline declarations before the checkpoint. Keep them in the
+  // fingerprint and original order; only the actual checkpoint resets effort.
+  const checkpointIndex = window === "root" ? -1 :
+    input.findIndex((item) => !isRecord(item) || item.type !== "additional_tools");
+  const hasCheckpoint = checkpointIndex >= 0 && isCheckpoint(input[checkpointIndex]);
+  const hashes = fingerprintPrefixes(input, hasCheckpoint ? checkpointIndex : -1);
+  if (!hashes) return;
   const selected = payload.reasoning.effort;
   const previous = findState(entries, model.id, window);
   const last = { offset: input.length, hash: hashes[input.length] };
@@ -62,9 +68,10 @@ export function rewriteReasoning(
   let updates = valid ? previous.updates.filter((update) => update.offset <= input.length).map((u) => ({ ...u })) : [];
   const retry = valid && previous.last.offset === last.offset && previous.last.hash === last.hash;
 
-  if (!valid && window !== "root" && isCheckpoint(input[0])) {
+  if (!valid && hasCheckpoint) {
     // An opaque checkpoint does not retain configuration-update semantics.
-    updates.push({ offset: 1, hash: hashes[1], effort: selected });
+    const offset = checkpointIndex + 1;
+    updates.push({ offset, hash: hashes[offset], effort: selected });
   }
   const effective = updates.at(-1)?.effort ?? baseline;
   if (effective !== selected && (compacting || !retry)) {
@@ -138,7 +145,7 @@ function isBoundary(value: unknown, update = false): value is Boundary {
     (value.offset as number) <= MAX_ITEMS && typeof value.hash === "string" && /^[a-f0-9]{64}$/.test(value.hash);
 }
 
-function fingerprintPrefixes(input: unknown[], hasCheckpoint: boolean): string[] | undefined {
+function fingerprintPrefixes(input: unknown[], checkpointIndex: number): string[] | undefined {
   if (input.length > MAX_ITEMS) return;
   const hash = createHash("sha256");
   const prefixes = [hash.copy().digest("hex")];
@@ -147,7 +154,7 @@ function fingerprintPrefixes(input: unknown[], hasCheckpoint: boolean): string[]
     for (const [index, item] of input.entries()) {
       // Compaction's normal hook may run before or after this extension.
       const text = boundedStringify(
-        hasCheckpoint && index === 0 && isCheckpoint(item) ? { type: "checkpoint" } : item,
+        index === checkpointIndex && isCheckpoint(item) ? { type: "checkpoint" } : item,
         MAX_BYTES - bytes,
       );
       if (text === undefined) return;

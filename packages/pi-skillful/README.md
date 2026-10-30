@@ -107,7 +107,7 @@ On app startup, non-hidden skills are active and hidden skills are inactive. Wit
 Toggle-border colors follow the current theme without another toggle or reload.
 At very narrow widths, the complete border is clipped to the available columns.
 
-Visibility and toggles use Pi's structured `systemPromptOptions.skills` API (Pi 1.1.0 or newer), not text replacement of the full system prompt. Pi records skill-list changes in the session transcript, alongside independent updates from other extensions such as Scout.
+Visibility and toggles target Pi 1.4.0's structured `systemPromptOptions.skills` API, not text replacement of the full system prompt. Pi records skill-list changes in the session transcript, alongside independent updates from other extensions such as Scout.
 
 An active slot can lift a restriction from `skillful.hiddenSkills`, but does not clear `disable-model-invocation` frontmatter or a restriction applied by an earlier prompt handler. Later handlers see the updated list and can apply their own policy. Package-bundled skills remain outside Skillful's visibility controls and toggle slots.
 

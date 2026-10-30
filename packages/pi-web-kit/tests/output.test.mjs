@@ -61,7 +61,7 @@ test("bounded UTF-8 fetch content and partial failures validate after truncation
 });
 
 test("search and documentation omitted-count fields and metadata fallback validate", () => {
-  const result = validates("web_search", { provider: "exa", queries: [{
+  const result = validates("web_search", { provider: "exa", status: "success", queries: [{ status: "success",
     query: "q", requestedResultLimit: 100, effectiveResultLimit: 100, effectiveContextTokens: 10000,
     contextCharacters: 100000, resultCount: 100,
     results: Array.from({ length: 100 }, () => ({ url: "u".repeat(2048), title: "t".repeat(2000), content: "界".repeat(1000) })),

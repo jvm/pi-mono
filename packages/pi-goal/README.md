@@ -18,8 +18,8 @@ Give Pi a durable objective and let it keep working until the job is verified do
 pi install npm:@mocito/pi-goal
 ```
 
-Requires Pi 1.1.0 or newer for complete usage accounting and the settlement
-and cache-warming hooks. Development and session-contract tests use Pi 1.1.0.
+Targets Pi 1.4.0 for complete usage accounting and the settlement
+and cache-warming hooks. Development and session-contract tests use Pi 1.4.0.
 There is no legacy fallback for nested terminal updates.
 
 For local development:
@@ -61,7 +61,7 @@ verification evidence. Trusted extensions still run with the user's permissions.
 
 ### Structured script contract
 
-On Pi 1.1.0 or newer, `get_goal` and `create_goal` declare output schemas:
+On Pi 1.4.0, `get_goal` and `create_goal` declare output schemas:
 
 - `get_goal` returns `{ goal: summary | null }`, including a stable `null` when
   no goal exists. Its direct no-goal text stays `No goal is set.`.
@@ -174,10 +174,17 @@ Nested tool usage is already aggregated by Pi onto the parent tool result and
 is counted once, not by walking nested calls. Cached input tokens count too.
 This is a token budget, not a currency or provider-quota budget.
 
+`pi-codex-image-gen` backend counters in renderer `details.usage` are
+informational, not normalized Pi usage entries. The goal does not scrape them
+or estimate charges. Subscription image quota and unknown image costs remain
+unknown, not zero; goal budgets do not enforce them. Image usage normalization
+and typed web extraction are explicitly deferred until their provider/data/usage
+contracts are approved.
+
 Virtual-model selections do not change that rule: Pi records the physical
 assistant's usage, and codemode classifier usage is aggregated onto its parent
 tool result. However, a raw `ctx.modelRegistry.classify()` call inside a router
-does **not** automatically create a session usage entry in Pi 1.1.0. The goal
+does **not** automatically create a session usage entry in Pi 1.4.0. The goal
 cannot charge an unrecorded result. Paid automatic routers need an explicit,
 single-count attribution contract before they can be treated as budget-safe;
 do not infer free classification from an unchanged goal total. Classifier

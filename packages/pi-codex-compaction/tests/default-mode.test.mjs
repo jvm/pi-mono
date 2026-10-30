@@ -123,7 +123,7 @@ for (const modelChanges of [
 test("warming follows the actual request, not the default toggle", async () => {
   const h = fixture();
   assert.equal(h.warm(), undefined, "no automatic request was sent");
-  await h.request({ ...h.payload(), input: [{ type: "configuration_update", reasoning: { effort: "high" } }] });
+  await h.request({ ...h.payload(), input: [{ type: "configuration_update", reasoning: { effort: "high" }, unsupported: true }] });
   assert.equal(h.warm(), undefined, "incompatible requests keep their existing warming policy");
   await h.request(h.payload());
   assert.deepEqual(h.warm(), { action: "stop" });

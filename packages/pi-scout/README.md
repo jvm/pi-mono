@@ -15,6 +15,31 @@ Give [Pi](https://pi.dev) proven codebases to learn from before it changes yours
 - **Cross-session memory** — keep registered references available while their cached clones exist.
 - **Clean context** — tell the agent only which references exist and where to inspect them; stale clones are pruned automatically.
 
+## Typed reference discovery
+
+`scout_list({filter?, limit?, offset?, revision?})` lists existing references
+without cloning or network access. Only IDs, names, local paths, optional
+branches and timestamps are returned. Stale paths are pruned consistently with
+prompt context. Names need not be unique; select by ID.
+
+Pages sort by ID, default to 20 records (maximum 100), and stay within 50,000
+bytes. `filter` (maximum 256 characters) matches ID/name case-insensitively.
+Results contain `repos`, `total`, `revision`, `offset`, and optional `nextOffset`.
+Continue with the same filter and returned revision/nextOffset. Membership or
+public identity changes invalidate continuation; restart at offset zero.
+Bookkeeping-only `lastSeenAt` changes do not invalidate pages.
+
+```js
+const refs = await tools.scout_list({ filter: "reference", limit: 10 });
+text(refs.repos.map(r => ({ id: r.id, path: r.path })));
+// Select one, then read only the relevant files at its path.
+```
+
+Full prompt context remains the default. `--scout-context compact` advertises
+the reference count and listing recipe instead of injecting every path.
+When `scout_list` is inactive/excluded, full context is preserved as a fallback.
+This flag does not authorize registration/removal or override tool exclusions.
+
 Registered repositories are cloned in a private, per-user directory under the OS temp directory (`<temp>/pi-scout-<uid>` on Unix-like systems). Root and clone permissions are restricted to the current user on Unix. Set `PI_SCOUT_TMPDIR` to override the parent temp directory. Pi Scout uses shallow clones with depth `1` by default because it is for code exploration, not history exploration. Pi Scout keeps records in Pi's agent directory and reuses them across sessions while the cloned directories still exist.
 
 ## Installation
@@ -44,7 +69,7 @@ pi -e /path/to/pi-mono/packages/pi-scout --print "list your tools"
 ```
 
 This is an npm-compatible TypeScript Pi package. There is no runtime build step.
-Use Pi 1.1.0 or newer and Node.js >=22.19.0 for the structured tool contracts.
+Use Pi 1.4.0 and Node.js >=22.19.0 for the supported structured tool contracts.
 
 ## Configuration
 
@@ -79,7 +104,7 @@ After a repository is registered, the agent sees its local path in the system pr
 
 ### Prompt updates
 
-Pi Scout uses the structured prompt API in Pi 1.1.0 or newer. It owns the `scout_repos` section and updates that section without replacing the full system prompt or other extensions' sections. When the last reference is removed or its directory disappears, the section is removed on the next prompt.
+Pi Scout targets Pi 1.4.0's structured prompt API. It owns the `scout_repos` section and updates that section without replacing the full system prompt or other extensions' sections. When the last reference is removed or its directory disappears, the section is removed on the next prompt.
 
 The section contains only repository names, local paths, and read-only usage guidance. Origin URLs, credentials, branch names, and other record metadata are not included.
 

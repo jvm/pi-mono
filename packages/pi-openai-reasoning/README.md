@@ -45,7 +45,7 @@ conversation references and requests already containing configuration updates ar
 left unchanged. This package does not add async tools or mid-turn steering.
 
 Virtual-model selections are ineligible even when they dispatch to legacy
-Astra. On Pi 1.1.0, request hooks still see the virtual selection; this extension
+Astra. On Pi 1.4.0, request hooks still see the virtual selection; this extension
 does not infer physical protocol support from a display name, payload, or prior
 response. Pi uses the router's ordinary physical thinking level without this
 extension's cache-preserving updates.
@@ -61,6 +61,8 @@ efforts, item positions and SHA-256 history fingerprints, not duplicate prompts.
 After successful compaction, a new request baseline and an explicit effort update
 after the checkpoint restore the selected effort. Failed compaction cannot change
 the saved pin.
+Pi 1.4's leading inline tool declarations stay in their original positions and
+remain fingerprinted; the checkpoint after them is the effort-reset boundary.
 
 Current `pi-codex-compaction` releases target only the public `openai` route and
 no longer provide legacy RemoteCompactionV2 or its event-bus adapters. This

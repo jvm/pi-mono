@@ -6,6 +6,21 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-30
+
+### Changed
+
+- Target Pi 1.4.0 for development and contract tests; older hosts are no longer test targets. Pi remains a host-supplied peer dependency.
+
+### Fixed
+
+- Resolve `--scout-context` after native CLI flag initialization so compact context applies on the first prompt and after reload.
+
+### Added
+
+- Add typed `scout_list` with public-field filtering, byte-bounded pages and revision-checked continuation.
+- Add opt-in `--scout-context compact`, with full context fallback when listing is inactive.
+
 ## [0.2.0] - 2026-10-09
 
 ### Added

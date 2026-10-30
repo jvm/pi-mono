@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+process.env.PI_OFFLINE = "1";
+process.env.PI_TELEMETRY = "0";
 import { createModels, InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { IMAGE_AUTH_PROVIDER } from "../.test-dist/src/image-oauth.js";
@@ -44,6 +46,7 @@ function createTool(registerProvider = () => {}) {
   extension({
     registerProvider,
     registerCommand() {},
+    on() {},
     registerTool(value) { if (value.name === "codex_generate_image") tool = value; },
   });
   assert.ok(tool);

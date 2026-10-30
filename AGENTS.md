@@ -45,6 +45,7 @@ Do not publish tests, plans, agent files, generated builds, secrets, settings, o
 - Required scripts: `check`, `typecheck`, `test`, `pack:dry-run`.
 - Required keywords: `pi-package`; extension packages also use `pi-extension` and `pi`.
 - Keep Pi imports in peer dependencies at `*` and pinned dev dependencies. Synchronize shared dev dependency versions.
+- Target Pi 1.4.0 only for development and contract tests; do not add older-host CI lanes.
 - Use root `package-lock.json`; never package-local lockfiles.
 - Keep `files` explicit. Base list: `index.ts`, `extensions`, `src`, README, LICENSE, CHANGELOG, SECURITY, CONTRIBUTING, CODE_OF_CONDUCT. Add only runtime assets.
 

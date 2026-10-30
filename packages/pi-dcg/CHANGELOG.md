@@ -6,12 +6,15 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-30
+
 ### Fixed
 
 - Do not let extra `workdir` or `mode` arguments on ordinary bash select a different policy directory. Honor managed working directories only for the registered executor's local capability.
 
 ### Changed
 
+- Target Pi 1.4.0 for development and contract tests; older hosts are no longer test targets. Pi remains a host-supplied peer dependency.
 - Check managed `bash` in its canonical working directory and freeze all approved bash arguments, including execution mode. Block argument changes during asynchronous policy checks.
 
 ## [0.4.1] - 2026-10-13

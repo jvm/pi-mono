@@ -1,5 +1,21 @@
 # Security Policy
 
+## Shared admission and cached finding
+
+HTTP admission is bounded per provider origin and account/header scope using
+process-random HMAC identities, never public credential keys. Queue wait counts
+toward request deadlines. HTTP 429 cooldowns are bounded; waiting requests
+recheck extensions within their original deadline, and no retry is added.
+Equivalent misses share transport only within the existing cache/account/options
+identity; waiter cancellation is independent. Last-waiter cancellation aborts
+shared work. Reload cancellation uses Pi's normal tool cancellation signal.
+
+Cached literal finding does not fetch on a miss. It scans redacted content only,
+with bounded terms, excerpts and match counts. It accepts no regex, path or
+persistent response handle. Search errors contain bounded transport messages,
+not backend response bodies. Validation, policy and cancellation failures are
+not converted into successful empty searches.
+
 ## Supported versions
 
 Security fixes are provided for the latest released version of `pi-web-kit`.
@@ -108,9 +124,32 @@ They do not approve provider spending, bypass tool hooks, or make an inactive
 direct tool reachable from nested dispatch. Project trust, URL validation,
 provider request limits and cancellation still apply.
 
-Branch-local `pi-web-kit:registered-tools` custom entries remember only this
-package's fixed tool names as they first become available. They contain no
-credentials, configuration values, activation decisions or usage data and do
-not enter model context. This distinguishes a newly available optional tool
-from re-registration of a manually disabled tool; Pi still owns activation
-and exclusions. Missing or invalid history does not force tools active on reload.
+Exposure follows actual native codemode activation, not an exposure setting.
+With active codemode, enabled web tools are deferred and remain callable
+while undeclared; native tool search can discover and activate them.
+With inactive/unavailable codemode, the saved direct selection is restored.
+An already manually inactive direct tool is not made callable by deferral.
+Removing an already undeclared deferred tool is not an observable disable;
+use explicit negative settings, CLI exclusions or the package hard disable.
+There is no loader or automatic activation of a discovery tool. A bounded
+`web_research` prompt section advertises the available deferred tool names
+and native discovery route, without provider data or full schemas.
+
+The effective configuration's `enabled: false` is a hard disable. Explicit
+`defaultTools` negative entries also hide the corresponding tools. Hidden
+definitions cannot be revived by search, activation, late credentials or
+reload. CLI exclusions remain enforced by Pi. Config is checked at startup,
+prompt and turn/tool boundaries, and again before execution, so stale handlers cannot
+start new requests after a hard disable; already dispatched requests are
+not cancelled by a config edit. These controls do not restrict other
+extensions, tools, or a trusted project configuration override.
+
+Version 2 branch-local `pi-web-kit:registered-tools` custom entries contain
+only the effective exposure enum and bounded arrays of this package's fixed
+tool names: known tools, direct selection, last applied declarations and
+positive settings. They contain no credentials, provider configuration or
+usage data and do not enter model context. Selection bookkeeping distinguishes
+automatic undeclaration from an observed manual deactivation. Pi still owns
+activation, exclusions and historical declaration updates. Missing/invalid
+history or older metadata without selection state uses conservative native
+restoration rather than forcing inactive tools active on reload.

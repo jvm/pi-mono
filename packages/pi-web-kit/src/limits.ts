@@ -42,6 +42,9 @@ export const FETCH_CACHE_MAX_ENTRIES = 100;
 export const FETCH_CACHE_MAX_BYTES = 20 * 1024 * 1024;
 export const FETCH_CACHE_TTL_MS = 30 * 60 * 1000;
 export const FETCH_CONCURRENCY = 3;
+export const MAX_FIND_TERM = 256;
+export const MAX_FIND_MATCHES = 20;
+export const FIND_CONTEXT = 80;
 
 export function capSearchResultLimit(provider: SearchProviderName, requested: number): number {
   return Math.min(requested, SEARCH_RESULT_LIMITS[provider] ?? requested);

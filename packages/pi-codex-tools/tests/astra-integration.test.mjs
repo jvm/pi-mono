@@ -61,9 +61,13 @@ for (const [catalog, stream, apiKey] of [
         onPayload: (body) => {
           assert.equal(body.model, "gpt-6-astra");
           assert.notEqual(body.parallel_tool_calls, false);
-          assert.equal(body.tools[0].type, "custom");
-          assert.deepEqual(body.tools[0].format, { type: "grammar", syntax: "lark", definition: APPLY_PATCH_GRAMMAR });
-          assert.equal(body.tools[0].parameters, undefined);
+          assert.equal(body.tools, undefined, "Pi 1.4 serializes chronological inline declarations");
+          const declarations = body.input.filter(item => item.type === "additional_tools").flatMap(item => item.tools);
+          assert.equal(declarations.length, 1);
+          assert.equal(declarations[0].name, "apply_patch");
+          assert.equal(declarations[0].type, "custom");
+          assert.deepEqual(declarations[0].format, { type: "grammar", syntax: "lark", definition: APPLY_PATCH_GRAMMAR });
+          assert.equal(declarations[0].parameters, undefined);
           if (requestCount === 1) {
             assert.equal(body.input.find((item) => item.type === "custom_tool_call").input, patch);
             assert.match(body.input.find((item) => item.type === "custom_tool_call_output").output, /Applied patch/);

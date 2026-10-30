@@ -3,6 +3,14 @@
 Investigation: [#170](https://github.com/jvm/pi-mono/issues/170), against Pi 1.1.0
 and the package implementations at `dd81418`.
 
+> **Historical record:** the investigation and measurements below used Pi 1.1.0.
+> The active development and contract-test target is now Pi 1.4.0 only.
+> On that host, the integration suite verifies that same-model continuations
+> retain signed thinking, while a cross-provider request omits the entire prior
+> thinking block, including readable text. The local session history retains
+> that block unchanged. This replaces the older wire-conversion observation
+> below; it does not change the conservative feature guards or authorize routing.
+
 ## Decision
 
 **Keep the current conservative guards. Defer production routing and classifier

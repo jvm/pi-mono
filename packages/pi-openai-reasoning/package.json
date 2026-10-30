@@ -1,6 +1,6 @@
 {
   "name": "pi-openai-reasoning",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Change Codex reasoning effort without rewriting the cached request prefix.",
   "type": "module",
   "license": "MIT",
@@ -30,8 +30,8 @@
     "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "1.1.0",
-    "@earendil-works/pi-coding-agent": "1.1.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-coding-agent": "1.4.0",
     "@types/node": "^26.6.3",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"

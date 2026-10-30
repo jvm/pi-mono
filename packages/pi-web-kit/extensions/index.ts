@@ -13,11 +13,24 @@ import { boundStructuredResult } from "../src/output-budget.js";
 import { parseInteger } from "../src/validation.js";
 import { singleLine } from "../src/render-text.js";
 import { researchProgress, researchRenderers } from "../src/research-render.js";
+import { ProviderRequestError } from "../src/http.js";
+import { buildExaSearchBody } from "../src/providers/exa-contract.js";
+import { WEB_TOOLS, names, readRegistration, directSelection, type Exposure, type ExposureState, type Registration } from "../src/exposure.js";
 
 // Preserve existing test/library entry points while keeping orchestration in src.
 export { buildCacheKey, fetchWithCache, pageSlice } from "../src/fetch.js";
 
 const REGISTERED_TOOLS_ENTRY = "pi-web-kit:registered-tools";
+
+function disabledBySettings(pi: ExtensionAPI, name: string): boolean {
+  const settings = pi.getSettings?.().defaultTools;
+  return Array.isArray(settings)
+    && settings.filter(entry => entry === `+${name}` || entry === `-${name}`).at(-1) === `-${name}`;
+}
+
+function codemodeActive(pi: ExtensionAPI): boolean {
+  return pi.getActiveTools?.().includes("codemode") ?? false;
+}
 
 export default function (pi: ExtensionAPI) {
   void reportInstallTelemetry();
@@ -31,95 +44,121 @@ export default function (pi: ExtensionAPI) {
   });
 
   let registeredConfig = "";
-  let rememberedTools: string[] | undefined;
-  pi.on("session_start", (event, ctx) => {
+  let remembered: ExposureState | undefined;
+  function syncTools(ctx: ExtensionContext, reload = false, restore = false) {
     const startupConfig = runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx));
-    const signature = toolConfigSignature(startupConfig);
-    if (signature === registeredConfig) return;
+    const exposure: Exposure = !startupConfig.enabled ? "hidden" : codemodeActive(pi) ? "deferred" : "direct";
     const available = [
       "web_search", "web_fetch",
       ...(startupConfig.apiKeys.context7 ? ["library_search", "library_docs"] : []),
       ...(startupConfig.apiKeys.exa ? ["code_search"] : []),
     ];
-    const previous = registrationHistory(ctx);
-    // Remember availability, not activation. Pi owns active/pending selection.
-    // Without history (an older session), conservatively preserve inactivity on
-    // the first reload instead of guessing which tools were manually disabled.
-    registerTools(pi, startupConfig, event.reason === "reload" ? new Set(previous ?? available) : undefined);
-    rememberedTools = recordRegisteredTools(pi, ctx, available);
-    // A session change can drop provider credentials without replacing this
-    // extension instance. Retained definitions must not remain active then.
-    if (typeof pi.getActiveTools === "function" && typeof pi.setActiveTools === "function") {
-      const unavailable = new Set([
-        ...(!startupConfig.apiKeys.context7 ? ["library_search", "library_docs"] : []),
-        ...(!startupConfig.apiKeys.exa ? ["code_search"] : []),
-      ]);
-      const active = pi.getActiveTools();
-      if (active.some(name => unavailable.has(name))) pi.setActiveTools(active.filter(name => !unavailable.has(name)));
+    const history = registrationHistory(ctx);
+    const previous: Registration | undefined = history ?? remembered ?? (reload ? { version: 1, tools: available } : undefined);
+    const defaults = pi.getSettings?.().defaultTools;
+    const positive = names((Array.isArray(defaults) ? defaults : [])
+      .filter(entry => typeof entry === "string" && entry.startsWith("+") && !disabledBySettings(pi, entry.slice(1))).map(entry => entry.slice(1)));
+    const restoring = !registeredConfig || restore;
+    let active = pi.getActiveTools?.() ?? [];
+    let selected = directSelection(previous, active, available, positive, name => disabledBySettings(pi, name), !restoring && !!pi.getActiveTools);
+    const signatureFor = () => JSON.stringify([toolConfigSignature(startupConfig), exposure, selected, pi.getSettings?.().defaultTools]);
+    // Startup and tree restoration can leave transcript tools pending behind
+    // hidden/missing definitions from the previous branch. Register before
+    // reading that loadout, and prefer the saved selection over a partial one.
+    if (restoring) {
+      registerTools(pi, startupConfig, exposure, new Set(previous?.tools), new Set(selected), syncTools);
+      registeredConfig = signatureFor();
+      active = pi.getActiveTools?.() ?? [];
+      selected = directSelection(previous, active, available, positive, name => disabledBySettings(pi, name), false);
     }
+    const signature = signatureFor();
+    if (signature !== registeredConfig) registerTools(pi, startupConfig, exposure, new Set(previous?.tools), new Set(selected), syncTools);
+    const allowed = (name: string) => available.includes(name) && !disabledBySettings(pi, name) && selected.includes(name);
+    // Preserve native discovery activation within codemode, but do not mistake
+    // an older direct tree snapshot for an explicit deferred activation.
+    const sameBranchPolicy = history?.exposure === exposure || (!ctx.sessionManager && previous?.exposure === exposure);
+    const declared = exposure === "hidden" ? [] : exposure === "direct" ? selected.filter(allowed)
+      : sameBranchPolicy ? (restoring ? previous?.declared ?? active : active).filter(allowed) : [];
+    if (pi.getActiveTools && pi.setActiveTools) {
+      const current = pi.getActiveTools();
+      if (JSON.stringify(names(current)) !== JSON.stringify(names(declared))) {
+        pi.setActiveTools([...current.filter(name => !WEB_TOOLS.has(name)), ...declared]);
+      }
+    }
+    remembered = { version: 2, tools: names([...(previous?.tools ?? []), ...available]), exposure,
+      directActive: selected, declared: names(pi.getActiveTools?.() ?? declared), positive };
+    if (JSON.stringify(history) !== JSON.stringify(remembered)) pi.appendEntry?.(REGISTERED_TOOLS_ENTRY, remembered);
     registeredConfig = signature;
-  });
-  pi.on("session_shutdown", (event, ctx) => {
-    // Tree navigation can restore an older branch record while the live
-    // registry still knows newer tools. Save that fact before runtime teardown.
-    if (event.reason === "reload" && rememberedTools) recordRegisteredTools(pi, ctx, rememberedTools);
-  });
-}
-
-function registrationHistory(ctx: ExtensionContext): string[] | undefined {
-  const entry = ctx.sessionManager?.getBranch().filter(item => item.type === "custom" && item.customType === REGISTERED_TOOLS_ENTRY).at(-1);
-  return entry?.type === "custom" ? registeredToolNames(entry.data) : undefined;
-}
-
-function recordRegisteredTools(pi: ExtensionAPI, ctx: ExtensionContext, tools: readonly string[]): string[] {
-  const previous = registrationHistory(ctx);
-  const remembered = [...new Set([...(previous ?? []), ...tools])].sort();
-  if (!previous || JSON.stringify(previous) !== JSON.stringify(remembered)) {
-    pi.appendEntry?.(REGISTERED_TOOLS_ENTRY, { version: 1, tools: remembered });
   }
-  return remembered;
+  pi.on("session_start", (event, ctx) => syncTools(ctx, event.reason === "reload"));
+  pi.on("before_agent_start", (event, ctx) => {
+    syncTools(ctx);
+    // Native codemode deliberately omits deferred namespaces from its catalog.
+    // Advertise the route, not the schemas, using one composable prompt section.
+    const deferred = pi.getAllTools?.().filter(tool => WEB_TOOLS.has(tool.name) && tool.exposure === "deferred").map(tool => tool.name) ?? [];
+    if (deferred.length) {
+      event.systemPromptOptions.sections.web_research = `For web research with active codemode: ${deferred.join(", ")}. Use await describeNamespace("web") or await searchTools(query, {namespace:"web"}), then await describeTool(name) for provider-specific inputs and typed results. Provider charges and existing approvals still apply.`;
+    } else delete event.systemPromptOptions.sections.web_research;
+  });
+  pi.on("turn_start", (_event, ctx) => syncTools(ctx));
+  pi.on("tool_call", (event, ctx) => {
+    if (WEB_TOOLS.has(event.toolName) || event.toolName === "codemode" || event.toolName === "tool_search") syncTools(ctx);
+  });
+  pi.on("tool_result", (_event, ctx) => { syncTools(ctx); });
+  pi.on("session_tree", (_event, ctx) => syncTools(ctx, false, true));
+  pi.on("session_shutdown", (_event, ctx) => syncTools(ctx));
 }
 
-function registeredToolNames(data: unknown): string[] | undefined {
-  if (!data || typeof data !== "object" || !("version" in data) || data.version !== 1
-    || !("tools" in data) || !Array.isArray(data.tools)
-    || data.tools.length > Object.keys(WEB_OUTPUT_SCHEMAS).length
-    || !data.tools.every(name => typeof name === "string" && Object.hasOwn(WEB_OUTPUT_SCHEMAS, name))) return undefined;
-  return [...new Set(data.tools)].sort();
+function registrationHistory(ctx: ExtensionContext): Registration | undefined {
+  const entry = ctx.sessionManager?.getBranch().filter(item => item.type === "custom" && item.customType === REGISTERED_TOOLS_ENTRY).at(-1);
+  return entry?.type === "custom" ? readRegistration(entry.data) : undefined;
 }
 
-function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolveConfig>, previouslyRegistered?: ReadonlySet<string>) {
-  // All five tools stay direct. Metadata must not make excluded/inactive tools callable.
+function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolveConfig>, exposure: Exposure, previouslyRegistered: ReadonlySet<string>, selected: ReadonlySet<string>, synchronize: (ctx: ExtensionContext) => void) {
   type DataTool = Omit<ToolDefinition, "execute"> & {
     execute(...args: Parameters<ToolDefinition["execute"]>): Promise<unknown>;
   };
-  const settings = pi.getSettings?.().defaultTools;
-  const disabledByDefault = (name: string) => Array.isArray(settings)
-    && settings.filter(entry => entry === `+${name}` || entry === `-${name}`).at(-1) === `-${name}`;
-  const register = (tool: DataTool) => pi.registerTool({
-    ...WEB_TOOL_METADATA,
-    ...tool,
-    // Late registration must not undo explicit settings or session deactivation.
-    // Pi restores previously active/pending names on reload even when this is false.
-    // Only first availability uses the default; re-registration cannot undo a
-    // manual deactivation, even if settings positively select this tool.
-    defaultActive: !previouslyRegistered?.has(tool.name) && !disabledByDefault(tool.name),
-    outputSchema: WEB_OUTPUT_SCHEMAS[tool.name],
-    async execute(id, args, signal, onUpdate, ctx) {
-      const secrets = Object.values(runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx)).apiKeys);
-      try {
-        const result = await tool.execute(id, args, signal,
-          onUpdate ? update => onUpdate(redactOutput(update, secrets)) : undefined, ctx);
-        // Some providers represent an aborted fetch as per-page failures.
-        // Cancellation is still a failed call, never a successful data snapshot.
-        if (signal?.aborted) throw new Error("Web tool cancelled.");
-        return jsonToolResult(result, WEB_OUTPUT_SCHEMAS[tool.name], secrets);
-      } catch (error) {
-        if (signal?.aborted) throw new Error("Web tool cancelled.");
-        throw new Error(redactText(error instanceof Error ? error.message : "Web tool failed.", secrets).slice(0, 1000));
-      }
-    },
-  });
+  const register = (tool: DataTool) => {
+    const available = !((tool.name.startsWith("library_") && !startupConfig.apiKeys.context7)
+      || (tool.name === "code_search" && !startupConfig.apiKeys.exa));
+    const selectedExposure = !available || disabledBySettings(pi, tool.name) ? "hidden"
+      : exposure === "deferred" && !selected.has(tool.name) ? "direct" : exposure;
+    pi.registerTool({
+      ...WEB_TOOL_METADATA,
+      ...tool,
+      // Pi restores active/pending names on reload. Only first availability
+      // uses the default; re-registration cannot undo manual deactivation.
+      exposure: selectedExposure,
+      defaultActive: selectedExposure === "direct" && !previouslyRegistered.has(tool.name),
+      outputSchema: WEB_OUTPUT_SCHEMAS[tool.name],
+      async execute(id, args, signal, onUpdate, ctx) {
+        const config = runtimeConfig(pi, ctx.cwd, projectIsTrusted(ctx));
+        if (!config.enabled || disabledBySettings(pi, tool.name)) throw new Error("Web tool is disabled.");
+        // Pi resolves an executor before tool_call hooks finish. A later hook
+        // can change the loadout, so an old deferred executor must recheck the
+        // live policy before starting a provider request.
+        synchronize(ctx);
+        if (pi.getAllTools && pi.getActiveTools) {
+          const current = pi.getAllTools().find(item => item.name === tool.name);
+          if (!current || current.exposure === "hidden" || (current.exposure === "direct" && !pi.getActiveTools().includes(tool.name))) {
+            throw new Error("Web tool is unavailable.");
+          }
+        }
+        if (selectedExposure === "hidden") throw new Error("Web tool is unavailable.");
+        const secrets = Object.values(config.apiKeys);
+        try {
+          const result = await tool.execute(id, args, signal,
+            onUpdate ? update => onUpdate(redactOutput(update, secrets)) : undefined, ctx);
+          // Providers may return aborted fetches as per-page failures.
+          if (signal?.aborted) throw new Error("Web tool cancelled.");
+          return jsonToolResult(result, WEB_OUTPUT_SCHEMAS[tool.name], secrets);
+        } catch (error) {
+          if (signal?.aborted) throw new Error("Web tool cancelled.");
+          throw new Error(redactText(error instanceof Error ? error.message : "Web tool failed.", secrets).slice(0, 1000));
+        }
+      },
+    });
+  };
   register({
     name: "web_search",
     label: "Web Search",
@@ -152,17 +191,35 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
       const effectiveResultLimit = capSearchResultLimit(config.provider_search, requestedResultLimit);
       const requestedContextTokens = params.contextTokens == null ? undefined : parseInteger(params.contextTokens, 0, "contextTokens", 1);
       const effectiveContextTokens = Math.min(requestedContextTokens ?? DEFAULT_SEARCH_CONTEXT_TOKENS, MAX_SEARCH_CONTEXT_TOKENS);
+      const inputs = queries.map(query => ({ ...params, query, numResults: effectiveResultLimit,
+        contextTokens: requestedContextTokens == null ? undefined : effectiveContextTokens }));
+      // Validate the entire Exa batch before the first request, not query by query.
+      if (config.provider_search === "exa") inputs.forEach(input => buildExaSearchBody(input));
       const provider = createSearchProvider(config, diagnostic => pi.events?.emit("pi-web-kit:exa-diagnostics", diagnostic));
       const grouped = [];
       const progress = createProgress("search", config.provider_search, queries);
       emitProgress(onUpdate, progress);
-      for (const query of queries) {
+      for (const input of inputs) {
+        const { query } = input;
         markProgressCurrent(progress, query);
         emitProgress(onUpdate, progress);
-        const result = await provider.search({ ...params, query, numResults: effectiveResultLimit, contextTokens: requestedContextTokens == null ? undefined : effectiveContextTokens }, signal);
+        let result;
+        try { result = await provider.search(input, signal); }
+        catch (error) {
+          signal?.throwIfAborted();
+          if (!(error instanceof ProviderRequestError)) throw error;
+          grouped.push({ query, status: "failed", requestedResultLimit, effectiveResultLimit,
+            requestedContextTokens, effectiveContextTokens, contextCharacters: 0, resultCount: 0, results: [],
+            error: { code: "provider_request_failed", message: error.message.slice(0, 256) } });
+          markProgressDone(progress, query, "provider request failed");
+          emitProgress(onUpdate, progress);
+          continue;
+        }
+        signal?.throwIfAborted();
         const bounded = applySearchContextBudget(redactOutput(result.results, Object.values(config.apiKeys)), effectiveContextTokens * 4);
         grouped.push({
           query,
+          status: "success",
           requestedResultLimit,
           effectiveResultLimit: result.effectiveResultLimit ?? effectiveResultLimit,
           requestedContextTokens,
@@ -177,7 +234,10 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
         markProgressDone(progress, query, `${bounded.results.length} results`);
         emitProgress(onUpdate, progress);
       }
-      const result = { provider: config.provider_search, queries: grouped };
+      signal?.throwIfAborted();
+      const failed = grouped.filter(query => query.status === "failed").length;
+      const result = { provider: config.provider_search,
+        status: failed === grouped.length ? "failed" : failed ? "partial" : "success", queries: grouped };
       return result;
     },
     renderCall(args, theme) {
@@ -220,7 +280,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
     },
   });
 
-  if (startupConfig.apiKeys.context7) {
+  if (startupConfig.apiKeys.context7 || exposure === "hidden" || previouslyRegistered.has("library_search")) {
     register({
       name: "library_search",
       label: "Library Search",
@@ -270,7 +330,7 @@ function registerTools(pi: ExtensionAPI, startupConfig: ReturnType<typeof resolv
     });
   }
 
-  if (startupConfig.apiKeys.exa) {
+  if (startupConfig.apiKeys.exa || exposure === "hidden" || previouslyRegistered.has("code_search")) {
     register({
       name: "code_search",
       label: "Code Search",
@@ -301,6 +361,7 @@ function toolConfigSignature(config: ReturnType<typeof resolveConfig>): string {
     fetch: config.provider_fetch,
     context7: !!config.apiKeys.context7,
     exa: !!config.apiKeys.exa,
+    enabled: config.enabled,
   });
 }
 
@@ -365,6 +426,9 @@ export function buildFetchSchema(provider: FetchProviderName) {
   const props: Record<string, any> = {
     url: Type.Optional(Type.String({ description: "Single URL", maxLength: 2048 })),
     urls: Type.Optional(Type.Array(Type.String({ maxLength: 2048 }), { description: `Multiple URLs (max ${MAX_URL_COUNT})`, maxItems: MAX_URL_COUNT })),
+    find: Type.Optional(Type.String({ minLength: 1, maxLength: 256, description: "Literal text to find in cached redacted content only. A cache miss does not fetch. Incompatible with offset, limit and refresh." })),
+    findCaseSensitive: Type.Optional(Type.Boolean({ description: "Default true. False uses Unicode case-insensitive literal matching." })),
+    findFrom: Type.Optional(int("UTF-16 offset for finding continuation, default 0", 0, MAX_OFFSET)),
     offset: Type.Optional(int("Character offset for cached/ranged reads", 0, MAX_OFFSET)),
     limit: Type.Optional(int("Maximum characters to return", 1, MAX_LIMIT)),
     refresh: Type.Optional(Type.Boolean({ description: "Refetch even if cached" })),
@@ -493,8 +557,11 @@ function boundedDetails(value: any): unknown {
 function searchDetails(value: any) {
   return {
     provider: value.provider,
+    status: value.status,
     queries: value.queries.map((q: any) => ({
       query: q.query,
+      status: q.status,
+      error: q.error,
       requestedResultLimit: q.requestedResultLimit,
       effectiveResultLimit: q.effectiveResultLimit,
       requestedContextTokens: q.requestedContextTokens,
@@ -558,6 +625,7 @@ function fetchDetails(value: any) {
       refreshed: r.refreshed,
       range: r.range,
       error: r.error,
+      ...(r.find ? { find: { count: r.find.count, omittedMatchCount: r.find.omittedMatchCount } } : {}),
     })),
   };
 }
@@ -631,15 +699,16 @@ function renderWebResult(kind: ProgressKind, result: any, { expanded, isPartial 
   const details = result.details as any;
   if (kind === "search" && details?.queries) {
     const total = details.queries.reduce((sum: number, q: any) => sum + (q.resultCount ?? q.results?.length ?? 0), 0);
-    let text = `${theme.fg("success", "✅ Web search complete")} ${theme.fg("muted", `${details.queries.length}/${details.queries.length}`)}\n   results: ${total} total`;
-    if (expanded) for (const q of details.queries) text += `\n   ✓ ${theme.fg("accent", quote(q.query))} ${theme.fg("muted", `${q.resultCount ?? q.results?.length ?? 0} results`)}`;
+    const failed = details.queries.filter((q: any) => q.status === "failed").length;
+    let text = `${theme.fg(failed ? "warning" : "success", failed ? "Web search completed with failures" : "✅ Web search complete")} ${theme.fg("muted", `${details.queries.length - failed}/${details.queries.length}`)}\n   results: ${total} total`;
+    if (expanded) for (const q of details.queries) text += `\n   ${q.status === "failed" ? "✗" : "✓"} ${theme.fg("accent", quote(q.query))} ${theme.fg("muted", q.error?.message ?? `${q.resultCount ?? q.results?.length ?? 0} results`)}`;
     return new Text(text, 0, 0);
   }
   if (kind === "fetch" && details?.results) {
     const ok = details.results.filter((r: any) => !r.error).length;
     const failed = details.results.length - ok;
     let text = failed > 0 ? `${theme.fg("warning", "⚠️ Fetch complete")} ${ok}/${details.results.length} succeeded` : `${theme.fg("success", details.results.length === 1 ? "✅ Page fetched" : "✅ Pages fetched")} ${theme.fg("muted", `${ok}/${details.results.length}`)}`;
-    if (expanded) for (const r of details.results) text += `\n   ${r.error ? theme.fg("error", "✕") : theme.fg("success", "✓")} ${theme.fg("accent", truncateMiddle(r.url, 100))}${r.error ? theme.fg("error", ` ${singleLine(r.error)}`) : theme.fg("muted", ` ${r.range?.returned ?? 0}/${r.range?.total ?? 0} chars${r.cached ? " cached" : ""}`)}`;
+    if (expanded) for (const r of details.results) text += `\n   ${r.error ? theme.fg("error", "✕") : theme.fg("success", "✓")} ${theme.fg("accent", truncateMiddle(r.url, 100))}${r.error ? theme.fg("error", ` ${singleLine(r.error)}`) : theme.fg("muted", r.find ? ` ${r.find.count} matches, ${r.find.omittedMatchCount} omitted (cached)` : ` ${r.range?.returned ?? 0}/${r.range?.total ?? 0} chars${r.cached ? " cached" : ""}`)}`;
     return new Text(text, 0, 0);
   }
   const content = result.content?.find?.((c: any) => c.type === "text")?.text ?? "";

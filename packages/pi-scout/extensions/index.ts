@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { Type } from "typebox";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import { buildScoutPrompt, formatRepo, loadPrunedState, registerRepo, removeRepo } from "../src/index.js";
-import { ADD_REPO_OUTPUT, REMOVE_REPO_OUTPUT, SCOUT_NAMESPACE, formatPublicRepo, publicRepo } from "../src/tool-contracts.js";
+import { ADD_REPO_OUTPUT, REMOVE_REPO_OUTPUT, LIST_REPOS_OUTPUT, SCOUT_NAMESPACE, formatPublicRepo, publicRepo, listPublicRepos } from "../src/tool-contracts.js";
 
 const RegisterRepoParams = Type.Object({
   source: Type.String({ description: "Git URL/path or owner/repo." }),
@@ -15,6 +15,26 @@ const RemoveRepoParams = Type.Object({
 
 export default function piScout(pi: ExtensionAPI) {
   reportInstallTelemetry();
+  pi.registerFlag("scout-context", { type: "string", description: "Scout prompt context: full (default) or compact when scout_list is reachable." });
+
+  pi.registerTool({
+    name: "scout_list", label: "List Scout repositories", namespace: SCOUT_NAMESPACE,
+    description: "List existing read-only Scout references with bounded filtering and pagination. No cloning or network requests.",
+    promptGuidelines: ["Use scout_list to select existing references before cloning. Continue with the same filter and returned revision/nextOffset; restart at offset 0 if the registry changes."],
+    executionMode: "parallel",
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    parameters: Type.Object({
+      filter: Type.Optional(Type.String({ maxLength: 256 })),
+      offset: Type.Optional(Type.Integer({ minimum: 0 })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+      revision: Type.Optional(Type.String({ maxLength: 64 })),
+    }, { additionalProperties: false }),
+    outputSchema: LIST_REPOS_OUTPUT,
+    async execute(_id, params) {
+      const data = listPublicRepos((await loadPrunedState()).repos, params);
+      return { content: [{ type: "text", text: JSON.stringify(data) }], structuredContent: data, details: data };
+    },
+  });
 
   let scoutRmRegistered = false;
   let hadRepos = false;
@@ -106,9 +126,16 @@ export default function piScout(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (event) => {
+    // Pi applies CLI values after extension registration. Resolve the flag
+    // here, not while the factory is still loading with empty flag values.
+    const contextMode = pi.getFlag("scout-context") ?? "full";
+    if (contextMode !== "full" && contextMode !== "compact") throw new Error("scout-context must be full or compact.");
     await syncScoutRmTool();
     const state = await loadPrunedState();
-    const scoutPrompt = buildScoutPrompt(state.repos);
+    const compact = contextMode === "compact" && pi.getActiveTools().includes("scout_list");
+    const scoutPrompt = compact && state.repos.length
+      ? `Scout has ${state.repos.length} read-only references. Use scout_list to select one, then read only relevant files at its returned path.`
+      : buildScoutPrompt(state.repos);
     // Change only our section; a deliberate forceSystemPrompt remains authoritative.
     if (scoutPrompt) event.systemPromptOptions.sections.scout_repos = scoutPrompt;
     else delete event.systemPromptOptions.sections.scout_repos;

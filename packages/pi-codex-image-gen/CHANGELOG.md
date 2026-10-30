@@ -6,6 +6,18 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-30
+
+### Changed
+
+- Target Pi 1.4.0 for development and contract tests; older hosts are no longer test targets. Pi remains a host-supplied peer dependency.
+
+### Added
+
+- Recover branch-local originals with typed `codex_list_image_artifacts`, without generation.
+- Return selected routing, duration, ID, and backend-reported metadata with artifact results.
+- Limit direct and artifact generation to two active requests and eight queued requests per account, with cancellation and a total admission deadline.
+
 ## [0.2.0] - 2026-10-09
 
 ### Documentation

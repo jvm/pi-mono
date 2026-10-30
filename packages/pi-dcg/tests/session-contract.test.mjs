@@ -32,7 +32,7 @@ test("ordinary bash really ignores extra workdir; DCG checks the directory the e
   assert.equal(h.checks[0].request.cwd, h.ctx.cwd);
   await access(join(h.ctx.cwd, "actual-marker"));
   await assert.rejects(access(join(extra, "actual-marker")));
-  assert.match(textOf(result), new RegExp(resolve(h.ctx.cwd)));
+  assert.ok(textOf(result).includes(resolve(h.ctx.cwd)));
 });
 
 // Top-level tests are sequential: each fixture owns fetch and its disposable profile.
@@ -364,7 +364,7 @@ test("reload cancels idle user confirmations and creates a fresh confirmation qu
   assert.equal(h.executed.length, 1);
 });
 
-test("Pi 1.1.0 limitation: replacing input before DCG detaches it from execution args", async t => {
+test("Pi 1.4.0 limitation: replacing input before DCG detaches it from execution args", async t => {
   // Characterization, not a passing security guarantee. Remove this limitation
   // only with an upstream fix and a regression that enforces argument identity.
   const h = await fixture(t, {

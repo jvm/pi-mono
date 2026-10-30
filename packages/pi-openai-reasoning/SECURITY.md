@@ -21,6 +21,10 @@ read. No project settings are read. No prompt or provider data is logged.
 Fingerprint serialization stops at the remaining history byte budget, including
 for individual strings. Unsupported JSON containers use normal Pi handling
 instead. This bounds the extension's fingerprint work, not Pi's own request size.
+Leading Pi inline tool declarations are fingerprinted without removal or
+reordering. Only the first checkpoint after those declarations is normalized
+within a recorded compaction window; changed declarations invalidate saved
+effort positions.
 
 The obsolete direct-compaction event-bus listener has been removed. Ordinary
 request hooks remain the only runtime transformation path. Pi's standard

@@ -6,6 +6,26 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-30
+
+### Changed
+
+- Target Pi 1.4.0 for development and contract tests; older hosts are no longer test targets. Pi remains a host-supplied peer dependency.
+
+### Added
+
+- Automatically defer enabled web tools when native codemode is active; keep direct exposure otherwise, without an exposure setting. Add a compact discovery hint and preserve manual selections through mode switches, native-search activation, reload and session history.
+- Independent `enabled: false` hard disable; retain explicit settings and CLI exclusions in both modes.
+- Preserve successful queries in partial/all-failed search batches with explicit status and bounded errors.
+- Bound aggregate provider HTTP requests and share equivalent in-flight fetch misses with independent waiter cancellation.
+- Find literal text in cached redacted pages without another provider request.
+
+### Fixed
+
+- Preserve successful search queries when a later provider response disconnects during body consumption; keep cancellation, response-size limits and invalid JSON/response shapes fatal.
+- Keep cached finder matches at or after the requested UTF-16 offset, including continuation inside a surrogate pair.
+- Honor later `Retry-After` extensions before dispatching an already-waiting request, without retrying or extending its total HTTP deadline.
+
 ## [0.4.2] - 2026-10-25
 
 ### Fixed

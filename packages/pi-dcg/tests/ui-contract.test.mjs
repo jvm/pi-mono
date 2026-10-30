@@ -5,6 +5,9 @@ import { stripVTControlCharacters } from "node:util";
 import { initTheme, InteractiveMode } from "@earendil-works/pi-coding-agent";
 import { theme } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import { COMMAND, SECOND_COMMAND, deferred, fixture, hookResponse, onBash } from "./session-fixture.mjs";
+import piProcesses from "../../pi-processes/extensions/index.ts";
+import { access } from "node:fs/promises";
+import { join } from "node:path";
 
 /** Isolate private Pi TUI calls here; production DCG uses only public APIs. */
 function selectorHarness() {
@@ -13,6 +16,7 @@ function selectorHarness() {
   const arrivals = [];
   const owner = Object.assign(Object.create(InteractiveMode.prototype), {
     editor: {},
+    extensionDialogs: [],
     editorContainer: { clear() {}, addChild() {} },
     programStatus: { setBlocked() {} },
     ui: {
@@ -26,6 +30,7 @@ function selectorHarness() {
   });
   return {
     owner, selectors,
+    visible: () => owner.extensionDialogs?.at(-1)?.component ?? owner.extensionSelector,
     confirm: (title, message, options) => owner.showExtensionConfirm(title, message, options),
     opened(index) {
       if (selectors[index]) return Promise.resolve(selectors[index]);
@@ -42,21 +47,21 @@ test("real Pi selector smoke: parallel approvals stay visible and independently 
   const first = await ui.opened(0);
   await tick();
   assert.equal(ui.selectors.length, 1, "the second confirmation must not replace the first");
-  assert.equal(ui.owner.extensionSelector, first);
+  assert.equal(ui.visible(), first);
   assert.ok(stripVTControlCharacters(first.render(80).join("\n")).includes(COMMAND));
   assert.ok(h.confirmations[0].message.startsWith("\u001b[22m"));
   const bodyColor = theme.fg("text", "Command:").split("Command:")[0];
   assert.ok(first.render(80).join("\n").includes(`${bodyColor}Command:`));
   first.handleInput("\n"); // Yes on the actual Pi selector.
   const second = await ui.opened(1);
-  assert.equal(ui.owner.extensionSelector, second);
+  assert.equal(ui.visible(), second);
   assert.ok(stripVTControlCharacters(second.render(80).join("\n")).includes(SECOND_COMMAND));
   second.handleInput("j"); // No, then confirm.
   second.handleInput("\n");
   const result = await running;
   assert.deepEqual(h.executed.map(call => call.command), [COMMAND]);
   assert.deepEqual(result.nestedCalls.calls.map(call => call.status), ["ok", "error"]);
-  assert.equal(ui.owner.extensionSelector, undefined);
+  assert.equal(ui.visible(), undefined);
 });
 
 test("real Pi selector smoke: turn abort dismisses a direct bash confirmation", { timeout: 5000 }, async t => {
@@ -66,11 +71,11 @@ test("real Pi selector smoke: turn abort dismisses a direct bash confirmation", 
   await ui.opened(0);
   await h.session.abort();
   await running;
-  assert.equal(ui.owner.extensionSelector, undefined);
+  assert.equal(ui.visible(), undefined);
   assert.equal(h.executed.length, 0);
 });
 
-test("Pi 1.1.0 limitation: another extension's concurrent dialog is not in DCG's queue", { timeout: 5000 }, async t => {
+test("host characterization: another extension's concurrent dialog is not in DCG's queue", { timeout: 5000 }, async t => {
   const ui = selectorHarness();
   const h = await fixture(t, {
     uiMode: "tui", confirm: ui.confirm,
@@ -86,12 +91,48 @@ test("Pi 1.1.0 limitation: another extension's concurrent dialog is not in DCG's
   // This characterizes a host limitation, not an accepted safety guarantee:
   // two extension dialogs exist, but only the last one occupies the editor.
   assert.equal(ui.selectors.length, 2);
-  assert.equal(ui.owner.extensionSelector, ui.selectors[1]);
+  assert.equal(ui.visible(), ui.selectors[1]);
   assert.equal(h.executed.length, 0, "displacing a dialog must not approve either call");
   await h.session.abort();
   await running;
-  assert.equal(ui.owner.extensionSelector, undefined);
+  assert.equal(ui.visible(), undefined);
   assert.equal(h.executed.length, 0);
+});
+
+test("host characterization: DCG startup overlaps process PTY input approval", { timeout: 5000 }, async t => {
+  const ui = selectorHarness();
+  const h = await fixture(t, {
+    omitShell: true, after: [piProcesses], uiMode: "tui", confirm: ui.confirm,
+    process: async ({ command }) => hookResponse(command.includes("startup-marker") ? "ask" : "allow"),
+  });
+  const launched = await h.run("bash", { command: "read -r answer; printf 'received:%s' \"$answer\"", tty: true, mode: "service" });
+  const id = launched.details.session_id;
+  const running = h.script(`text(await Promise.allSettled([
+    tools.bash({command:"printf approved > startup-marker",mode:"foreground"}),
+    tools.write_stdin({session_id:${JSON.stringify(id)},chars:"never\\\\n"})
+  ]));`);
+  await ui.opened(1);
+  assert.equal(ui.selectors.length, 2);
+  assert.equal(ui.visible(), ui.selectors[1]);
+  if (typeof ui.owner.pushExtensionDialog === "function") {
+    // Pi 1.4 owns a dialog stack. Deny the visible call and verify restoration
+    // of the other extension's confirmation, without approving either action.
+    const top = ui.selectors[1];
+    top.handleInput("j");
+    top.handleInput("\n");
+    await tick();
+    assert.equal(ui.visible(), ui.selectors[0]);
+    ui.selectors[0].handleInput("j");
+    ui.selectors[0].handleInput("\n");
+    t.diagnostic("Host dialog stack restores independent confirmations (current host).");
+  } else t.diagnostic("Host limitation: independent extension dialogs share one selector slot; the first is displaced. No local mitigation authorized (D4).");
+  await assert.rejects(access(join(h.ctx.cwd, "startup-marker")));
+  await h.session.abort();
+  await running;
+  const output = await h.run("process_output", { session_id: id });
+  assert.doesNotMatch(output.details.output, /never|received/);
+  assert.equal(output.details.status, "running");
+  assert.equal(ui.visible(), undefined);
 });
 
 for (const excludeFromContext of [false, true]) {

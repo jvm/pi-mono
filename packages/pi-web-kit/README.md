@@ -11,7 +11,63 @@ Give [Pi](https://pi.dev) current web knowledge, authoritative library docs, and
 - **Find proven implementation patterns** — search practical usage, setup, migrations, and error context across real code.
 - **Spend context wisely** — compact search results, chunked page reads, bounded output, and fetch caching keep research useful without overwhelming the model.
 - **Compose research in scripts** — typed results let codemode filter and join data without parsing model-facing text.
+- **Follow the active interaction mode** — web schemas are deferred when codemode is active and direct otherwise, with no exposure setting.
 - **Choose your providers** — mix Exa, TinyFish, Brave, Firecrawl, markdown.new, and Context7 based on coverage, cost, and credentials.
+
+## Partial search and shared resource limits
+
+`web_search` returns top-level `status: "success" | "partial" | "failed"`.
+Each query has `status: "success" | "failed"`; failed queries have empty results
+and `error: {code: "provider_request_failed", message}`. Even all-failed
+batches resolve as unmistakable failure data. Inspect status, not just whether
+the call resolved. Independent queries retain input order and continue after
+operational HTTP/network failures. Invalid arguments, cancellation, policy
+blocks and invalid required provider shapes still reject. Batches validate
+before dispatch and execute queries sequentially.
+
+Across calls, provider/account/header scopes allow three HTTP requests at once,
+up to 100 queued requests, and 128 live scopes. Deadlines include queue wait and
+body reads. Batch endpoints count as one HTTP request, not one logical URL.
+HTTP 429 `Retry-After` cooldowns are capped at 30 seconds; requests are not
+automatically retried. Later responses can extend an existing cooldown; waiting
+requests recheck it within their original total HTTP deadline. Separate permitted requests still overlap.
+Equivalent fetch misses share in-flight work, including across extension
+instances loaded from this package module. Cache identity includes account,
+URL, provider defaults and material options. Refresh has its own flight identity.
+One cancelled waiter does not cancel work needed by another; the last cancels
+shared transport. Completed caching remains separate from in-flight sharing.
+
+## Find text already in cache
+
+Fetch normally first, then use `web_fetch({url, find: "literal"})`.
+Finding is **cache-only**: a missing/expired page returns an explicit error,
+never a disguised provider request. `findCaseSensitive` defaults to true;
+false uses Unicode case-insensitive literal matching. No caller regex is run.
+
+`find` is limited to 256 UTF-16 code units. Finder results contain `term`,
+`caseSensitive`, `units: "UTF-16"`, `from`, `scanned`, `count`,
+`omittedMatchCount`, `matches`, and optional `nextFrom`. Each match has
+`offset`, `length`, `excerptOffset`, and `excerpt`. Offsets use UTF-16 code
+units, like existing range reads. Counts cover non-overlapping matches at or
+after `findFrom` (default zero); empty pages/no matches produce zero counts.
+At most 20 matches are returned across a batch, with 80 code units of context
+on each side. Continue with `findFrom: nextFrom`. Matching runs after redaction.
+The response/cache size limits still apply, including the 50,000-byte JSON
+budget. Finder options cannot combine with range `offset`/`limit` or `refresh`.
+
+```js
+const search = await tools.web_search({ queries: ["topic A", "topic B"], purpose: "Compare sources" });
+const sources = search.queries.filter(q => q.status === "success").flatMap(q => q.results);
+const pages = await tools.web_fetch({ urls: sources.slice(0, 3).map(r => r.url) });
+text(pages.results.map(r => ({ url: r.url, error: r.error, range: r.range })));
+// Use the exact same material fetch options as the original request.
+const found = await tools.web_fetch({ url: sources[0].url, find: "relevant phrase" });
+text(found.results);
+```
+
+With active codemode, use namespace/tool discovery even at inline budget zero.
+Without active codemode, tools are direct. Typed extraction is not implemented;
+no page content is sent to a new inference provider.
 
 ## Installation
 
@@ -40,7 +96,7 @@ pi -e /path/to/pi-mono/packages/pi-web-kit --web-provider-fetch markdown_new --p
 ```
 
 This is an npm-compatible TypeScript Pi package. Bun is not required.
-Use Pi 1.1.0 or newer and Node.js >=22.19.0 for the structured tool contracts.
+Use Pi 1.4.0 and Node.js >=22.19.0 for the supported structured tool contracts.
 
 ## Quick usage
 
@@ -130,6 +186,7 @@ Example:
 
 ```json
 {
+  "enabled": true,
   "provider_search": "firecrawl",
   "provider_fetch": "markdown_new",
   "apiKeys": {
@@ -145,6 +202,61 @@ Example:
 ```
 
 Do not commit config files containing secrets. Project `.pi-web-kit.json` is ignored by this repo's `.gitignore`, but other repositories may need their own ignore rule.
+
+### Automatic tool exposure
+
+There is no exposure setting:
+
+| Native tool selection | Web tools |
+| --- | --- |
+| `codemode` active, in either `on` or `only` mode | Enabled tools use deferred exposure; their schemas are initially undeclared. |
+| `codemode` inactive or unavailable | Direct exposure, preserving the user's selected tools. |
+| Only `tool_search` active | Direct exposure; search alone does not trigger deferral. |
+| Package `enabled: false`, or an explicit per-tool exclusion | Hidden or host-excluded; not callable. |
+
+Enable native `codemode` using Pi's normal tool selection, for example
+`defaultTools: ["+codemode", "+tool_search"]`. This package does not enable it
+or register a loader. Merely configuring `codemode.mode` or registering an
+inactive codemode tool does not enable deferral. Pi's `on`/`only` and
+`inlineBudget` settings still control its other tools independently.
+
+Scripts can use `searchTools("queries", { namespace: "web" })`,
+`describeTool("web_search")`, and then `tools.web_search(...)`. Nested calls do
+not activate direct declarations. Native `tool_search` can explicitly activate
+individual deferred tools for later direct calls. A short `web_research`
+prompt section advertises discovery because native codemode deliberately
+omits deferred tools from its initial catalog. Full schemas and detailed
+guidance remain available through discovery, including at inline budget zero.
+Explicit native-search activation declares a deferred web tool in either
+codemode mode. Pi's `only` policy still governs other direct tools independently.
+
+Turning codemode on withdraws prior web declarations, without disabling their
+nested access. Turning it off restores the prior direct selection, not every
+registered tool. A manually inactive direct tool stays inactive and is not
+converted into a callable deferred tool. Explicit activation can restore it.
+Native-search activation survives reload. An observed removal of an explicitly
+active web tool is remembered as a manual deactivation; automatically
+undeclared tools are not mistaken for manually disabled ones.
+
+**Deferred is not disabled.** Removing an already inactive deferred name from
+the active set has no observable effect: it remains discoverable and callable.
+For a reliable hard disable, set `"enabled": false` for this package, use an explicit
+`defaultTools` `-tool_name` entry for one tool, or use Pi's CLI exclusions.
+Hard-disabled tools remain hidden through discovery, activation attempts,
+credential changes and reload. A hard disable blocks new calls, not provider
+requests already dispatched. Config precedence still applies: a trusted
+project config can override global config; CLI exclusions remain host-owned.
+These controls do not change provider billing or authorize network requests.
+
+Exposure is reconciled at startup/reload, before prompts, at turn/tool boundaries,
+and on tree navigation or session shutdown. Switching during a script does not
+cancel it: subsequent nested calls must still be permitted by the new selection
+and exclusions. Pi owns declaration updates; historical schemas in the
+conversation are not erased. The same selection rule applies in TUI, print,
+JSON and RPC. Optional tools still require their provider keys.
+
+Remove the earlier, unreleased `toolExposure` config key if present; it is rejected
+rather than silently ignored. There is no `auto`, `direct`, or `deferred` override.
 
 ### CLI overrides
 
@@ -489,24 +601,23 @@ The namespace is `web`, not a name prefix: calls remain `tools.web_fetch(…)`.
 hints are read-only, non-destructive, idempotent, and open-world: repeated reads
 can return different content and incur provider charges.
 
-Direct exposure remains the default, and codemode is optional. No package-level
-deferred/codemode exposure switch is added: it would make inactive direct tools
-nested-callable and change the meaning of disabling them. Use Pi's `codemode.mode`
-(`on` or `only`) and `inlineBudget` to reduce declarations while retaining the
-active-tool boundary. Optional research tools still require their provider keys.
-Explicit `defaultTools` `-name` entries are honored at late registration; reload
-restores Pi's active selection rather than re-enabling manually disabled tools.
-New optional tools activate when credentials first become available on reload,
-including existing positive `defaultTools` selections. Previously registered
-tools are not force-reactivated, even if settings still positively select them.
-The extension records only previously registered tool names in branch-local
-`pi-web-kit:registered-tools` session metadata, outside model context; it does
-not store activation choices or credentials. The record is refreshed before
-reload so navigating to older branch history cannot revive a manually disabled
-tool. Older sessions without this metadata preserve inactivity on their first
-reload, so they may require explicit activation or a restart.
-Malformed/unknown-version metadata uses the same
-conservative fallback.
+Codemode is optional. Exposure follows its active selection as
+[described above](#automatic-tool-exposure); no package exposure setting is needed.
+Newly available optional tools follow the current mode: direct activation in
+normal interactions, discovery/nested access in codemode. Existing manual
+deactivations are retained when credentials return. A stable positive
+`defaultTools` entry does not override a later manual deactivation; a newly
+added positive entry can deliberately restore that selection.
+
+Version 2 branch-local `pi-web-kit:registered-tools` metadata stores bounded
+arrays of this package's fixed tool names: known tools, the direct selection,
+last applied declarations, and positive settings, plus the exposure enum.
+It contains no credentials, provider configuration or usage data and stays
+outside model context. This distinguishes automatic deferral from manual
+choices through reload, resume, fork and tree navigation. Older sessions
+without selection metadata, or with malformed/unknown-version metadata,
+use conservative native restoration; explicit activation may be needed
+rather than guessing whether an inactive tool was manually disabled.
 CLI exclusions remain host-enforced.
 
 ## Privacy and security

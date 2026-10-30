@@ -12,6 +12,43 @@ Create and edit images without leaving [Pi](https://pi.dev).
 - **Separate image login** — keep Pi chat on `openai` OAuth while the extension handles image authentication.
 - **Scripted workflows without image payloads** — generate recoverable originals through codemode and load images only for explicit display.
 
+## Recovery and parallel requests
+
+`codex_list_image_artifacts({offset?, limit?, revision?})` returns metadata from
+the same validated current-branch records as `/image-artifacts`, never bytes
+or arbitrary manifests. It does not generate an image or consume image quota.
+Pages default to 8 records (maximum 20) and 50,000 bytes. Continue with returned
+`nextOffset` and `revision`; restart at offset zero if records change.
+Each item includes `artifact`, `toolCallId` and `availability` (`present`,
+`missing`, `unavailable`). Availability is a filesystem snapshot, not proof of
+original contents or permission to read another branch.
+
+```js
+// Recover a generation completed before a later script error; do not regenerate.
+const r = await tools.codex_list_image_artifacts({});
+text(r.artifacts.map(x => ({ path: x.artifact.path, availability: x.availability })));
+```
+
+Artifact results additionally return `generationDurationMs`, `routingProvider`,
+`routingModel`, optional `responseId`, `imageGenerationId`, and `reportedImage`.
+The latter is an allowlisted, bounded backend report, not measured dimensions,
+transparency, or proof of the served model. Inspect pixels separately.
+
+Direct and artifact generation share account-local admission: two active
+operations, eight queued operations, and at most 32 account scopes per process
+module. The five-minute total deadline includes admission wait; network work
+also keeps its existing deadline. Queueing is not authorization to generate
+extra assets. Approved arguments are snapshotted before waits. Storage is
+reserved after admission and before generation, not for every queued call.
+Cancellation/reload releases queued work; completed originals are retained.
+Cancellation after dispatch can still consume quota. There is no prompt-based
+deduplication or new automatic retry policy.
+
+Backend counters remain informational in `details.usage`, not Pi ledger
+entries, verified charges or subscription-quota measurements. Unknown costs are
+unknown, not zero. Goal token budgets do not enforce image quota. Image ledger
+mapping is explicitly deferred until a reliable provider contract is approved.
+
 ## Install
 
 ```sh
@@ -60,7 +97,7 @@ The tool reports generation stages and the backend's returned size, quality, bac
 
 ### Direct and codemode tools
 
-Use Pi 1.1.0 or newer and Node.js >=22.19.0.
+Use Pi 1.4.0 and Node.js >=22.19.0.
 
 | Tool | Reachability | Delivery |
 | --- | --- | --- |
@@ -160,7 +197,7 @@ catalog entry. Pi's `models.generateImages()` and
 backend. Continue using the direct or artifact tool above. OpenRouter image
 models use their own credentials/billing and are not a subscription fallback.
 
-A native adapter is deferred on the Pi 1.1.0 baseline. The generic image
+A native adapter remains deferred; the historical assessment used Pi 1.1.0. The generic image
 context provides text/image blocks, not this package's save modes, routing
 override, output-format control, or branch-aware recent-image selection.
 Generic calls also do not inherit the image tools' approval hooks or exclusions.
@@ -213,7 +250,7 @@ The extension owns an image-capable ChatGPT OAuth flow, registered as **Codex Im
 
 Complete the browser login with your ChatGPT account. You can also run `/login` and select **Codex Images (ChatGPT subscription)**. The browser redirects to `http://localhost:1455/auth/callback`. If the callback cannot reach Pi, paste the **full redirect URL** into Pi's login prompt, not into chat. Login expires after ten minutes.
 
-Use Pi 1.1.0 or later. Pi stores the `codex-images` credential in its agent auth store (normally `~/.pi/agent/auth.json`). `/logout codex-images` removes that credential without changing your chat login. No credential files are created by the extension itself.
+Use Pi 1.4.0. Pi stores the `codex-images` credential in its agent auth store (normally `~/.pi/agent/auth.json`). `/logout codex-images` removes that credential without changing your chat login. No credential files are created by the extension itself.
 
 The package implements the Codex-compatible OAuth protocol itself. It neither imports Pi's `openai-codex` OAuth helpers nor requires the Codex app or its credential store. It still depends on OpenAI continuing to accept that public OAuth client and private image endpoint; this is not a new OAuth application registered with OpenAI.
 

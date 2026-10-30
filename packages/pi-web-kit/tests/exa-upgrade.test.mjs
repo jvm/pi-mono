@@ -196,7 +196,9 @@ test("diagnostic input is allowlisted, bounded and cannot interrupt successful c
 test("diagnostics for HTTP failures and cancellation never echo raw bodies or abort reasons", async t => {
   const h = harness(t);
   t.mock.method(globalThis, "fetch", async () => new Response("private-backend-body", { status: 429 }));
-  await assert.rejects(h.call("web_search", { query: "private-query", purpose: "Find sources" }), /HTTP 429/);
+  const failed = await h.call("web_search", { query: "private-query", purpose: "Find sources" });
+  assert.equal(failed.structuredContent.status, "failed");
+  assert.match(failed.structuredContent.queries[0].error.message, /HTTP 429/);
   assert.equal(h.events[0].data.error, "http");
   assert.equal(h.events[0].data.httpStatus, 429);
   const controller = new AbortController();

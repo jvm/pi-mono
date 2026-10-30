@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { beforeEach } from "node:test";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
-import { createAgentSession, createCodemodeExtension, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, createCodemodeExtension, createToolSearchExtension, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import extension from "../extensions/index.ts";
 import fast from "../../pi-fast/extensions/index.ts";
 import codexTools from "../../pi-codex-tools/extensions/index.ts";
@@ -75,6 +75,56 @@ function mockResponses(t, outputs) {
   });
   return requests;
 }
+
+test("zero-budget deferred discovery survives checkpoints, activation and reload without leaking intermediates", async t => {
+  const code = `
+    const ns=await describeNamespace("fixture_research");
+    if(!ns.tools.includes("fixture_deferred") || ns.tools.includes("fixture_hidden")) throw new Error("Bad discovery");
+    if(ALL_TOOLS.some(t=>t.name==="fixture_model_only")) throw new Error("Model-only tool leaked");
+    const r=await tools.fixture_deferred({}); text({length:r.value.length});
+  `;
+  const script = id => ({ type: "custom_tool_call", id: `ct_${id}`, call_id: id, name: "codemode", input: code, status: "completed" });
+  const requests = mockResponses(t, [
+    [checkpoint(), script("before")], [text("msg_1", "done")],
+    [{ type: "function_call", id: "fc_search", call_id: "search", name: "tool_search",
+      arguments: '{"query":"fixture_deferred","limit":1}', status: "completed" }],
+    [text("msg_2", "loaded")],
+    [checkpoint("cmp_2"), script("after")], [text("msg_3", "done")],
+  ]);
+  const h = await harness({
+    settings: { defaultTools: ["codemode", "tool_search"] },
+    factories: [
+      createCodemodeExtension({ mode: "only", inlineBudget: 0 }), createToolSearchExtension(),
+      pi => {
+        for (const [name, exposure] of [["fixture_deferred", "deferred"], ["fixture_hidden", "hidden"], ["fixture_model_only", "model-only"]]) {
+          pi.registerTool({
+            name, exposure, label: name, description: name,
+            namespace: { name: "fixture_research", instructions: "Synthetic discovery contract." },
+            parameters: { type: "object", properties: {}, additionalProperties: false },
+            outputSchema: { type: "object", properties: { value: { type: "string" } }, required: ["value"] },
+            async execute() {
+              const data = { value: "PRIVATE_INTERMEDIATE_SENTINEL".repeat(4000) };
+              return { content: [{ type: "text", text: "Private fixture" }], structuredContent: data, details: undefined };
+            },
+          });
+        }
+      },
+    ],
+  });
+  t.after(() => h.close());
+  await h.session.prompt("discover before checkpoint");
+  const initial = JSON.stringify(requests[0].tools);
+  assert.ok(!initial.includes('"name":"fixture_deferred"'), "discovery must not promote deferred schemas");
+  await h.session.prompt("activate fixture_deferred");
+  assert.ok(h.api.getActiveTools().includes("fixture_deferred"));
+  await h.session.reload();
+  await h.session.prompt("discover after reload");
+  assert.deepEqual(h.errors, []);
+  assert.ok(h.session.messages.filter(m => m.role === "toolResult").every(m => !m.isError));
+  assert.ok(!JSON.stringify(requests).includes("PRIVATE_INTERMEDIATE_SENTINEL"), "consumed intermediate values are not transcript entries");
+  assert.ok(!JSON.stringify(requests).includes('"name":"fixture_hidden"'));
+  assert.equal(requests.length, 6);
+});
 
 test("real Pi enables public server compaction by default without a command or saved setting", async (t) => {
   const requests = mockResponses(t, [[checkpoint(), text("msg_1", "answer")], [text("msg_2", "next")]]);
@@ -147,6 +197,27 @@ function inlineTools(payload) {
   payload.input.unshift({ type: "additional_tools", role: "developer", tools: payload.tools });
   delete payload.tools;
 }
+const definitions = tools => tools.flatMap(tool => tool.type === "namespace" ? tool.tools : [tool]);
+
+test("known reasoning configuration stays chronological across checkpoint replay", async t => {
+  const update = { type: "configuration_update", reasoning: { effort: "low" } };
+  const requests = mockResponses(t, [[checkpoint(), text("msg_effort", "kept")], [text("msg_next", "next")]]);
+  const h = await harness({ extensionLast: true, factories: [pi => pi.on("before_provider_request", event => {
+    inlineTools(event.payload);
+    const summary = event.payload.input.findIndex(item => JSON.stringify(item).includes("<summary>"));
+    if (summary >= 0) event.payload.input.splice(summary + 1, 0, structuredClone(update));
+    else event.payload.input.push(structuredClone(update));
+  })] });
+  t.after(() => h.close());
+  await h.session.prompt("old");
+  await h.session.prompt("next");
+  const input = requests[1].input;
+  const index = input.findIndex(item => item.type === "compaction");
+  assert.ok(index >= 0);
+  assert.deepEqual(input[index + 1], update);
+  assert.equal(input.slice(index + 2).find(item => item.type !== "configuration_update").id, "msg_effort");
+  assert.deepEqual(h.errors, []);
+});
 
 test("inline tool declarations automatically gain a stable namespace base and adopt checkpoints", async (t) => {
   const requests = mockResponses(t, [[checkpoint(), text("msg_1", "answer")]]);
@@ -183,13 +254,17 @@ test("checkpoint continuation preserves inline positions and tools during new au
     assert.equal(requests.length, 2);
     assert.ok(requests[0].context_management);
     assert.ok(requests[1].context_management);
-    assert.deepEqual(requests[1].tools[0].tools, requests[0].tools);
+    assert.deepEqual(definitions(requests[1].tools), definitions(requests[0].tools));
     const input = requests[1].input;
     const index = input.findIndex((item) => item.type === "compaction");
     assert.ok(index >= 0);
-    assert.deepEqual(input[index + 1], call);
-    assert.equal(input[index + 2].type, "function_call_output");
-    assert.equal(input[index + 2].output, "fixture result");
+    const suffix = input.slice(index + 1);
+    const configs = suffix.filter(item => item.type === "configuration_update");
+    assert.ok(configs.every(item => Object.keys(item).length === 2 && Object.keys(item.reasoning).length === 1));
+    const replayed = suffix.filter(item => item.type !== "configuration_update");
+    assert.deepEqual(replayed[0], call);
+    assert.equal(replayed[1].type, "function_call_output");
+    assert.equal(replayed[1].output, "fixture result");
     assert.equal(input.filter((item) => item.type === "additional_tools").length, 0);
     assert.deepEqual(h.errors, []);
   } finally { await h.close(); }
@@ -211,7 +286,7 @@ test("mode-off and reload repair saved checkpoint replay with inline tool declar
     const index = input.findIndex((item) => item.type === "compaction");
     assert.ok(index >= 0);
     assert.equal(input[index + 1].type, "additional_tools");
-    assert.deepEqual(input[index + 1].tools, requests[0].tools);
+    assert.deepEqual(input[index + 1].tools, definitions(requests[0].tools));
     assert.equal(requests[1].context_management, undefined);
     assert.deepEqual(h.errors, []);
   } finally { await h.close(); }
@@ -314,7 +389,7 @@ for (const field of ["configuration_update", "previous_response_id", "truncation
       const requests = mockResponses(t, [[text("msg_1", "answer")]]);
       const h = await harness({ extensionLast: true, factories: [(pi) => pi.on("before_provider_request", (event) => {
         const payload = event.payload;
-        if (field === "configuration_update") payload.input.push({ type: field, reasoning: { effort: "low" } });
+        if (field === "configuration_update") payload.input.push({ type: field, reasoning: { effort: "low" }, unsupported: true });
         else payload[field] = field === "context_management" ? [{ type: "compaction", compact_threshold: 5555 }] : "fixture";
       })] });
       try {

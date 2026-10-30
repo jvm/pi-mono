@@ -8,6 +8,22 @@ import { CompletionCoordinator } from "../src/completion.js";
 import { clean, renderCall, renderResult } from "../src/render.js";
 import { ProcessManager } from "../src/process-manager.js";
 
+const PROCESS_NAMESPACE = {
+  name: "processes",
+  description: "Owned shell processes, bounded output, waits and approved terminal input.",
+  instructions: [
+    "Start independent finite work with bash mode:'background'; final output arrives automatically for the current task. Service mode is for long-lived work and does not prove readiness.",
+    "When results become dependencies and independent work is exhausted, use one event-driven process_wait. A wait deadline or cancellation does not stop the process.",
+    "Inspect status, exit_code, signal, timed_out and wait_status; mixed outcomes remain per-process data. Do not infer success from a resolved call.",
+    "Read bounded output with process_output using next_cursor or tail:true. dropped_bytes reports output loss; unread_bytes reports more retained output. Do not poll merely to check completion.",
+    "Nested results do not consume background delivery unless acknowledge:true is explicit on process_output/process_wait. Acknowledge only completed results being handled, not discarded script results.",
+    "process_list does not consume output. process_kill stops only owned processes. Invalid IDs and arguments reject. Every non-empty PTY write requires a separate user approval; no approval transfers to another call.",
+    "Discovery only lists callable tools: bash may be excluded while inspection/wait tools remain available. Use describeTool for their exact schemas.",
+    'Recipe: const r=await tools.bash({command:"npm test",mode:"background"}); text({id:r.session_id,status:r.status});',
+    'Recipe when results are needed: const r=await tools.process_wait({session_ids:ids,acknowledge:true}); text(r.processes.map(p=>({id:p.session_id,status:p.status,exit:p.exit_code,signal:p.signal,timed_out:p.timed_out,diagnostic:p.output.slice(-1000)})));',
+  ].join("\n"),
+};
+
 const SessionId = Type.String({ minLength: 1, maxLength: 64, description: "Owned process ID returned by a managed bash call." });
 const RunMode = Type.Union([Type.Literal("foreground"), Type.Literal("background"), Type.Literal("service")], {
   description: "Default foreground: wait for final output. Background: finite independent work with task-scoped automatic output. Service: indefinite work, no automatic turn.",
@@ -224,14 +240,14 @@ export default function piProcesses(pi: ExtensionAPI): void {
   // Local executor/guard contract, not model-supplied input or a provider schema keyword.
   Object.defineProperty(bashParameters, Symbol.for("pi-processes.bash-workdir.v1"), { value: true });
   pi.registerTool({
-    name: "bash", label: "Bash",
-    description: "Execute a local shell command. Without mode, preserves built-in bash output, errors, and timeout behavior. Explicit foreground/background/service modes use managed processes. Background returns promptly and delivers final output automatically to this task: continue independent work, do not poll for completion. Service does not auto-resume. macOS/Linux; not a sandbox.",
+    name: "bash", label: "Bash", namespace: PROCESS_NAMESPACE,
+    description: "Execute local shell commands. Without mode, preserve built-in bash output/errors/timeouts. Explicit foreground/background/service modes use managed processes. Background returns promptly and automatically delivers final output for this task; continue independent work, do not poll. Service does not auto-resume. macOS/Linux; not a sandbox.",
     promptSnippet: "Execute commands in foreground, background, or service mode.",
     promptGuidelines: [
       "Use command for shell text and timeout in seconds. Do not use cmd, timeout_ms, or max_output_chars.",
       "Omit mode for ordinary bash. Set mode explicitly for managed execution; workdir, tty, title, and max_output_tokens require mode.",
       "Use mode:'foreground' when the next action needs the result or no independent work remains.",
-      "Use mode:'background' for finite work that can overlap independent actions. Completion includes output automatically. Do not repeatedly poll, sleep, or read output just to check completion. If no independent work remains, use one process_wait or end the response; completion resumes this task.",
+      "Use mode:'background' for independent finite work; final output auto-resumes this task. Do not poll, sleep, or read output merely to check completion. When independent work is exhausted, use one process_wait or end the response.",
       "Use mode:'service' for dev servers and watchers. A running process is not proof of readiness; inspect output or perform a separate readiness check when needed.",
       "Run independent calls concurrently. Do not edit inputs while validation reads them; re-run validation after relevant edits. Results do not validate subsequent file changes.",
       "input_changes_observed warns that Pi file-editing tools ran during the command. Re-run validation before claiming it covers those edits. This is conservative and does not detect external changes.",
@@ -311,7 +327,7 @@ export default function piProcesses(pi: ExtensionAPI): void {
   });
 
   pi.registerTool({
-    name: "write_stdin", label: "Send process input",
+    name: "write_stdin", label: "Send process input", namespace: PROCESS_NAMESPACE,
     description: "Send approved text to a PTY process. Each non-empty write requires approval. Empty chars remain a legacy consuming poll; prefer process_output or one process_wait instead of repeated polls.",
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     executionMode: "parallel",
@@ -350,7 +366,7 @@ export default function piProcesses(pi: ExtensionAPI): void {
   });
 
   pi.registerTool({
-    name: "process_output", label: "Read process output",
+    name: "process_output", label: "Read process output", namespace: PROCESS_NAMESPACE,
     description: "Read useful partial or final output immediately without waiting or consuming another reader's output. Use next_cursor for incremental reads. Do not repeatedly read just to check completion; background tasks deliver automatically.",
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     executionMode: "parallel",
@@ -370,7 +386,7 @@ export default function piProcesses(pi: ExtensionAPI): void {
   });
 
   pi.registerTool({
-    name: "process_wait", label: "Wait for processes",
+    name: "process_wait", label: "Wait for processes", namespace: PROCESS_NAMESPACE,
     description: "One event-driven dependency wait for any or all selected processes. Use only after independent work is exhausted. Returns on completion, deadline, cancellation, or queued user input; never stops the processes. No repeated model polling is needed.",
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     executionMode: "parallel",
@@ -406,7 +422,7 @@ export default function piProcesses(pi: ExtensionAPI): void {
   });
 
   pi.registerTool({
-    name: "process_kill", label: "Stop process",
+    name: "process_kill", label: "Stop process", namespace: PROCESS_NAMESPACE,
     description: "Stop a session-owned process group with SIGTERM, then SIGKILL. Does not stop processes owned by other sessions.",
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     executionMode: "parallel",
@@ -424,7 +440,7 @@ export default function piProcesses(pi: ExtensionAPI): void {
   });
 
   pi.registerTool({
-    name: "process_list", label: "List processes",
+    name: "process_list", label: "List processes", namespace: PROCESS_NAMESPACE,
     description: "List retained process sessions and exit status without consuming output.",
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     executionMode: "parallel",

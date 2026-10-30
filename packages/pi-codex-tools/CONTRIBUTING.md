@@ -33,7 +33,7 @@ Before opening a pull request:
 ## Code of conduct
 
 This project follows the Contributor Covenant Code of Conduct.
-## Pi 1.1.0 terminal audit
+## Pi 1.4.0 terminal contract tests
 
 From the monorepo root, run `node --import tsx --test tests/tui-contracts.test.mjs`.
 The suite uses actual regular/fullscreen tool shells, theme invalidation, resize,
