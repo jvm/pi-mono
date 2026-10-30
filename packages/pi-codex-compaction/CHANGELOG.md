@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-10-30
+
 ### Changed
 
 - Target Pi 1.4.0 for development and contract tests; older hosts are no longer test targets. Pi remains a host-supplied peer dependency.

@@ -1,6 +1,6 @@
 {
   "name": "pi-subs-usage",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Show active AI subscription quotas and credit usage in Pi's status bar.",
   "type": "module",
   "license": "MIT",

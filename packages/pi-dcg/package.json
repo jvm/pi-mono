@@ -1,6 +1,6 @@
 {
   "name": "pi-dcg",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Guard Pi shell commands with Destructive Command Guard.",
   "type": "module",
   "license": "MIT",
