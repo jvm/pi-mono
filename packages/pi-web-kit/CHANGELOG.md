@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Changed
+
+- Target Pi 1.4.0 for development and contract tests; older hosts are no longer test targets. Pi remains a host-supplied peer dependency.
+
 ### Added
 
 - Automatically defer enabled web tools when native codemode is active; keep direct exposure otherwise, without an exposure setting. Add a compact discovery hint and preserve manual selections through mode switches, native-search activation, reload and session history.

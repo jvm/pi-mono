@@ -64,7 +64,7 @@ npm install
 pi -e ./packages/pi-processes
 ```
 
-Requirements: Node >=22.19.0, macOS or Linux, and a Pi host. Public API contracts are tested against Pi 1.1.0. `node-pty` 1.2.0-beta.15 is an optional native dependency: pipes work without it, but `tty:true` fails explicitly if its binding cannot load. This exact upstream prerelease fixes the macOS helper's missing execute permission in stable 1.1.0; no runtime permission repair is needed. A source build may need a C/C++ toolchain, Python, and Node headers. Review npm's lifecycle-script policy if native installation is disabled.
+Requirements: Node >=22.19.0, macOS or Linux, and Pi 1.4.0. Public API contracts target Pi 1.4.0 only. `node-pty` 1.2.0-beta.15 is an optional native dependency: pipes work without it, but `tty:true` fails explicitly if its binding cannot load. This exact upstream prerelease fixes the macOS helper's missing execute permission in stable 1.1.0; no runtime permission repair is needed. A source build may need a C/C++ toolchain, Python, and Node headers. Review npm's lifecycle-script policy if native installation is disabled.
 
 Do not load another extension that registers `bash` or `write_stdin` at the same time. This override delegates to the built-in executor, not another extension's bash override. It does not replace user `!`/`!!` execution or Pi's RPC control-channel shell command.
 
@@ -238,7 +238,7 @@ Use the matching checkout of `pi-dcg` for the unreleased unified interface. It c
 
 DCG is optional and inherits its configured fail-open/fail-closed policy. Set `PI_DCG_ON_ERROR=block` for bridge failures to block startup. Without a guard extension, startup follows Pi's normal local-tool behavior; this package does not add a startup confirmation.
 
-**DCG cannot safely validate partial interactive input.** The per-write confirmation is a separate human decision, not a DCG allow decision. Approving input can execute destructive commands or alter a shell's state. Bash hooks apply to the unified entry point, but must account for managed `workdir` and mode. They do not automatically cover `write_stdin`. The Pi 1.1.0 earlier-input-object replacement limitation described in pi-dcg also applies.
+**DCG cannot safely validate partial interactive input.** The per-write confirmation is a separate human decision, not a DCG allow decision. Approving input can execute destructive commands or alter a shell's state. Bash hooks apply to the unified entry point, but must account for managed `workdir` and mode. They do not automatically cover `write_stdin`. The Pi 1.4.0 earlier-input-object replacement limitation described in pi-dcg also applies.
 
 See [SECURITY.md](SECURITY.md) for process-group and isolation limitations.
 

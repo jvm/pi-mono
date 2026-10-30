@@ -24,7 +24,7 @@ For startup-renderer changes, use a disposable Pi profile with one hidden and on
 
 ## Architecture
 
-Three features are wired in `extensions/index.ts`. There is no build step and no test suite; `check` is the only verify step.
+Three features are wired in `extensions/index.ts`. There is no runtime build step; `check` type-checks and `test` compiles disposable fixtures before running the package tests.
 
 1. **Inline skill invocation** (`src/extensions/inline-skill-invocation.ts`): hooks `pi.on("input")` to expand `/skill:name` markers anywhere in the prompt, not just at the start. Replaces each known marker with the skill's `SKILL.md` content before Pi's own expansion runs.
 2. **Skill visibility** (`src/extensions/skill-visibility.ts`): hooks `pi.on("before_agent_start")` to remove hidden skills from the `<available_skills>` system prompt section by re-running `formatSkillsForPrompt` with `disableModelInvocation: true` on hidden entries. Also registers the `/skillful` command, which opens a TUI menu backed by `SettingsList`.

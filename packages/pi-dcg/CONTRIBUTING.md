@@ -42,9 +42,9 @@ Private TUI method access is confined to `tests/ui-contract.test.mjs`; productio
 
 ### Upstream follow-ups from #166
 
-Pi 1.1.0 can detach `tool_call` event input from the actual execution arguments when an earlier handler replaces the object. It also lacks a shared queue for concurrent dialogs from different extensions. The tests that name these limitations deliberately characterize the current behavior; they do not certify it as safe.
+Pi 1.4.0 can detach `tool_call` event input from the actual execution arguments when an earlier handler replaces the object. The named test deliberately characterizes this behavior; it does not certify it as safe. Pi 1.4.0's dialog stack restores independent prompts; the mixed DCG/process test verifies separate denials.
 
-An upstream fix should preserve input identity from the start of dispatch and coordinate terminal dialogs across extensions. Do not patch installed Pi files, replace bash, or weaken DCG policy to hide these gaps. When the host fixes them, update the shared baseline and replace the characterization assertions with the desired guarantees. Do not treat the local #166 work as closing those upstream requirements.
+An upstream fix must preserve input identity from the start of dispatch. Do not patch installed Pi files, replace bash, or weaken DCG policy to hide this gap. When the host fixes it, update the shared baseline and replace the characterization assertions with the desired guarantee. Do not treat the local #166 work as closing that upstream requirement.
 
 ## Pull request checklist
 

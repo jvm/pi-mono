@@ -208,7 +208,11 @@ for (const factories of [[reasoning, compaction, fast, tools], [tools, fast, com
       await h.session.prompt("after checkpoint");
       assert.equal(requests.at(-1).reasoning.effort, "max");
       assert.notEqual(requests.at(-1).input[0].type, "compaction");
-      assert.deepEqual(requests.at(-1).input[1], { type: "configuration_update", reasoning: { effort: "max" } });
+      const input = requests.at(-1).input;
+      const summaryIndex = input.findIndex(item => item.role === "user" && item.content?.some(block =>
+        block.type === "input_text" && block.text.startsWith("The conversation history before this point was compacted")));
+      assert.ok(summaryIndex >= 0, "Pi's summary must be retained after its inline declarations");
+      assert.deepEqual(input[summaryIndex + 1], { type: "configuration_update", reasoning: { effort: "max" } });
       h.session.setThinkingLevel("low");
       await h.session.prompt("after checkpoint change");
       assert.deepEqual(updates(requests.at(-1)).map((u) => u.reasoning.effort), ["max", "low"]);
@@ -281,6 +285,30 @@ test("a user-authored summary prefix is still fingerprinted as user input", () =
   assert.deepEqual(updates(result.payload), []);
 });
 
+test("checkpoint detection preserves and fingerprints leading inline declarations", () => {
+  const declarations = { type: "additional_tools", tools: [
+    { type: "function", name: "fixture", parameters: { type: "object", properties: {} } },
+  ] };
+  const summary = user("The conversation history before this point was compacted into the following summary: fixture");
+  const input = [declarations, summary, assistant("retained"), user("after")];
+  const original = structuredClone(input);
+  const checkpoint = { type: "compaction", id: "fixture-checkpoint" };
+  const first = rewriteReasoning(body(input, "max"), model, [checkpoint]);
+  assert.deepEqual(input, original);
+  assert.deepEqual(first.payload.input, [
+    declarations, summary, { type: "configuration_update", reasoning: { effort: "max" } },
+    assistant("retained"), user("after"),
+  ]);
+  const next = [...input, assistant("answer"), user("next")];
+  const entries = [checkpoint, stateEntry(first.state)];
+  const continued = rewriteReasoning(body(next, "low"), model, entries);
+  assert.deepEqual(updates(continued.payload).map(update => update.reasoning.effort), ["max", "low"]);
+  const redefined = [{ ...declarations, tools: [] }, ...next.slice(1)];
+  const reset = rewriteReasoning(body(redefined, "high"), model, entries);
+  assert.deepEqual(updates(reset.payload).map(update => update.reasoning.effort), ["high"],
+    "changed declarations must invalidate the old fingerprint, not replay old effort");
+});
+
 test("real compaction failure and cancellation leave saved effort metadata intact", async (t) => {
   let compacting = false;
   let cancel = false;
@@ -326,7 +354,9 @@ test("model switches do not apply Astra updates to unsupported models", async (t
     await h.session.prompt("first");
     h.session.setThinkingLevel("high");
     await h.session.prompt("second");
-    await h.session.setModel(h.modelRuntime.getModel("openai-codex", "gpt-5.5"));
+    const otherModel = h.modelRuntime.getModel("openai-codex", "gpt-6.1-sol");
+    assert.ok(otherModel, "The pinned Pi catalog must include the unsupported reasoning-update control");
+    await h.session.setModel(otherModel);
     await h.session.prompt("other model");
     assert.equal(requests.at(-1).reasoning.effort, "high");
     assert.deepEqual(updates(requests.at(-1)), []);

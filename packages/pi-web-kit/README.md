@@ -96,7 +96,7 @@ pi -e /path/to/pi-mono/packages/pi-web-kit --web-provider-fetch markdown_new --p
 ```
 
 This is an npm-compatible TypeScript Pi package. Bun is not required.
-Use Pi 1.1.0 or newer and Node.js >=22.19.0 for the structured tool contracts.
+Use Pi 1.4.0 and Node.js >=22.19.0 for the supported structured tool contracts.
 
 ## Quick usage
 

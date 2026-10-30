@@ -25,7 +25,7 @@ The maintainer will acknowledge reports as soon as practical and coordinate disc
 
 The package does not require API keys and does not read provider credentials. Its model tools can only inspect the current goal, create a new explicitly requested goal when none exists, or mark the current goal `complete`/`blocked`.
 
-On supported Pi runtimes (Pi 1.1.0 or newer), `update_goal` uses Pi's
+On the supported Pi 1.4.0 runtime, `update_goal` uses Pi's
 `model-only` exposure. Codemode discovery and nested dispatch through
 `ctx.executeTool()` cannot reach it. A direct update must be the only tool call
 in its assistant turn, after the model has inspected verification results.

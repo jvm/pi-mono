@@ -14,7 +14,7 @@ and continue inference without Pi stopping for a separate summary request.
 
 ### Codemode and current-host compatibility
 
-Compatibility tests exercise Pi 1.1.0 and 1.4.0 in isolated installations,
+Compatibility tests target Pi 1.4.0 only in an isolated installation,
 including zero-inline-budget discovery, deferred activation, reload and
 checkpoint replay. Consumed structured intermediates do not enter conversation
 history unless the script prints them. Hidden/model-only tools stay outside
@@ -33,7 +33,7 @@ updates retain their original positions and preserve cached prefixes. Each
 compaction starts a fresh base from Pi's current tool state. There is no
 tool-strategy setting or opt-in.
 
-Requires **Pi 1.1.0 or later**. The package name is unchanged, but the legacy
+Targets **Pi 1.4.0**. The package name is unchanged, but the legacy
 `openai-codex` provider is no longer supported.
 
 ## Installation
@@ -56,7 +56,7 @@ pi -e /path/to/pi-mono/packages/pi-codex-compaction
 
 Pi supplies the host packages through its extension loader; this package does
 not install or resolve a separate physical copy of Pi AI. No manual dependency
-installation is required. See Pi's [package dependency contract](https://github.com/earendil-works/pi/blob/v1.1.0/packages/coding-agent/docs/packages.md#declare-dependencies).
+installation is required. See Pi's [package dependency contract](https://github.com/earendil-works/pi/blob/v1.4.0/packages/coding-agent/docs/packages.md#declare-dependencies).
 
 Select a GPT-5/GPT-6 model on provider `openai`, API `openai-responses`, at
 `https://api.openai.com/v1`. No enable command is needed. A previously saved
@@ -156,7 +156,7 @@ RemoteCompactionV2 protocol.
 | Legacy `openai-codex`, custom endpoints, other providers, routed model mismatch | Left unchanged; no compaction or auth hooks for those routes |
 
 Virtual-model selections are also ineligible, including when their physical
-dispatch returns to the same public OpenAI model. Pi 1.1.0 request hooks expose
+dispatch returns to the same public OpenAI model. Pi 1.4.0 request hooks expose
 the selected virtual model, not a complete physical request/auth identity.
 Existing checkpoints use their bounded readable fallback rather than opaque
 replay. Pi's ordinary routed context-limit checks and standard compaction remain
@@ -280,8 +280,9 @@ namespaced calls, calls before and after checkpoints, tool removal/redefinition,
 mode-off, reload, branches, codemode-hidden tools, multiple compaction epochs,
 cache-prefix stability, user-fact recall and Pi's threshold safety net.
 Host suites are skipped by ordinary `npm test` unless the host entry is supplied.
-The installed Pi 1.4.0 SDK passed these contracts; the pinned Pi 1.1 baseline
-alone does not exercise its native inline serializer.
+The pinned development baseline and isolated host checks both use Pi 1.4.0.
+Run `npm run test:host` from the repository root to include these additional
+host suites and the native inline serializer contracts.
 
 Earlier subscription comparisons reproduced inline tool loss and tested
 full-snapshot alternatives. The selected implementation instead keeps native

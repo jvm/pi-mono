@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Target Pi 1.4.0 for development and contract tests; older hosts are no longer test targets. Pi remains a host-supplied peer dependency.
+
 ### Added
 
 - Group process tools in the discoverable `processes` namespace, including lifecycle, acknowledgement, and compact script recipes.

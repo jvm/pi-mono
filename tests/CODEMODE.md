@@ -24,9 +24,13 @@ remains subscription-only.
 
 ## Validation
 
-The compatibility runner uses a disposable repository copy and installs synchronized
-Pi dependencies there. Tests assert the resolved host version and path. No dependency
-inputs in the working repository are changed by the runner.
+Pi 1.4.0 is now the only development and contract-test target. Older-host results
+below are historical evidence, not an active support matrix.
+
+`npm run test:host` uses a disposable repository copy and installs synchronized
+Pi 1.4.0 dependencies there. Tests assert the resolved host version and path.
+The runner rejects older or floating targets. No dependency inputs in the
+working repository are changed by the runner.
 
 Declaration measurements report UTF-8 bytes and byte-derived token estimates, not
 billed tokens. Declaration, discovery/catalog, and retained output sizes are separate
@@ -43,20 +47,20 @@ measurements. These measurements do not predict latency, cost, or prompt-cache h
 | E | Real nested cached finder beyond inline content; cache-miss error without network; existing range, cache expiry, redaction and output-budget tests. |
 | F | Registered typed Scout listing, revision invalidation and public-field tests; compact/fallback prompt tests plus shared reload/tree/fork/skill composition contracts. |
 | G | Fixture-image direct/nested admission, failed-script typed recovery, missing files, cancelled queues/reload and quota-failed siblings; existing branch/manifest/fork and save tests. No live image calls. |
-| H | Existing exactly-once goal ledger/session tests run in both lanes; actual image backend counters remain informational in a cross-package regression. No guessed charge or quota mapping. |
-| I | Both host lanes run DCG/process exact-argument and UI contracts, goal accounting, codex native-edit contracts, and automatic compaction discovery/activation/reload/checkpoint tests. Shared prompt tests retain skill visibility controls. |
+| H | Existing exactly-once goal ledger/session tests run on Pi 1.4.0; actual image backend counters remain informational in a cross-package regression. No guessed charge or quota mapping. |
+| I | The Pi 1.4.0 host runs DCG/process exact-argument and UI contracts, goal accounting, codex native-edit contracts, and automatic compaction discovery/activation/reload/checkpoint tests. Shared prompt tests retain skill visibility controls. |
 | K | User-deferred under D2: no inference provider, extraction options or inference spend. |
 
 ### Host ownership
 
-The earlier-hook input-object replacement defect is reproduced in both hosts
+The earlier-hook input-object replacement defect is reproduced in Pi 1.4.0
 by `pi-dcg/tests/session-contract.test.mjs`. Its owner is Pi tool dispatch:
 the checked `event.input` and executed arguments must have the same identity.
 Keep this characterization when proposing an upstream fix; do not remove it
 or label it a successful safety guarantee.
 
-Pi 1.1's shared dialog slot is separately characterized. Pi 1.4's host-owned
-dialog stack restores an independent prompt after the visible one closes;
+Pi 1.4's host-owned dialog stack restores an independent prompt after the visible
+one closes;
 the mixed DCG/process test exercises separate denials. No private host patch
 or cross-package runtime dependency is introduced.
 
@@ -88,12 +92,24 @@ responses that extend an already-waiting request's cooldown.
 
 Use `PI_OFFLINE=1 PI_TELEMETRY=0 npm run validate` for reproducible local
 acceptance without best-effort install telemetry entering fetch-count fixtures.
-These controls disable telemetry, not research providers. Run both isolated
-compatibility lanes with `node scripts/test-pi-compat.mjs <version>`.
-Run root validation and compatibility lanes sequentially on a shared host:
+These controls disable telemetry, not research providers. Run the isolated
+Pi 1.4.0 checks with `npm run test:host`.
+Run root validation and the isolated host checks sequentially on a shared host:
 their image OAuth fixtures use the same loopback callback port, 1455.
 
-## Local acceptance results (initial implementation batch)
+## Pi 1.4.0-only baseline acceptance
+
+- All 15 workspaces pin Pi 1.4.0 for development; host-provided peer ranges stay `*`.
+- Node 24 root validation passes with 1,267 tests and two expected opt-in skips,
+  all package checks, a zero-vulnerability production audit, and pack dry runs.
+- `npm run test:host` passes 474 tests without skips, including the additional
+  compaction-host suites, actual resolved-version/path checks, raw grammar
+  transport, virtual-model thinking isolation, and the reasoning checkpoint fix.
+- SDK process smoke and the subscription-usage/native Fast authentication smokes
+  pass with synthetic credentials and mocked transport.
+- All 15 package archives exclude test fixtures, agent files and local settings.
+
+## Historical acceptance results (initial implementation batch)
 
 - `npm run validate`: passed all package checks/tests, package consistency,
   production audit (zero vulnerabilities), and pack dry runs. Two existing

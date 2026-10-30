@@ -4,8 +4,10 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
-const version = process.argv[2];
-if (!["1.1.0", "1.4.0"].includes(version)) throw new Error("Expected Pi 1.1.0 or 1.4.0");
+const version = "1.4.0";
+if (process.argv.length > 3 || (process.argv[2] && process.argv[2] !== version)) {
+  throw new Error(`Expected Pi ${version}; older hosts and floating versions are not test targets.`);
+}
 const source = fileURLToPath(new URL("../", import.meta.url));
 const dir = await mkdtemp(join(tmpdir(), "pi-compat-"));
 const run = (command, args, env = {}) => {
@@ -39,21 +41,22 @@ try {
   run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"]);
   const laneEnv = { PI_TEST_HOST_VERSION: version, PI_TEST_HOST_ROOT: resolve(dir) };
   run(process.execPath, ["--import", "tsx", "--test",
-    "tests/structured-tools.test.mjs", "tests/structured-prompts.test.mjs",
+    "tests/pi-baseline.test.mjs",
+    "tests/structured-tools.test.mjs", "tests/structured-prompts.test.mjs", "tests/virtual-models.test.mjs",
     "packages/pi-processes/tests/session.test.mjs",
     "packages/pi-dcg/tests/session-contract.test.mjs",
     "packages/pi-dcg/tests/ui-contract.test.mjs",
     "packages/pi-codex-compaction/tests/automatic.test.mjs",
     "packages/pi-goal/tests/session-contract.test.mjs",
     "packages/pi-codex-tools/tests/extension.test.mjs",
+    "packages/pi-codex-tools/tests/astra-integration.test.mjs",
+    "packages/pi-openai-reasoning/tests/extension.test.mjs",
   ], laneEnv);
   run("npm", ["test", "-w", "packages/pi-codex-image-gen"], laneEnv);
-  if (version === "1.4.0") {
-    run(process.execPath, ["--import", "tsx", "--test",
-      "packages/pi-codex-compaction/tests/host-inline-tools.test.mjs",
-      "packages/pi-codex-compaction/tests/host-strategies.test.mjs",
-    ], { ...laneEnv, PI_COMPACTION_HOST_ENTRY: join(dir, "node_modules/@earendil-works/pi-coding-agent/dist/index.js") });
-  }
+  run(process.execPath, ["--import", "tsx", "--test",
+    "packages/pi-codex-compaction/tests/host-inline-tools.test.mjs",
+    "packages/pi-codex-compaction/tests/host-strategies.test.mjs",
+  ], { ...laneEnv, PI_COMPACTION_HOST_ENTRY: join(dir, "node_modules/@earendil-works/pi-coding-agent/dist/index.js") });
   run(process.execPath, ["--import", "tsx", "packages/pi-processes/tests/host-smoke.mjs",
     join(dir, "node_modules/@earendil-works/pi-coding-agent/dist/index.js")], laneEnv);
 } finally {

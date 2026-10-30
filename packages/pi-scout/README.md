@@ -69,7 +69,7 @@ pi -e /path/to/pi-mono/packages/pi-scout --print "list your tools"
 ```
 
 This is an npm-compatible TypeScript Pi package. There is no runtime build step.
-Use Pi 1.1.0 or newer and Node.js >=22.19.0 for the structured tool contracts.
+Use Pi 1.4.0 and Node.js >=22.19.0 for the supported structured tool contracts.
 
 ## Configuration
 
@@ -104,7 +104,7 @@ After a repository is registered, the agent sees its local path in the system pr
 
 ### Prompt updates
 
-Pi Scout uses the structured prompt API in Pi 1.1.0 or newer. It owns the `scout_repos` section and updates that section without replacing the full system prompt or other extensions' sections. When the last reference is removed or its directory disappears, the section is removed on the next prompt.
+Pi Scout targets Pi 1.4.0's structured prompt API. It owns the `scout_repos` section and updates that section without replacing the full system prompt or other extensions' sections. When the last reference is removed or its directory disappears, the section is removed on the next prompt.
 
 The section contains only repository names, local paths, and read-only usage guidance. Origin URLs, credentials, branch names, and other record metadata are not included.
 

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Target Pi 1.4.0 for development and contract tests; older hosts are no longer test targets. Pi remains a host-supplied peer dependency.
+
+### Fixed
+
+- Reset reasoning after a compacted checkpoint preceded by Pi 1.4's inline tool declarations, preserving declaration order and fingerprinting their exact content.
+
 ## [0.2.0] - 2026-10-09
 
 ### Documentation

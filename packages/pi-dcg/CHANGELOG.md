@@ -12,6 +12,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Changed
 
+- Target Pi 1.4.0 for development and contract tests; older hosts are no longer test targets. Pi remains a host-supplied peer dependency.
 - Check managed `bash` in its canonical working directory and freeze all approved bash arguments, including execution mode. Block argument changes during asynchronous policy checks.
 
 ## [0.4.1] - 2026-10-13

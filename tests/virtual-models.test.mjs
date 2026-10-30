@@ -207,7 +207,7 @@ test("router sees user, tool continuation, retry, and direct summary calls witho
   assert.deepEqual(h.errors, []);
 });
 
-test("sticky tool continuation retains its physical thinking signature; a cross-provider turn drops it", async (t) => {
+test("sticky continuation retains thinking; a cross-provider request drops the block without rewriting history", async (t) => {
   const action = (pi) => pi.registerTool({
     name: "fixture_noop", label: "Fixture", description: "Change the next user route only.", parameters: Type.Object({}),
     async execute() {
@@ -234,10 +234,18 @@ test("sticky tool continuation retains its physical thinking signature; a cross-
   assert.equal(h.routes[1].reason, "continuation");
   assert.equal(h.requests[1].model, h.physical("public").id);
   assert.ok(h.requests[1].input.some((item) => item.encrypted_content === "synthetic-thinking-signature"));
+  const recordedThinking = () => h.session.messages
+    .filter(message => message.role === "assistant")
+    .flatMap(message => message.content)
+    .filter(block => block.type === "thinking");
+  const originalThinking = structuredClone(recordedThinking());
+  assert.equal(originalThinking[0].thinking, "Synthetic readable thought.");
   await h.session.prompt("The next user turn can change providers.");
   assert.equal(h.requests[2].model, "tiny");
-  assert.doesNotMatch(JSON.stringify(h.requests[2]), /synthetic-thinking-signature|rs_fixture/);
-  assert.match(JSON.stringify(h.requests[2]), /Synthetic readable thought/);
+  // Pi 1.4 drops another model's entire thinking block, rather than turning
+  // readable thinking into an ordinary assistant reply on the new provider.
+  assert.doesNotMatch(JSON.stringify(h.requests[2]), /synthetic-thinking-signature|rs_fixture|Synthetic readable thought/);
+  assert.deepEqual(recordedThinking(), originalThinking, "wire conversion must not rewrite recorded thinking");
   assert.equal(goalState(h).tokensUsed, 33);
   assert.deepEqual(h.errors, []);
 });

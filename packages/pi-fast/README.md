@@ -100,7 +100,7 @@ inference. No API key was available for live API-key checks; automated tests
 cover its Pi transport, and the API `fast` parameter follows the official docs.
 
 Virtual-model selections are not eligible for this extension's Fast tier, even
-if their current physical dispatch is an allowlisted OpenAI model. On Pi 1.1.0,
+if their current physical dispatch is an allowlisted OpenAI model. On Pi 1.4.0,
 request hooks still see the virtual selection, not an authenticated physical
 request identity. The extension leaves the tier unchanged rather than guessing
 from the payload or the previous response. Select a supported physical model
@@ -198,10 +198,10 @@ npm run -w packages/pi-fast smoke:native-openai -- /path/to/node_modules/@earend
 This command uses only synthetic in-memory credentials and mocked HTTP. It
 checks subscription/API-key tier selection, toggles, and authentication switches
 without changing the monorepo's pinned dependencies or making live requests.
-It is separate from `test` so other installed Pi versions can be checked without
-changing the pinned Pi 1.1.0 baseline, which already includes native OpenAI OAuth.
+It is separate from `test` for the explicit native-auth smoke test.
+Development and contract tests target Pi 1.4.0, including native OpenAI OAuth.
 
-Smoke test (Pi 0.99.1 or later): sign in with ChatGPT on `openai`, then
+Smoke test (Pi 1.4.0): sign in with ChatGPT on `openai`, then
 select `openai/gpt-6.1-sol`, enable `/fast on`, and send a short prompt.
 Check the filled bolt. Repeat with a legacy `openai-codex/gpt-6.1-sol` login,
 and with GPT-6 Astra, Sol, and Luna on both providers.

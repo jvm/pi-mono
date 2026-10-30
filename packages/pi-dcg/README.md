@@ -41,7 +41,7 @@ terminal font.
 ## Requirements
 
 - Node.js 22.19.0 or newer
-- Pi, supplied by the host; contract-tested against Pi 1.1.0 and 1.4.0
+- Pi 1.4.0, supplied by the host and used for development and contract tests
 - A separately installed `dcg` executable; dcg 0.6.8 or newer is recommended
 
 Install dcg using its [upstream installation instructions](https://github.com/Dicklesworthstone/destructive_command_guard#installation), review its release-verification guidance, and confirm that the binary is visible in the same environment as Pi:
@@ -82,7 +82,7 @@ Pi's separate RPC control-channel `{"type":"bash"}` command does not emit either
 
 For every non-empty command, the extension starts dcg directly without a shell, sends a Claude-compatible `PreToolUse` payload on stdin, and waits for dcg's decision before Pi executes the command.
 
-Pi allows `tool_call` handlers to rewrite tool arguments in sequence. `pi-dcg` checks **in-place** mutations made by earlier handlers, then seals the approved `command`, freezes all startup arguments, and seals their input reference. Changes during asynchronous checks or later changes to mode, cwd, or command block execution. Managed bash working directories are canonicalized before policy checks and execution, but only when the registered executor advertises the local `pi-processes.bash-workdir.v1` capability and the call uses an explicit managed mode. Ordinary bash ignores extra `workdir` arguments, so those arguments never select its policy directory. Pi 1.1.0 has a separate argument-identity limitation when an earlier handler replaces the entire input object; see [Limitations](#limitations).
+Pi allows `tool_call` handlers to rewrite tool arguments in sequence. `pi-dcg` checks **in-place** mutations made by earlier handlers, then seals the approved `command`, freezes all startup arguments, and seals their input reference. Changes during asynchronous checks or later changes to mode, cwd, or command block execution. Managed bash working directories are canonicalized before policy checks and execution, but only when the registered executor advertises the local `pi-processes.bash-workdir.v1` capability and the call uses an explicit managed mode. Ordinary bash ignores extra `workdir` arguments, so those arguments never select its policy directory. Pi 1.4.0 has a separate argument-identity limitation when an earlier handler replaces the entire input object; see [Limitations](#limitations).
 
 DCG does not replace the bash executor, activate excluded tools, or bypass another extension's approval hooks.
 
@@ -176,12 +176,12 @@ This extension intercepts Pi events, not operating-system process execution. It 
 
 `user_bash` handlers are first-result-wins in Pi. An earlier extension that fully handles `!` commands can prevent later handlers, including `pi-dcg`, from seeing them.
 
-Host composition characterization (Pi 1.1.0 and 1.4.0):
+Host composition characterization (Pi 1.4.0):
 
 - If an earlier `tool_call` handler assigns a new object to `event.input`, Pi can execute the original arguments while DCG checks the replacement. Integrations must mutate argument fields in place, not replace the input object. DCG cannot repair this host contract after the replacement has occurred.
-- The confirmation queue covers this DCG instance, not other extensions' dialogs. Pi 1.1.0 can displace a prompt in its shared editor slot. Pi 1.4.0 has a host-owned dialog stack: closing the top prompt restores the preceding prompt. Mixed DCG startup/process-input tests exercise this restoration and separate denials. No local scheduler or executor patch is installed.
+- The confirmation queue covers this DCG instance, not other extensions' dialogs. Pi 1.4.0 has a host-owned dialog stack: closing the top prompt restores the preceding prompt. Mixed DCG startup/process-input tests exercise this restoration and separate denials. No local scheduler or executor patch is installed.
 
-The earlier-input-object replacement defect remains reproduced on both lanes.
+The earlier-input-object replacement defect remains reproduced on Pi 1.4.0.
 This is a known host limitation, not a passing safety guarantee. D4's approved
 outcome is to document/track it at the host ownership layer, not weaken the guard.
 
