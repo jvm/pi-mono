@@ -22,6 +22,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Fixed
 
+- Preserve successful search queries when a later provider response disconnects during body consumption; keep cancellation, response-size limits and invalid JSON/response shapes fatal.
 - Keep cached finder matches at or after the requested UTF-16 offset, including continuation inside a surrogate pair.
 - Honor later `Retry-After` extensions before dispatching an already-waiting request, without retrying or extending its total HTTP deadline.
 

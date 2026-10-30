@@ -9,7 +9,7 @@ import { fetchCache } from "../src/cache.ts";
 import { WEB_OUTPUT_SCHEMAS } from "../src/output.ts";
 import { FetchCache } from "../src/cache.ts";
 import { MAX_RESPONSE_BYTES } from "../src/limits.ts";
-import { requestJson } from "../src/http.ts";
+import { ProviderRequestError, requestJson } from "../src/http.ts";
 import { createServer } from "node:http";
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status });
@@ -48,6 +48,67 @@ function harness(t, env = {}) {
     return result;
   } };
 }
+
+for (const failure of ["invalid JSON", "invalid shape", "advertised size", "streamed size", "cancellation"]) {
+  test(`registered search keeps ${failure} fatal after earlier success`, async t => {
+    const h = harness(t);
+    const cancellation = new AbortController();
+    const queries = [];
+    t.mock.method(globalThis, "fetch", async (_url, init) => {
+      const { query } = JSON.parse(init.body);
+      queries.push(query);
+      if (query !== "fail") return json({ results: [{ url: a, title: query, highlights: [query] }] });
+      if (failure === "invalid JSON") return new Response("private invalid JSON");
+      if (failure === "invalid shape") return json({ results: null });
+      if (failure === "advertised size") return new Response("", { headers: { "content-length": String(MAX_RESPONSE_BYTES + 1) } });
+      let reads = 0;
+      return new Response(new ReadableStream({
+        pull(controller) {
+          if (failure === "streamed size") {
+            controller.enqueue(new Uint8Array(1024 * 1024));
+          } else if (reads++ === 0) {
+            controller.enqueue(new TextEncoder().encode('{"private":"partial'));
+          } else {
+            cancellation.abort(new Error("private abort reason"));
+            controller.error(cancellation.signal.reason);
+          }
+        },
+      }));
+    });
+    const expected = failure === "cancellation" ? "Web tool cancelled."
+      : failure.includes("size") ? `Provider response exceeded ${MAX_RESPONSE_BYTES} bytes.`
+      : "Provider returned invalid JSON.";
+    await assert.rejects(h.call("web_search", { queries: ["first", "fail", "last"], purpose: "Find evidence" }, cancellation.signal),
+      error => !(error instanceof ProviderRequestError) && error.message === expected);
+    assert.deepEqual(queries, ["first", "fail"], "fatal errors must not publish a partial result or dispatch later queries");
+  });
+}
+
+test("native response-body disconnects are bounded operational failures", { timeout: 10_000 }, async t => {
+  const nativeFetch = globalThis.fetch;
+  let response;
+  let receivedHeaders = false;
+  const server = createServer((_req, res) => {
+    response = res;
+    res.writeHead(200, { "content-type": "application/json" });
+    res.write('{"private":"partial');
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.mock.method(globalThis, "fetch", async (...args) => {
+    const res = await nativeFetch(...args);
+    receivedHeaders = true;
+    setImmediate(() => response.destroy());
+    return res;
+  });
+  try {
+    await assert.rejects(requestJson(`http://127.0.0.1:${server.address().port}/disconnect`, { timeoutMs: 5000 }),
+      error => error instanceof ProviderRequestError && error.message === "Provider response body could not be read.");
+    assert.equal(receivedHeaders, true);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
 
 for (const provider of ["tinyfish", "firecrawl"]) {
   test(`${provider}: registered fetch keeps redirect collisions and failures attached through caching`, async t => {

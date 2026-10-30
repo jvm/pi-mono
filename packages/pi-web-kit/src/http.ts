@@ -89,7 +89,12 @@ async function readBoundedText(res: Response): Promise<string> {
   let bytes = 0;
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      // Reading a response can fail after fetch has already returned headers.
+      // Classify only the body read, not size checks, decoding or JSON parsing.
+      // withResponseTimeout still gives caller cancellation/deadlines precedence.
+      const { done, value } = await reader.read().catch(() => {
+        throw new ProviderRequestError("Provider response body could not be read.");
+      });
       if (done) break;
       bytes += value.byteLength;
       if (bytes > MAX_RESPONSE_BYTES) throw tooLarge();

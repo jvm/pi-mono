@@ -212,30 +212,45 @@ function validates(h, event) {
 }
 
 for (const mode of ["off", "only"]) {
-  test(`partial search failures preserve independent queries (${mode})`, async t => {
-    const h = await fixture(t, { mode });
-    h.setProvider(async (_url, init) => {
-      const { query } = JSON.parse(init.body);
-      return query === "fail" ? new Response("private backend body", { status: 503 })
-        : json({ results: [{ url: "https://fixture.invalid/" + query, title: query, highlights: [query] }] });
+  for (const failure of ["http", "network", "body"]) {
+    test(`partial ${failure} search failures preserve independent queries (${mode})`, async t => {
+      const h = await fixture(t, { mode });
+      h.setProvider(async (_url, init) => {
+        const { query } = JSON.parse(init.body);
+        if (query !== "fail") return json({ results: [{ url: "https://fixture.invalid/" + query, title: query, highlights: [query] }] });
+        if (failure === "http") return new Response("private backend body", { status: 503 });
+        if (failure === "network") throw new TypeError("private network failure synthetic-EXA_API_KEY-secret");
+        let reads = 0;
+        return new Response(new ReadableStream({
+          pull(controller) {
+            if (reads++ === 0) controller.enqueue(new TextEncoder().encode('{"private":"backend body'));
+            else controller.error(new TypeError("private body failure synthetic-EXA_API_KEY-secret"));
+          },
+        }));
+      });
+      const args = { queries: ["first", "fail", "last"], purpose: "Test partial search" };
+      succeeds(mode === "off" ? await h.run("web_search", args) : await h.script(`
+        const r=await tools.web_search(${JSON.stringify(args)});
+        if(r.status!=="partial" || r.queries[0].results.length!==1 || r.queries[2].status!=="success")
+          throw new Error("Successful evidence lost");
+        text(r.queries.map(q=>({query:q.query,status:q.status})));
+      `));
+      const event = h.events.findLast(e => e.toolName === "web_search");
+      validates(h, event);
+      assert.equal(event.structuredContent.status, "partial");
+      assert.deepEqual(event.structuredContent.queries.map(q => q.status), ["success", "failed", "success"]);
+      assert.equal(event.structuredContent.queries[1].error.code, "provider_request_failed");
+      if (failure === "body") {
+        assert.equal(event.structuredContent.queries[1].error.message, "Provider response body could not be read.");
+      }
+      assert.equal(h.providerRequests.length, 3);
+      assert.doesNotMatch(outputSurfaces(h) + JSON.stringify(h.progress),
+        /private backend body|private network failure|private body failure|synthetic-EXA_API_KEY-secret/);
+      succeeds(mode === "off" ? await h.run("web_search", { query: "fail", purpose: "All failed" })
+        : await h.script(`text(await tools.web_search({query:"fail",purpose:"All failed"}));`));
+      assert.equal(h.events.findLast(e => e.toolName === "web_search").structuredContent.status, "failed");
     });
-    const args = { queries: ["first", "fail", "last"], purpose: "Test partial search" };
-    succeeds(mode === "off" ? await h.run("web_search", args) : await h.script(`
-      const r=await tools.web_search(${JSON.stringify(args)});
-      if(r.status!=="partial" || r.queries[0].results.length!==1 || r.queries[2].status!=="success")
-        throw new Error("Successful evidence lost");
-      text(r.queries.map(q=>({query:q.query,status:q.status})));
-    `));
-    const event = h.events.findLast(e => e.toolName === "web_search");
-    validates(h, event);
-    assert.equal(event.structuredContent.status, "partial");
-    assert.deepEqual(event.structuredContent.queries.map(q => q.status), ["success", "failed", "success"]);
-    assert.equal(h.providerRequests.length, 3);
-    assert.doesNotMatch(outputSurfaces(h), /private backend body/);
-    succeeds(mode === "off" ? await h.run("web_search", { query: "fail", purpose: "All failed" })
-      : await h.script(`text(await tools.web_search({query:"fail",purpose:"All failed"}));`));
-    assert.equal(h.events.findLast(e => e.toolName === "web_search").structuredContent.status, "failed");
-  });
+  }
 }
 
 test("nested parallel batches share HTTP admission and equivalent cache misses", async t => {

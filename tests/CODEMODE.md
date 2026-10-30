@@ -131,5 +131,16 @@ their image OAuth fixtures use the same loopback callback port, 1455.
 - No Compound Engineering files or instruction blocks changed. No push,
   publication, live image request or extraction inference was performed.
 
-Physical-terminal/macOS manual smoke remains a user-approved release-testing
-deferral, not a passing automated check.
+## Release testing decision (2026-10-30)
+
+For these releases, the user approved publication after automated checks and
+waived the deferred human physical-terminal/macOS smoke test. It was not run.
+Linux/macOS CI, native PTY tests and Pi 1.4.0 SDK/TUI fixtures remain the release
+evidence; they do not certify terminal pixels, IME or emulator image placement.
+
+PR review also reproduced a provider response disconnect after headers that
+discarded earlier successful queries. Direct and native codemode regressions
+now cover partial/all-failed HTTP, network and body-read failures. Registered
+search controls keep cancellation, oversized responses, malformed JSON and
+invalid response shapes fatal; a real loopback socket disconnect verifies the
+body-read error classification without sending research data to a provider.
