@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-03
+
 ### Added
 
 - Show pending automatic background-result deliveries as a separate monitor count in the footer. Monitors clear when results reach model context, are explicitly handled, or the requesting task is disarmed.
