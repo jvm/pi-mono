@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-03
+
 ### Fixed
 
 - Show only the live detached shell count in the footer and clear it when the last shell exits. Completed results, including failures, remain in `/processes` without stale footer warnings or completion feedback.
