@@ -14,11 +14,14 @@ export class CompletionCoordinator {
   private readonly early = new Map<string, ProcessResult>();
   private readonly observations = new Map<string, Set<string>>();
 
+  constructor(private readonly onChange: () => void = () => {}) {}
+
   newTask(): void {
     this.task++;
     this.records.clear();
     this.early.clear();
     this.observations.clear();
+    this.changed();
   }
 
   arm(id: string, task = this.task): boolean {
@@ -26,6 +29,7 @@ export class CompletionCoordinator {
     const result = this.early.get(id);
     this.early.delete(id);
     this.records.set(id, { task, result, observers: new Set(), reserved: false });
+    this.changed();
     return true;
   }
 
@@ -48,15 +52,23 @@ export class CompletionCoordinator {
   }
 
   finish(callId: string, terminalIds: string[], success: boolean): void {
+    const previous = this.records.size;
     for (const id of this.observations.get(callId) ?? []) {
       this.records.get(id)?.observers.delete(callId);
       if (success && terminalIds.includes(id)) this.records.delete(id);
     }
     this.observations.delete(callId);
+    if (previous !== this.records.size) this.changed();
   }
 
   acknowledge(ids: string[]): void {
+    const previous = this.records.size;
     for (const id of ids) this.records.delete(id);
+    if (previous !== this.records.size) this.changed();
+  }
+
+  private changed(): void {
+    try { this.onChange(); } catch { /* display feedback must not affect delivery */ }
   }
 
   retryUncommitted(): void {

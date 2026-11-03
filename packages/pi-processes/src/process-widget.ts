@@ -46,14 +46,23 @@ export class ProcessDisplay {
   private shown = false;
   private disposed = false;
 
-  constructor(private readonly ctx: ExtensionContext, private readonly runtime: ProcessRuntime) {}
+  constructor(
+    private readonly ctx: ExtensionContext,
+    private readonly runtime: ProcessRuntime,
+    private readonly monitors: () => number = () => 0,
+  ) {}
 
   sync(): void {
     if (this.disposed || this.ctx.mode !== "tui") return;
-    // Status describes live work only. Retained results belong in /processes.
+    // Shells track execution; monitors track task-scoped automatic delivery.
     const running = this.runtime.background().length;
-    try { this.ctx.ui.setStatus("pi-processes-results", running
-      ? `${running} ${running === 1 ? "shell" : "shells"} · /processes` : undefined); }
+    const monitors = this.monitors();
+    const status = [
+      ...(running ? [`${running} ${running === 1 ? "shell" : "shells"}`] : []),
+      ...(monitors ? [`${monitors} ${monitors === 1 ? "monitor" : "monitors"}`] : []),
+    ];
+    try { this.ctx.ui.setStatus("pi-processes-results", status.length
+      ? `${status.join(" · ")} · /processes` : undefined); }
     catch { /* display-only feedback */ }
     if (!running) {
       this.clear();

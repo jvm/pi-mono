@@ -186,7 +186,7 @@ test("real managed footer counts only live detached shells and never revives com
   const first = dataOfForPanel(await h.run("bash", { command: "sleep 30", mode: "service" }));
   assert.equal(statuses.get("pi-processes-results"), "1 shell · /processes");
   const second = dataOfForPanel(await h.run("bash", { command: "sleep 30", mode: "background" }));
-  assert.equal(statuses.get("pi-processes-results"), "2 shells · /processes");
+  assert.equal(statuses.get("pi-processes-results"), "2 shells · 1 monitor · /processes");
   await h.run("process_kill", { session_id: second.session_id });
   assert.equal(statuses.get("pi-processes-results"), "1 shell · /processes");
   await h.run("process_kill", { session_id: first.session_id });

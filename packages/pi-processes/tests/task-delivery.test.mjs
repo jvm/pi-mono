@@ -47,8 +47,38 @@ async function scripted(t, steps, extra = {}) {
 const command = (command, mode = "background", extra = {}) => [{ name: "bash", args: { command, mode, ...extra } }];
 const lastJob = h => dataOf(h.session.messages.findLast(m => m.role === "toolResult" && m.toolName === "bash")).session_id;
 
+test("TUI monitors survive shell exit until automatic results reach model context", async t => {
+  let status;
+  const h = await scripted(t, [[
+    ...command("while ! test -f first; do sleep 0.02; done; printf first-result"),
+    ...command("while ! test -f second; do sleep 0.02; done; printf second-result; exit 7"),
+    ...command("while ! test -f release; do sleep 0.02; done", "foreground"),
+  ]], { uiMode: "tui", uiContext: {
+    setStatus(key, value) { if (key === "pi-processes-results") status = value; },
+  } });
+  const run = h.session.prompt("Run two validations and independent work.");
+  await eventually(() => status === "2 shells · 2 monitors · /processes");
+  await writeFile(join(h.ctx.cwd, "first"), "");
+  await eventually(() => status === "1 shell · 2 monitors · /processes");
+  await writeFile(join(h.ctx.cwd, "second"), "");
+  await eventually(() => status === "2 monitors · /processes");
+  assert.equal(notices(h).length, 0, "results wait for the safe continuation");
+  await writeFile(join(h.ctx.cwd, "release"), "");
+  await run;
+  assert.equal(status, undefined, "projected results clear the last monitors without manual action");
+  assert.equal(notices(h).length, 1);
+  assert.equal(notices(h)[0].details.processes.length, 2);
+  assert.match(JSON.stringify(h.requests.at(-1).input), /first-result/);
+  assert.match(JSON.stringify(h.requests.at(-1).input), /second-result/);
+  assert.deepEqual(h.errors, []);
+});
+
 test("background idle resumes once with bounded sanitized output, never a visible bookkeeping message", async t => {
-  const h = await scripted(t, [command("sleep 0.25; printf '\\033[31mfinal-result\\033[0m\\007'; exit 7")]);
+  const statuses = [];
+  const h = await scripted(t, [command("sleep 0.25; printf '\\033[31mfinal-result\\033[0m\\007'; exit 7")],
+    { uiMode: "tui", uiContext: {
+      setStatus(key, value) { if (key === "pi-processes-results") statuses.push(value); },
+    } });
   await h.session.prompt("Run validation.");
   const launched = dataOf(h.session.messages.find(m => m.role === "toolResult" && m.toolName === "bash"));
   assert.equal(launched.completion_delivery, "automatic");
@@ -63,6 +93,9 @@ test("background idle resumes once with bounded sanitized output, never a visibl
   assert.doesNotMatch(JSON.stringify(message.details), /\\u001b|\\u0007|sleep/);
   assert.match(JSON.stringify(h.requests.at(-1).input), /final-result/);
   assert.equal(h.checks.length, 1);
+  assert.ok(statuses.includes("1 shell · 1 monitor · /processes"));
+  assert.ok(statuses.includes("1 monitor · /processes"));
+  assert.equal(statuses.at(-1), undefined);
   assert.deepEqual(h.errors, []);
 });
 
@@ -120,10 +153,13 @@ test("a later extension replacing a boundary draft does not silently lose its re
 });
 
 test("one direct dependency wait consumes completion without a duplicate push", async t => {
+  const statuses = [];
   const h = await scripted(t, [
     command("sleep 0.25; printf awaited-result"),
     h => [{ name: "process_wait", args: { session_ids: [lastJob(h)], timeout_ms: 5000 } }],
-  ]);
+  ], { uiMode: "tui", uiContext: {
+    setStatus(key, value) { if (key === "pi-processes-results") statuses.push(value); },
+  } });
   await h.session.prompt("Wait once when the result becomes required.");
   await delay(200);
   assert.equal(h.requests.length, 3);
@@ -131,19 +167,28 @@ test("one direct dependency wait consumes completion without a duplicate push", 
   const waited = dataOf(h.session.messages.findLast(m => m.role === "toolResult"));
   assert.equal(waited.wait_status, "completed");
   assert.equal(waited.processes[0].output, "awaited-result");
+  assert.ok(statuses.includes("1 shell · 1 monitor · /processes"));
+  assert.equal(statuses.at(-1), undefined);
   assert.deepEqual(h.errors, []);
 });
 
 test("new user task disarms old auto-resume but retains output", async t => {
-  const h = await scripted(t, [command("while ! test -f finish; do sleep 0.02; done; printf old-result")]);
+  let status;
+  const h = await scripted(t, [command("while ! test -f finish; do sleep 0.02; done; printf old-result")],
+    { uiMode: "tui", uiContext: {
+      setStatus(key, value) { if (key === "pi-processes-results") status = value; },
+    } });
   await h.session.prompt("Old task.");
+  assert.equal(status, "1 shell · 1 monitor · /processes");
   const id = lastJob(h);
   await h.session.prompt("Different task.");
+  assert.equal(status, "1 shell · /processes", "disarming delivery does not stop the shell");
   const before = h.requests.length;
   await writeFile(join(h.ctx.cwd, "finish"), "");
   await delay(300);
   assert.equal(h.requests.length, before);
   assert.equal(notices(h).length, 0);
+  assert.equal(status, undefined);
   // A non-consuming output read is still available through the real tool path.
   const tool = h.api.getAllTools().find(t => t.name === "process_output");
   assert.ok(tool);
@@ -238,13 +283,18 @@ test("service mode is immediate, silent on exit, and does not promise readiness"
 
 for (const acknowledge of [false, true]) {
   test(`codemode nested final result ${acknowledge ? "explicitly consumes" : "does not silently consume"} auto-delivery`, async t => {
-    const h = await fixture(t, { after: [piProcesses] });
+    const statuses = [];
+    const h = await fixture(t, { after: [piProcesses], uiMode: "tui", uiContext: {
+      setStatus(key, value) { if (key === "pi-processes-results") statuses.push(value); },
+    } });
     const code = `const j=await tools.bash({command:"sleep 0.15; printf nested-result",mode:"background"});
       const r=await tools.process_wait({session_ids:[j.session_id],acknowledge:${acknowledge}});
       ${acknowledge ? "text(r);" : "text('Result deliberately not exposed');"}`;
     await h.script(code);
     await delay(200);
     assert.equal(notices(h).length, acknowledge ? 0 : 1);
+    assert.ok(statuses.includes("1 shell · 1 monitor · /processes"));
+    assert.equal(statuses.at(-1), undefined);
     assert.deepEqual(h.errors, []);
   });
 }
@@ -266,6 +316,26 @@ test("coordinator protects failed observations, early exits and task generations
   const old = c.taskId;
   c.newTask();
   assert.equal(c.arm("stale", old), false);
+});
+
+test("monitor changes follow delivery ownership and isolate display failures", () => {
+  const counts = [];
+  const c = new CompletionCoordinator(() => counts.push(c.armed));
+  c.arm("job");
+  c.complete({ session_id: "job", status: "exited", output: "result" });
+  c.take();
+  c.retryUncommitted();
+  c.observe("failed-reader", ["job"]);
+  c.finish("failed-reader", ["job"], false);
+  assert.deepEqual(counts, [1], "exit, reservation, retry, and failed reads retain the monitor");
+  c.acknowledge(["job"]);
+  c.arm("other");
+  c.newTask();
+  assert.deepEqual(counts, [1, 0, 1, 0]);
+  const brokenDisplay = new CompletionCoordinator(() => { throw new Error("terminal closed"); });
+  assert.equal(brokenDisplay.arm("job"), true);
+  brokenDisplay.acknowledge(["job"]);
+  assert.equal(brokenDisplay.armed, 0);
 });
 
 for (const nested of [false, true]) {
