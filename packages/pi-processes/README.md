@@ -198,7 +198,7 @@ Only processes whose initial call returned `running` appear. Foreground calls an
 
 Each command preview is bounded to the first 256 UTF-16 code units, escapes terminal controls and direction-changing Unicode characters, and truncates to the available terminal width. It is a preview, not a full command or safety decision. Commands can contain secrets; do not place credentials in command arguments. No process output or submitted PTY input is displayed or consumed by the widget.
 
-The widget shows at most three process rows plus an overflow count. Successful completion and intentional stops give five seconds of footer feedback. Managed failures (including explicit foreground failures), unexpected signals, and timeouts leave an attention count until explicitly acknowledged or removed. Other extensions' widgets, editor, and footer remain unchanged. RPC, print, and JSON modes do not create terminal components; their structured tools and automatic result delivery still work. Print/JSON callers must keep the host alive for idle auto-resume, or use foreground/`process_wait` before exiting.
+The widget shows at most three process rows plus an overflow count. The footer shows only the live detached shell count, such as `1 shell · /processes`. It clears as soon as the last shell exits, including on failure, timeout, or intentional stop. Completed results remain in `/processes`; failures stay marked there until acknowledged or removed. Foreground calls do not add a shell indicator unless they detach. Other extensions' widgets, editor, and footer remain unchanged. RPC, print, and JSON modes do not create terminal components; their structured tools and automatic result delivery still work. Print/JSON callers must keep the host alive for idle auto-resume, or use foreground/`process_wait` before exiting.
 
 ### Live `/processes` manager
 
@@ -230,7 +230,7 @@ Opening the process panel does not change the model task. Navigating to another 
 
 Tool results, including empty legacy `write_stdin` polls, show status and loss counts plus the first four output lines. Expansion shows at most 40 lines; long lines are clipped to terminal width. Model output budgets are independent of this display limit. Use the process panel for full retained segments and long-line navigation.
 
-Completion feedback uses a footer status, not `ui.notify()` or visible conversation entries. Failed-result attention remains until explicitly acknowledged or removed, not merely inspected. Carriage-return progress and tabs are normalized for display without changing model output or raw retained logs.
+Completion does not create footer feedback, `ui.notify()` messages, or visible conversation entries. Failed-result attention in the manager remains until explicitly acknowledged or removed, not merely inspected. Clearing the live shell indicator does not acknowledge results or change retention. Carriage-return progress and tabs are normalized for display without changing model output or raw retained logs.
 
 ## Command policy
 
@@ -279,7 +279,7 @@ Additional smoke checks for the execution modes and process UI:
 5. Inspect it through `/processes`. Verify line/page scrolling, horizontal columns, next/previous log segments, tail, refresh, and follow/pause. Verify Esc returns to the list before closing. Confirm this makes no model request and does not consume tool output or delay automatic delivery.
 6. Queue a steering message during a long foreground attachment or `process_wait`. Verify prompt release without process termination. Change task or session-tree branch before background completion and verify no stale wake.
 7. Repeat a nested wait in codemode while discarding its result; verify automatic model delivery still occurs. Repeat with `acknowledge:true` while handling the result and verify no duplicate.
-8. View a running job, then let it fail. Verify attention appears. View its output again and verify attention remains until `a`. Repeat with `A` and verify a later failure still alerts.
+8. Start two detached jobs and verify the footer shows `2 shells`. Let one exit and verify `1 shell`; let the other fail and verify the status clears immediately without opening `/processes`. Read the results and verify the status does not return. Open `/processes` and verify failure attention remains until `a`. Repeat with `A` and verify a later failure is still marked in the manager.
 9. Cancel then confirm `s`, `d`, and `D`. Verify stops retain output, removal deletes only completed records, running work survives bulk cleanup, and protected readers are skipped. Verify warning counts and recent footer feedback clear with the removed records.
 10. In regular and fullscreen modes, resize the manager, switch themes, use custom selection keybindings, and open help. Verify rows stay bounded and close/reload removes UI timers and retention pins.
 

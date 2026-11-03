@@ -130,7 +130,7 @@ test("real /processes command opens local output without a provider call or cons
   assert.deepEqual(h.errors, []);
 });
 
-test("background completion creates footer feedback, not permanent UI notification rows", { timeout: 10_000 }, async t => {
+test("background completion clears the footer without permanent UI notification rows", { timeout: 10_000 }, async t => {
   const statuses = new Map();
   const h = await fixture(t, { after: [piProcesses], uiMode: "tui", uiContext: {
     setStatus(key, value) { statuses.set(key, value); },
@@ -139,7 +139,8 @@ test("background completion creates footer feedback, not permanent UI notificati
       component.handleInput("\r");
       assert.ok(component.render(40).join("\n").includes("private-output"));
       component.handleInput("\x1b");
-      assert.match(statuses.get("pi-processes-results"), /need attention/,
+      assert.equal(statuses.get("pi-processes-results"), undefined);
+      assert.match(component.render(100).join("\n"), /1 need attention/,
         "viewing output must not acknowledge a failure");
       component.handleInput("a");
       component.handleInput("\x1b");
@@ -161,7 +162,7 @@ test("background completion creates footer feedback, not permanent UI notificati
   await writeFile(join(h.ctx.cwd, "footer-ready"), "");
   const completion = await delivered.promise;
   await h.session.waitForIdle();
-  assert.match(statuses.get("pi-processes-results"), /need attention/);
+  assert.equal(statuses.get("pi-processes-results"), undefined);
   assert.equal(h.notifications.length, 0, "ui.notify would append permanent visible conversation rows");
   assert.equal(completion.display, false);
   await h.session.prompt("/processes");
@@ -169,6 +170,40 @@ test("background completion creates footer feedback, not permanent UI notificati
   assert.deepEqual(h.errors, []);
 });
 const dataOfForPanel = r => r.structuredContent ?? r.details ?? JSON.parse(textOf(r));
+
+test("real managed footer counts only live detached shells and never revives completed results", { timeout: 20_000 }, async t => {
+  const statuses = new Map([["neighbor", "unrelated status"]]);
+  const h = await fixture(t, { after: [piProcesses], uiMode: "tui", uiContext: {
+    setStatus(key, value) { statuses.set(key, value); },
+    custom: async factory => {
+      const component = factory({ terminal: { rows: 16 }, requestRender() {} }, theme, {}, () => {});
+      assert.match(component.render(100).join("\n"), /1 need attention/);
+      component.handleInput("\x1b");
+    },
+  } });
+  const failed = dataOfForPanel(await h.run("bash", { command: "printf failure; exit 7", mode: "foreground" }));
+  assert.equal(statuses.get("pi-processes-results"), undefined, "no manual acknowledgment is required");
+  const first = dataOfForPanel(await h.run("bash", { command: "sleep 30", mode: "service" }));
+  assert.equal(statuses.get("pi-processes-results"), "1 shell · /processes");
+  const second = dataOfForPanel(await h.run("bash", { command: "sleep 30", mode: "background" }));
+  assert.equal(statuses.get("pi-processes-results"), "2 shells · /processes");
+  await h.run("process_kill", { session_id: second.session_id });
+  assert.equal(statuses.get("pi-processes-results"), "1 shell · /processes");
+  await h.run("process_kill", { session_id: first.session_id });
+  assert.equal(statuses.get("pi-processes-results"), undefined);
+  const output = dataOfForPanel(await h.run("process_output", { session_id: failed.session_id }));
+  assert.equal(output.exit_code, 7);
+  assert.equal(output.output, "failure");
+  await h.run("process_list", {});
+  await h.session.prompt("/processes");
+  await h.run("bash", { command: "printf success", mode: "foreground" });
+  assert.equal(statuses.get("pi-processes-results"), undefined, "later lifecycle events must not revive old failures");
+  await h.run("bash", { command: "exit 2", mode: "foreground" });
+  assert.equal(statuses.get("pi-processes-results"), undefined);
+  assert.equal(statuses.get("neighbor"), "unrelated status");
+  assert.equal(h.notifications.length, 0);
+  assert.deepEqual(h.errors, []);
+});
 
 test("real /processes completed cleanup removes owned output without provider calls or stopping a service", async t => {
   const h = await fixture(t, { after: [piProcesses], uiMode: "tui", uiContext: {

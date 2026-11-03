@@ -45,46 +45,17 @@ export class ProcessDisplay {
   private widget?: ProcessWidget;
   private shown = false;
   private disposed = false;
-  private readonly completed = new Set<string>();
-  private recent?: string;
-  private recentId?: string;
-  private feedbackTimer?: ReturnType<typeof setTimeout>;
 
   constructor(private readonly ctx: ExtensionContext, private readonly runtime: ProcessRuntime) {}
 
   sync(): void {
     if (this.disposed || this.ctx.mode !== "tui") return;
-    const views = this.runtime.views();
-    const ids = new Set(views.map(p => p.session_id));
-    if (this.recentId && !ids.has(this.recentId)) {
-      this.recent = this.recentId = undefined;
-      clearTimeout(this.feedbackTimer);
-      this.feedbackTimer = undefined;
-    }
-    for (const id of this.completed) if (!ids.has(id)) this.completed.delete(id);
-    let changed = false;
-    for (const job of views) {
-      if (!job.detached || !job.mode || job.status !== "exited" || this.completed.has(job.session_id)) continue;
-      this.completed.add(job.session_id);
-      if (job.attention === "none") {
-        this.recent = `${job.title.slice(0, 60)} · ${job.stopped ? "stopped" : "done"}`;
-        this.recentId = job.session_id;
-        changed = true;
-      }
-    }
-    if (changed) {
-      clearTimeout(this.feedbackTimer);
-      this.feedbackTimer = setTimeout(() => { this.recent = this.recentId = undefined; this.feedbackTimer = undefined; this.sync(); }, 5000);
-      this.feedbackTimer.unref();
-    }
-    // Pi ui.notify() appends visible conversation rows; completion feedback must
-    // remain in our footer slot instead, never accumulating a status transcript.
-    const failures = views.filter(job => job.attention === "needs_attention").length;
-    try { this.ctx.ui.setStatus("pi-processes-results", failures
-      ? `${failures} process result(s) need attention · /processes`
-      : this.recent ? `${this.recent} · /processes` : undefined); }
+    // Status describes live work only. Retained results belong in /processes.
+    const running = this.runtime.background().length;
+    try { this.ctx.ui.setStatus("pi-processes-results", running
+      ? `${running} ${running === 1 ? "shell" : "shells"} · /processes` : undefined); }
     catch { /* display-only feedback */ }
-    if (!this.runtime.background().length) {
+    if (!running) {
       this.clear();
       return;
     }
@@ -101,7 +72,6 @@ export class ProcessDisplay {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    clearTimeout(this.feedbackTimer);
     this.clear();
     try { this.ctx.ui.setStatus("pi-processes-results", undefined); } catch { /* teardown */ }
   }
