@@ -39,7 +39,7 @@ test("viewing/acknowledging running output cannot suppress a later failure", asy
   h.manager.handleInput("a");
   h.manager.handleInput("A");
   await eventually(() => h.rt.views()[0]?.attention === "needs_attention");
-  assert.match(h.statuses.get("pi-processes-results"), /1 process result.*need attention/);
+  assert.equal(h.statuses.get("pi-processes-results"), undefined);
   h.manager.handleInput("r");
   assert.match(h.text(), /failure-output/);
   h.manager.handleInput("\x1b");
