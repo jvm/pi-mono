@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Show pending automatic background-result deliveries as a separate monitor count in the footer. Monitors clear when results reach model context, are explicitly handled, or the requesting task is disarmed.
+
+### Fixed
+
+- Update managed bash launch-card headings in place when processes finish, fail, time out, or stop. Lifecycle-driven redraws leave stored tool results and output previews unchanged.
+
 ## [0.4.1] - 2026-11-03
 
 ### Fixed

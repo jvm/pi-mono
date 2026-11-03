@@ -7,6 +7,7 @@ import { ProcessDisplay } from "../src/process-widget.js";
 import { CompletionCoordinator } from "../src/completion.js";
 import { clean, renderCall, renderResult } from "../src/render.js";
 import { ProcessManager } from "../src/process-manager.js";
+import { LiveProcessCards } from "../src/live-process-cards.js";
 
 const PROCESS_NAMESPACE = {
   name: "processes",
@@ -88,7 +89,8 @@ export default function piProcesses(pi: ExtensionAPI): void {
   let display: ProcessDisplay | undefined;
   let panel: ProcessManager | undefined;
   let lifetime = new AbortController();
-  const completion = new CompletionCoordinator();
+  const completion = new CompletionCoordinator(() => display?.sync());
+  const cards = new LiveProcessCards();
   let wakeTimer: ReturnType<typeof setTimeout> | undefined;
   let lastUserEntry: string | undefined;
   let inputVersion = 0;
@@ -213,7 +215,8 @@ export default function piProcesses(pi: ExtensionAPI): void {
         return;
       }
     }, undefined, () => display?.sync(), () => inputVersion, ctx.mode === "tui");
-    display = new ProcessDisplay(ctx, runtime);
+    display = new ProcessDisplay(ctx, runtime, () => completion.armed);
+    if (ctx.mode === "tui") cards.attach(runtime);
     process.on("exit", onExit);
   });
   pi.on("session_shutdown", async () => {
@@ -228,7 +231,8 @@ export default function piProcesses(pi: ExtensionAPI): void {
     const old = runtime;
     runtime = undefined;
     process.removeListener("exit", onExit);
-    await old?.close();
+    try { await old?.close(); }
+    finally { cards.dispose(); }
   });
 
   const builtin = createBashToolDefinition(process.cwd());
@@ -265,7 +269,7 @@ export default function piProcesses(pi: ExtensionAPI): void {
     renderResult(output, options, theme, context) {
       const data = output.structuredContent ?? output.details;
       if (data && typeof data === "object" && "session_id" in data) {
-        return renderResult(output, options, theme);
+        return renderResult(cards.result(output, context), options, theme);
       }
       return builtin.renderResult!({ ...output, details: output.details as BashToolDetails | undefined }, options, theme, context);
     },
