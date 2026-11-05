@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-05
+
 ### Added
 
 - Request native transparent, opaque, or automatic backgrounds through both subscription image tools; preserve transparency during edits.
