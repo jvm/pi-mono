@@ -6,6 +6,18 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Request native transparent, opaque, or automatic backgrounds through both subscription image tools; preserve transparency during edits.
+- Return requested settings, backend reports, and independently decoded dimensions and alpha properties separately, with warnings when inspection is unavailable or properties disagree.
+- Opt into the PNG-only Codex Images generation/edit transport with `transport: "images"` in tool arguments or trusted configuration. Responses remains the default.
+- Retain bounded request IDs and classify authentication, quota, moderation, unsupported-feature, and invalid-request failures without exposing raw error bodies.
+
+### Fixed
+
+- Preserve completed images when the returned format differs from the request, using actual MIME types and filenames with branch-local recovery.
+- Replace chroma-key-first skill guidance with native transparency, input inspection, and alpha-preserving edit guidance adapted from Codex `0.168.0-alpha.3`.
+
 ## [0.3.0] - 2026-10-30
 
 ### Changed

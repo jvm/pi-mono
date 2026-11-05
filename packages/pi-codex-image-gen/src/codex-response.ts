@@ -1,5 +1,7 @@
 // The subscription Responses contract is private. Keep its parser and safety
 // boundaries separate from Pi tool registration and file handling.
+import { randomUUID } from "node:crypto";
+
 export const REQUEST_TIMEOUT_MS = 5 * 60_000;
 export const MAX_RESPONSE_BYTES = 100 * 1024 * 1024;
 export const MAX_IMAGE_BYTES = 32 * 1024 * 1024;
@@ -21,9 +23,12 @@ export interface ParsedCodexResponse {
 		result: string;
 		revisedPrompt?: string;
 		reported: ReportedImage;
+		generationId?: string;
 	};
 	text: string[];
 	responseId?: string;
+	requestId?: string;
+	imagegenRequestId?: string;
 	usage?: unknown;
 }
 
@@ -46,7 +51,37 @@ function text(value: unknown, secrets: string[] = []): string {
 
 function identifier(value: unknown, secrets: string[]): string | undefined {
 	return typeof value === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(value)
+		&& !value.startsWith("eyJ")
 		&& !secrets.some(secret => secret && value.includes(secret)) ? value : undefined;
+}
+
+export interface FailureDiagnostics {
+	category: "authentication" | "quota" | "moderation" | "unsupported-feature" | "invalid-request" | "backend";
+	status?: number;
+	code?: string;
+	requestId?: string;
+	imagegenRequestId?: string;
+	responseId?: string;
+}
+
+export class CodexRequestError extends Error {
+	constructor(message: string, readonly diagnostics: FailureDiagnostics) {
+		const ids = [
+			diagnostics.code ? `Code: ${diagnostics.code}.` : "",
+			diagnostics.requestId ? `Request ID: ${diagnostics.requestId}.` : "",
+			diagnostics.imagegenRequestId ? `Image request ID: ${diagnostics.imagegenRequestId}.` : "",
+			diagnostics.responseId ? `Response ID: ${diagnostics.responseId}.` : "",
+		].filter(Boolean).join(" ");
+		super(`${message}${ids ? ` ${ids}` : ""}`);
+		this.name = "CodexRequestError";
+	}
+}
+
+function requestIds(response: Response, secrets: string[]) {
+	return {
+		requestId: identifier(response.headers.get("x-request-id"), secrets),
+		imagegenRequestId: identifier(response.headers.get("x-codex-imagegen-request-id"), secrets),
+	};
 }
 
 export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -120,21 +155,35 @@ function isQuota(error: Record<string, unknown>): boolean {
 	return [error.code, error.type].some(value => typeof value === "string" && QUOTA_CODES.has(value));
 }
 
-function errorHint(error: unknown): string {
-	const { code, type } = object(error);
+function classifyError(value: unknown, status?: number): Pick<FailureDiagnostics, "category"> & { message: string } {
+	const error = object(value);
+	const { code, type } = error;
+	if (status === 401 || status === 403) return { category: "authentication", message: status === 401
+		? "Image login was rejected. Run /login codex-images again."
+		: "Codex access was denied. This can be a connection or account restriction; it does not identify the image model." };
 	if (isQuota({ code, type })) {
-		return "Codex subscription quota is unavailable or exhausted. Check your plan or wait for its reset.";
+		return { category: "quota", message: "Codex subscription quota is unavailable or exhausted. Check your plan or wait for its reset." };
 	}
-	if (code === "moderation_blocked" || type === "image_generation_user_error") {
-		return "Codex could not generate this image. Review the prompt and input images before trying again.";
+	if (code === "moderation_blocked") {
+		return { category: "moderation", message: "Codex could not generate this image. Review the prompt and input images before trying again." };
 	}
-	return "Codex could not complete the image request.";
+	if (error.detail === "GIF output is not enabled for this request."
+		|| error.message === "GIF output is not enabled for this request."
+		|| ["unsupported_parameter", "unsupported_value", "invalid_input_fidelity_model", "unsupported_model", "invalid_complexity"].includes(String(code))
+		|| ["Complexity 'low' is not supported for this image model.", "Complexity 'medium' is not supported for this image model."].includes(String(error.message))) {
+		return { category: "unsupported-feature", message: "Codex has not enabled or does not support this image feature for this request. No alternate transport or API fallback was used." };
+	}
+	if (type === "image_generation_user_error" || status === 400 || status === 422) {
+		return { category: "invalid-request", message: "Codex could not generate this image. Review the prompt and input images before trying again." };
+	}
+	return { category: "backend", message: "Codex could not complete the image request." };
 }
 
-export async function httpFailure(response: Response, signal: AbortSignal): Promise<{ message: string; retry: boolean }> {
+export async function httpFailure(response: Response, signal: AbortSignal, secrets: string[] = []): Promise<{ message: string; retry: boolean; diagnostics: FailureDiagnostics }> {
 	if (response.headers.get("cf-mitigated") === "challenge") {
 		void response.body?.cancel().catch(() => undefined);
-		return { message: "Codex connection was challenged by Cloudflare. This does not establish model or subscription availability.", retry: false };
+		return { message: "Codex connection was challenged by Cloudflare. This does not establish model or subscription availability.", retry: false,
+			diagnostics: { category: "backend", status: response.status, ...requestIds(response, secrets) } };
 	}
 	let body = "";
 	try {
@@ -147,18 +196,20 @@ export async function httpFailure(response: Response, signal: AbortSignal): Prom
 	}
 	let error: Record<string, unknown> = {};
 	try {
-		error = object(object(JSON.parse(body)).error);
+		const parsed = object(JSON.parse(body));
+		error = parsed.error ? object(parsed.error) : parsed;
 	} catch { /* HTML and other non-JSON error bodies are not diagnostics. */ }
-	const terminal = isQuota(error)
+	const classified = classifyError(error, response.status);
+	const terminal = classified.category === "unsupported-feature" || isQuota(error)
 		|| error.code === "moderation_blocked" || error.type === "image_generation_user_error";
-	const hint = response.status === 401
-		? "Image login was rejected. Run /login codex-images again."
-		: response.status === 403
-			? "Codex access was denied. This can be a connection or account restriction; it does not identify the image model."
-			: errorHint(error);
+	const diagnostics: FailureDiagnostics = {
+		category: classified.category, status: response.status,
+		code: identifier(error.code, secrets), ...requestIds(response, secrets),
+	};
 	return {
-		message: `Codex image request failed (HTTP ${response.status}). ${hint}`,
+		message: `Codex image request failed (HTTP ${response.status}). ${classified.message}`,
 		retry: !terminal && [429, 500, 502, 503, 504].includes(response.status),
+		diagnostics,
 	};
 }
 
@@ -180,7 +231,7 @@ export async function parseCodexSse(
 	secrets: string[],
 	onProgress?: (stage: string) => void,
 ): Promise<ParsedCodexResponse> {
-	const parsed: ParsedCodexResponse = { text: [] };
+	const parsed: ParsedCodexResponse = { text: [], ...requestIds(response, secrets) };
 	let completed = false;
 	let textChars = 0;
 	let lastStage: string | undefined;
@@ -208,7 +259,14 @@ export async function parseCodexSse(
 		switch (event.type) {
 			case "error":
 			case "response.failed":
-				throw new Error(errorHint(object(event.response).error ?? event.error ?? event));
+				{
+					const error = object(object(event.response).error ?? event.error ?? event);
+					const classified = classifyError(error);
+					throw new CodexRequestError(classified.message, {
+						category: classified.category, code: identifier(error.code, secrets),
+						...requestIds(response, secrets), responseId: parsed.responseId,
+					});
+				}
 			case "response.incomplete":
 				throw new Error("Codex response was incomplete. No automatic retry was made.");
 			case "response.created":
@@ -283,4 +341,47 @@ export async function parseCodexSse(
 	if (!completed) throw new Error("Codex stream ended before completion. The backend may still finish; no automatic retry was made.");
 	parsed.text = [text(parsed.text.join(""), secrets)];
 	return parsed;
+}
+
+function imageUsage(value: unknown): Record<string, unknown> | undefined {
+	const usage = object(value);
+	const counters = (record: Record<string, unknown>, fields: string[]) => Object.fromEntries(fields.flatMap(key =>
+		typeof record[key] === "number" && Number.isFinite(record[key]) && record[key] >= 0 ? [[key, record[key]]] : []));
+	const result: Record<string, unknown> = counters(usage, ["input_tokens", "output_tokens", "total_tokens"]);
+	for (const key of ["input_tokens_details", "output_tokens_details"]) {
+		const details = counters(object(usage[key]), ["image_tokens", "text_tokens", "cached_tokens", "reasoning_tokens"]);
+		if (Object.keys(details).length) result[key] = details;
+	}
+	return Object.keys(result).length ? result : undefined;
+}
+
+/** Bounded JSON from the private Codex Images routes, not public API billing. */
+export async function parseCodexImages(
+	response: Response, signal: AbortSignal, secrets: string[],
+): Promise<ParsedCodexResponse> {
+	const decoder = new TextDecoder();
+	let body = "";
+	for await (const chunk of chunks(response, MAX_RESPONSE_BYTES, signal)) body += decoder.decode(chunk, { stream: true });
+	body += decoder.decode();
+	let parsed: Record<string, unknown>;
+	try { parsed = object(JSON.parse(body)); }
+	catch { throw new Error("Codex returned invalid image JSON. No automatic retry was made."); }
+	if (parsed.error || parsed.detail) {
+		const error = object(parsed.error ?? parsed);
+		const classified = classifyError(error);
+		throw new CodexRequestError(classified.message, { category: classified.category,
+			code: identifier(error.code, secrets), ...requestIds(response, secrets) });
+	}
+	if (!Array.isArray(parsed.data) || parsed.data.length !== 1) throw new Error("Codex must return exactly one image. No automatic retry was made.");
+	const item = object(parsed.data[0]);
+	if (typeof item.b64_json !== "string" || !item.b64_json) throw new Error("Codex did not return image data.");
+	if (item.b64_json.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4) throw new Error("Codex image exceeded the 32 MiB size limit.");
+	const generationId = identifier(item.generation_id, secrets);
+	return {
+		text: [], ...requestIds(response, secrets), usage: imageUsage(parsed.usage),
+		image: {
+			id: generationId ?? randomUUID(), generationId, status: "completed",
+			result: item.b64_json, reported: reportedImage(parsed, secrets),
+		},
+	};
 }

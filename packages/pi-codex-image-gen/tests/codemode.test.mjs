@@ -6,10 +6,14 @@ import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { createCodemodeExtension, SessionManager } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { PhotonImage } from "@silvia-odwyer/photon-node";
 import { codexHarness, requestBody, textResponse } from "../../../tests/codex-harness.mjs";
 import imageExtension from "../.test-dist/extensions/index.js";
 import { ARTIFACT_ENTRY, RESERVATION_ENTRY, artifactRecord, branchArtifacts, readArtifactManifest, reserveArtifact } from "../.test-dist/src/artifacts.js";
 import { REQUEST_TIMEOUT_MS } from "../.test-dist/src/codex-response.js";
+
+process.env.PI_OFFLINE = "1";
+process.env.PI_TELEMETRY = "0";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
@@ -91,13 +95,15 @@ async function fixture(t, mode = "only", factories = []) {
     await rm(root, { recursive: true, force: true });
   });
   const imageRequests = [];
+  const imageUrls = [];
   const chatRequests = [];
   let call;
   let imageHandler = () => imageResponse();
   globalThis.fetch = async (_url, init) => {
-    const body = requestBody(init);
-    if (body.tools?.some(tool => tool.type === "image_generation")) {
+    const body = String(_url).includes("/codex/images/") ? JSON.parse(init.body) : requestBody(init);
+    if (String(_url).includes("/codex/images/") || body.tools?.some(tool => tool.type === "image_generation")) {
       imageRequests.push(body);
+      imageUrls.push(String(_url));
       return imageHandler(body);
     }
     chatRequests.push(body);
@@ -109,7 +115,7 @@ async function fixture(t, mode = "only", factories = []) {
     return textResponse();
   };
   return {
-    ...h, root, nested, imageRequests, chatRequests,
+    ...h, root, nested, imageRequests, imageUrls, chatRequests,
     records: () => h.sessionManager.getBranch().filter(entry => entry.type === "custom" && entry.customType === ARTIFACT_ENTRY),
     setImageHandler(handler) { imageHandler = handler; },
     async runInSession(session, name, args) {
@@ -173,6 +179,79 @@ test("nested artifact metadata reaches the parent; explicit read/image delivers 
   assert.deepEqual(await readFile(record.artifact.path), PNG);
   assert.equal((await stat(record.artifact.path)).mode & 0o777, 0o600);
   assert.equal((await stat(join(record.artifact.path, ".."))).mode & 0o777, 0o700);
+});
+
+test("native transparency and dedicated Images edits work through codemode artifact wiring", async t => {
+  const h = await fixture(t);
+  const image = new PhotonImage(Uint8Array.from([255, 0, 0, 0, 0, 0, 255, 128]), 2, 1);
+  const bytes = Buffer.from(image.get_bytes());
+  image.free();
+  h.setImageHandler(body => {
+    assert.equal(body.background, "transparent");
+    assert.equal(body.model, "gpt-image-2");
+    assert.equal(body.quality, "auto");
+    assert.equal(body.size, "auto");
+    assert.equal(body.tools, undefined);
+    return Response.json({ background: "transparent", size: "2x1", data: [{ b64_json: bytes.toString("base64"), generation_id: "gen-native" }] },
+      { headers: { "x-codex-imagegen-request-id": "req-native" } });
+  });
+  const generated = await h.script(`text(await tools.codex_generate_image_artifact({
+    prompt:"fixture",background:"transparent",transport:"images",save:"none"
+  }));`);
+  assert.equal(generated.isError, false, JSON.stringify(generated.content));
+  const data = h.nested.find(e => e.toolName === "codex_generate_image_artifact").structuredContent;
+  assert.equal(data.measuredImage.hasTransparency, true);
+  assert.equal(data.measuredImage.alphaMin, 0);
+  assert.equal(data.measuredImage.alphaMax, 128);
+  assert.equal(data.transport, "images");
+  assert.equal(data.routingModel, undefined);
+  assert.equal(data.imagegenRequestId, "req-native");
+  assert.equal(data.imageWarning, undefined);
+  assert.equal(data.requestedImage.background, "transparent");
+  assert.deepEqual(await readFile(data.artifact.path), bytes);
+  assert.equal(h.imageUrls[0], "https://chatgpt.com/backend-api/codex/images/generations");
+  const edited = await h.script(`text(await tools.codex_generate_image_artifact({
+    prompt:"fixture edit",background:"transparent",transport:"images",save:"none",
+    referencedImagePaths:[${JSON.stringify(data.artifact.path)}]
+  }));`);
+  assert.equal(edited.isError, false, JSON.stringify(edited.content));
+  assert.equal(h.imageUrls[1], "https://chatgpt.com/backend-api/codex/images/edits");
+  assert.deepEqual(h.imageRequests[1].images, [{ image_url: `data:image/png;base64,${bytes.toString("base64")}` }]);
+  assert.equal(h.records().length, 2);
+});
+
+test("Responses artifact backgrounds and actual-format recovery survive a requested format mismatch", async t => {
+  const h = await fixture(t);
+  const result = await h.script(`text(await tools.codex_generate_image_artifact({
+    prompt:"fixture",background:"transparent",outputFormat:"webp",save:"none"
+  }));`);
+  assert.equal(result.isError, false, JSON.stringify(result.content));
+  assert.equal(h.imageRequests[0].tools[0].background, "transparent");
+  const data = h.nested.find(e => e.toolName === "codex_generate_image_artifact").structuredContent;
+  assert.equal(data.artifact.mimeType, "image/png");
+  assert.ok(data.artifact.path.endsWith(".png"));
+  assert.equal(data.requestedImage.outputFormat, "webp");
+  assert.equal(data.measuredImage.outputFormat, "png");
+  assert.match(data.imageWarning, /Requested webp.*returned png/);
+  const reservation = h.sessionManager.getBranch().find(e => e.customType === RESERVATION_ENTRY);
+  assert.equal(reservation.data.mimeType, "image/webp");
+  const recovered = await branchArtifacts([reservation]);
+  assert.equal(recovered[0].artifact.path, data.artifact.path);
+  assert.deepEqual(await readFile(recovered[0].artifact.path), PNG);
+  assert.equal(h.imageRequests.length, 1);
+});
+
+test("inspection failure retains a recoverable artifact and does not fabricate measured pixels", async t => {
+  const h = await fixture(t);
+  h.setImageHandler(() => imageResponse(PNG.subarray(0, 8)));
+  const result = await h.script(`text(await tools.codex_generate_image_artifact({prompt:"fixture",save:"none"}));`);
+  assert.equal(result.isError, false, JSON.stringify(result.content));
+  const data = h.nested.find(e => e.toolName === "codex_generate_image_artifact").structuredContent;
+  assert.equal(data.measuredImage, undefined);
+  assert.match(data.imageWarning, /unverified/);
+  assert.deepEqual(await readFile(data.artifact.path), PNG.subarray(0, 8));
+  assert.equal(h.records().length, 1);
+  assert.equal(h.imageRequests.length, 1);
 });
 
 test("typed recovery survives later script failure without a new generation", async t => {

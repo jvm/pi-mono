@@ -8,6 +8,7 @@ Create and edit images without leaving [Pi](https://pi.dev).
 
 - **Generate images in conversation** — describe the asset you need and let Pi create it.
 - **Edit from references** — transform up to five local or recent conversation images.
+- **Create native cutouts** — request transparent backgrounds and preserve alpha during edits, without API billing or chroma keying.
 - **Save where work happens** — return images inline or organize them by project, session, or custom directory.
 - **Separate image login** — keep Pi chat on `openai` OAuth while the extension handles image authentication.
 - **Scripted workflows without image payloads** — generate recoverable originals through codemode and load images only for explicit display.
@@ -33,6 +34,20 @@ Artifact results additionally return `generationDurationMs`, `routingProvider`,
 `routingModel`, optional `responseId`, `imageGenerationId`, and `reportedImage`.
 The latter is an allowlisted, bounded backend report, not measured dimensions,
 transparency, or proof of the served model. Inspect pixels separately.
+
+Results keep `requestedImage`, `reportedImage`, and `measuredImage` separate.
+`measuredImage` contains decoded width, height, output format, `alphaMin`,
+`alphaMax`, and `hasTransparency`. Measurement is best-effort: it admits at most
+16,777,216 header-declared pixels to an isolated decoder worker, with a three-second
+inspection deadline. Originals are saved before inspection. If decoding fails,
+exceeds a limit, or is cancelled, `measuredImage` is omitted and `imageWarning`
+reports that pixels are unverified. This is not a full image-security audit.
+Visual inspection is still required for edge quality and content.
+
+If Codex returns a different supported format, the original is retained without
+conversion, using its actual MIME type and filename extension. `imageWarning`
+reports the mismatch; it never triggers regeneration. Bounded `requestId` and
+`imagegenRequestId` values are returned when available.
 
 Direct and artifact generation share account-local admission: two active
 operations, eight queued operations, and at most 32 account scopes per process
@@ -83,14 +98,57 @@ In a Pi session:
 
 The agent will invoke `codex_generate_image` with your prompt, optionally include up to five local or recent conversation images for editing, stream the response from the Codex backend, and save the resulting image to disk. The `model` parameter controls the Codex routing model, not the image model. The backend selects the image model; `backendImageModel` is `"unknown"` unless the response explicitly reports an image model.
 
-The tool reports generation stages and the backend's returned size, quality, background, and format in `details.reportedImage`. These are server-reported values, not guarantees inferred from the prompt. `details.byteCount` records decoded bytes; `details.generationDurationMs` records elapsed generation/save time. Check the actual image before using it, especially for exact dimensions or alpha transparency.
+The tool reports generation stages and the backend's returned size, quality, background, and format in `details.reportedImage`. These are server-reported values, not guarantees inferred from the prompt. `details.measuredImage`, when available, describes independently decoded pixels. `details.byteCount` records decoded bytes; `details.generationDurationMs` records elapsed generation/save/inspection time.
+
+### Native transparency
+
+Both tools accept `background: "transparent"`, `"opaque"`, or `"auto"`.
+Omitting the parameter preserves the existing Responses request behavior.
+
+```js
+const result = await tools.codex_generate_image_artifact({
+  prompt: "Isolate this product; preserve its shape, fine edges, and label text.",
+  referencedImagePaths: ["product.png"],
+  background: "transparent",
+  outputFormat: "png",
+  save: "project"
+});
+text(result);
+```
+
+Transparent output requires PNG or WebP; JPEG combinations reject before
+authentication or generation. Preserve existing transparency during edits
+unless an opaque background is requested. Use native alpha first, not a
+chroma-key source or a separately billed API fallback. Check measured alpha and
+inspect the image: a valid alpha channel alone does not guarantee a good cutout.
+
+### Optional dedicated Images transport
+
+Responses remains the default and supports PNG, JPEG, and WebP. Select
+`transport: "images"` per call or in trusted configuration to use the Codex
+subscription's dedicated `/images/generations` and `/images/edits` routes.
+References select the edit route automatically. This is **not** the public
+Images API and does not use API keys.
+
+The opt-in transport is PNG-only. It follows Codex's client contract:
+`gpt-image-2`, `quality: "auto"`, and `size: "auto"`. The identifier is not proof
+of which model weights are served. Explicit routing `model` arguments and
+JPEG/WebP output reject before generation; configured routing models apply
+only to Responses. Per-call `transport` overrides configuration.
+
+There is no automatic transport fallback after any failure. This avoids
+duplicate quota consumption and silent changes in output behavior. GIF, SVG,
+complexity, masks, markup, exact size/quality controls, and Flare/Sunburst
+selection are not exposed. In November 2026 tests, GIF requests were rejected
+by both Pi and an official GIF-enabled Codex alpha. Client support alone does
+not establish server access.
 
 ### Subscription reliability and limits
 
 - Requests identify this package with a Pi User-Agent. The image login uses the Codex-compatible public OAuth client; it does not launch the Codex app, read its credentials, import browser cookies, or fall back to paid API calls.
 - One five-minute network deadline covers the connection, retries, and stream. Escape cancels network work; the remote generation may still finish.
 - Prompts: 32,000 characters. References: five regular PNG/JPEG/WebP files or conversation images, at most 20 MiB each and 50 MiB combined.
-- Responses: 100 MiB total, with at most one 32 MiB decoded output image. Base64 and format signatures are checked; this is not a full image decoder. Backend text and revised prompts are limited to 4,000 characters; HTTP error bodies are read only up to 16 KiB and are not displayed.
+- Responses: 100 MiB total, with at most one 32 MiB decoded output image. Base64 and format signatures are checked; bounded worker inspection additionally measures supported images when possible. Backend text and revised prompts are limited to 4,000 characters; HTTP error bodies are read only up to 16 KiB and are not displayed.
 - Transient HTTP failures have bounded retries. Quota exhaustion, moderation errors, failed/incomplete streams, connection errors, and deadlines are not automatically retried. Avoid immediately repeating an ambiguous failure: the first generation may have consumed quota.
 - Local save settings are checked before generation. Existing files are never overwritten; a persistent save failure still returns the direct inline image or scripted original artifact and a bounded warning.
 - Cloudflare challenges are reported as connection failures, not as proof that your subscription or image model is unsupported.
@@ -223,7 +281,7 @@ delivery, recovery, authentication, and approval contracts.
 
 The optional `skills/imagegen/scripts/image_gen.py` API CLI accepts `--model gpt-image-2.5-flare` or `--model gpt-image-2.5-sunburst`, including their `2026-09-08` snapshots. Both accept `--quality xhigh` and `--quality max` in addition to the existing quality settings. The CLI default remains `gpt-image-2`. Both 2.5 models support `--size auto` and custom dimensions such as `1536x864`, under the [documented size constraints](skills/imagegen/references/image-api.md#flexible-sizes-gpt-image-2-and-25). Resolutions above `2560x1440` are experimental.
 
-GPT Image 2 now supports native transparency in preview: use `--model gpt-image-2 --background transparent --output-format png` (or `webp`) in confirmed CLI mode. This uses `OPENAI_API_KEY` and separate API billing. The Pi tool still uses chroma-key removal because it has no background parameter.
+The existing CLI's native-transparency path uses `OPENAI_API_KEY` and separate API billing. It is not required for native transparency through the Pi subscription tools. This change does not expand API fallback capabilities.
 
 Public API model selection does not establish support for the same options on the private Codex backend. The extension does not expose Flare/Sunburst selection or claim that your account has received the Images 2.5 rollout.
 
@@ -233,7 +291,7 @@ In subscription tests on September 11, 2026, the direct endpoint accepted Flare,
 
 | Credential / route | Model selection | Usage and fallback |
 | --- | --- | --- |
-| `codex-images` OAuth / private Codex Responses | `model` selects a routing model, not an image model | ChatGPT image quota; preferred credential |
+| `codex-images` OAuth / private Codex Responses or Images | `model` selects a Responses routing model, not an image model; Images uses automatic server-selected rendering | ChatGPT image quota; preferred credential |
 | Legacy Pi `openai-codex` OAuth / same backend | Same routing semantics | Used only when owned image credentials are absent; no switch after an auth/generation failure |
 | Pi `openai` ChatGPT plan-sharing login | Any chat model | Not accepted for image generation; never sent to this backend |
 | OpenAI API key | Explicit standalone Python CLI only | Separate API billing; never an automatic fallback from the Pi tool |
@@ -256,7 +314,7 @@ The package implements the Codex-compatible OAuth protocol itself. It neither im
 
 Existing Pi `openai-codex` credentials remain a compatibility fallback when `codex-images` credentials are absent and the legacy provider is available. With both image logins, `codex-images` wins. A selected login that fails to refresh or generate does not switch to another account. Configured but unusable image credentials also block fallback, including a stored API-key credential that Pi's OAuth-only provider cannot resolve. Re-run `/login codex-images` to repair that login instead of silently using a different account.
 
-Both image logins use `https://chatgpt.com/backend-api/codex/responses`. Pi's new `openai` plan-sharing OAuth grant is different and [does not support image generation](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations). The extension never sends that chat token to the Codex backend. API keys do **not** enable this tool or API-key billing.
+Both image logins use fixed HTTPS routes under `https://chatgpt.com/backend-api/codex/`: Responses by default, or the dedicated Images routes when explicitly selected. Pi's new `openai` plan-sharing OAuth grant is different and [does not support image generation](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations). The extension never sends that chat token to the Codex backend. API keys do **not** enable this tool or API-key billing.
 
 ## Configuration
 
@@ -284,6 +342,7 @@ Project config overrides global config only when project trust is active. If pro
 | `save`    | string | `"global"` | Default save mode (see below).           |
 | `saveDir` | string | —          | Directory used when `save=custom`.       |
 | `model`   | string | `"gpt-6-astra"`| Codex routing model, not the backend image model. |
+| `transport` | string | `"responses"` | Subscription route: `responses` or opt-in PNG-only `images`. |
 
 ### Environment variables
 
@@ -312,6 +371,8 @@ Both generation entry points accept these parameters.
 | `prompt`       | string | ✅        | The image generation prompt.                                       |
 | `model`        | string | —        | Override the Codex model. Defaults to config or `gpt-6-astra`.     |
 | `outputFormat` | string | —        | `png` (default), `jpeg`, or `webp`.                                |
+| `background` | string | — | `transparent`, `opaque`, or `auto`; omission preserves existing Responses behavior. |
+| `transport` | string | — | Override configured subscription transport: `responses` or PNG-only `images`. |
 | `save`         | string | —        | Override save mode for this call.                                  |
 | `saveDir`      | string | —        | Directory when `save=custom`. Relative paths resolve under CWD.    |
 | `referencedImagePaths` | string[] | — | Up to five local images to edit. Relative paths resolve under CWD. |
@@ -320,13 +381,13 @@ Both generation entry points accept these parameters.
 ## How it works
 
 1. Resolves package-owned `codex-images` OAuth via Pi, or falls back to available legacy Pi `openai-codex` OAuth.
-2. Sends a request to the Codex Responses endpoint and routing model (default `gpt-6-astra`) with the `image_generation` tool enabled.
+2. Sends a request through Responses and its routing model (default `gpt-6-astra`), or the explicitly selected PNG-only Images transport.
 3. For edits, attaches the selected local or conversation images to the request.
 4. The backend selects an image model to generate or edit the image.
-5. Parses the SSE stream and strictly validates the returned base64 and image format.
+5. Parses bounded SSE or Images JSON and validates base64 and the actual returned file format.
 6. For the artifact tool, commits the reserved temporary original and records its branch-local recovery metadata.
 7. Saves a persistent copy according to the active save mode; failures produce a bounded warning without discarding a usable inline image or artifact.
-8. Returns the direct inline image or structured artifact metadata. Codemode displays an image only through an explicit `read` and `image()` operation.
+8. Attempts bounded, isolated pixel inspection, then returns the direct inline image or structured artifact metadata. Codemode displays an image only through an explicit `read` and `image()` operation.
 
 ## Troubleshooting
 
@@ -337,6 +398,8 @@ Both generation entry points accept these parameters.
 | 429 response | Rate limited | Wait and retry; the extension retries automatically with backoff |
 | "Codex did not return an image" | Backend refused the prompt | Rephrase the prompt and try again |
 | "save=custom requires saveDir" | Missing config | Set `saveDir` in config or `PI_CODEX_IMAGE_SAVE_DIR` env var |
+| Unsupported-feature error | Backend feature gate or unsupported parameter | Check the supported subscription controls; do not switch transports or billing automatically |
+| `imageWarning` | Format mismatch, unavailable inspection, or inconsistent properties | Keep the completed original and inspect it locally; do not regenerate automatically |
 
 ## License
 
