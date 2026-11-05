@@ -254,6 +254,7 @@ test("malformed backend payload fails before saving or returning image content",
 
 async function harness(t, responder, registerProvider) {
   const cwd = await mkdtemp(join(tmpdir(), "imagegen-contract-"));
+  isolateAgentDir(t, cwd);
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const originalFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = originalFetch; });
@@ -305,7 +306,6 @@ test("tool sends an honest Pi User-Agent, blocks redirects, and retains the subs
 
 test("owned image OAuth uses the Astra default and preserves config and per-call routing overrides", async (t) => {
   const h = await harness(t, () => sseResponse());
-  isolateAgentDir(t, h.cwd);
   const ctx = context(h.cwd);
   ctx.modelRegistry.getProviderAuth = async provider => {
     assert.equal(provider, IMAGE_AUTH_PROVIDER);
@@ -602,6 +602,22 @@ test("dedicated Images transport follows the subscription generation/edit contra
   await h.run({ transport: "images", referencedImagePaths: ["input.png"] });
   assert.equal(h.calls[1].url, "https://chatgpt.com/backend-api/codex/images/edits");
   assert.deepEqual(JSON.parse(h.calls[1].body).images, [{ image_url: `data:image/png;base64,${PNG.toString("base64")}` }]);
+  assert.equal(JSON.parse(h.calls[1].body).background, "auto");
+  await h.run({ transport: "images", referencedImagePaths: ["input.png"], background: "opaque" });
+  assert.equal(JSON.parse(h.calls[2].body).background, "opaque");
+});
+
+test("the shared harness isolates global agent settings and retains default Responses routing", async t => {
+  const h = await harness(t, () => sseResponse());
+  assert.equal(process.env.PI_CODING_AGENT_DIR, join(h.cwd, "isolated-agent"));
+  await h.run();
+  assert.equal(h.calls[0].url, "https://chatgpt.com/backend-api/codex/responses");
+});
+
+test("new Images generation defaults to opaque while edits leave background selection automatic", async t => {
+  const h = await harness(t, () => Response.json({ data: [{ b64_json: PNG.toString("base64") }] }));
+  await h.run({ transport: "images" });
+  assert.equal(JSON.parse(h.calls[0].body).background, "opaque");
 });
 
 test("Images transport rejects incompatible options before auth and honors only trusted config", async t => {
@@ -613,7 +629,6 @@ test("Images transport rejects incompatible options before auth and honors only 
     { transport: "images", outputFormat: "jpeg" }, { transport: "images", model: "gpt-6-astra" }]) {
     await assert.rejects(h.run(params, undefined, undefined, noAuth), /transport/);
   }
-  isolateAgentDir(t, h.cwd);
   await mkdir(join(h.cwd, ".pi", "extensions"), { recursive: true });
   await writeFile(join(h.cwd, ".pi", "extensions", "codex-image-gen.json"),
     JSON.stringify({ transport: "images", model: "unused-routing-model" }));

@@ -395,7 +395,7 @@ Scene/backdrop: genuinely transparent background
 Constraints: preserve product identity, geometry, fine edges, and label text exactly; no halos, fringing, or restyling
 ```
 
-Tool settings: use `background: "transparent"` and `outputFormat: "png"`. Inspect measured alpha and the visual result; preserve original bytes and copy the selected asset into the project.
+Pi tool settings: use `background: "transparent"` and `outputFormat: "png"`. Inspect measured alpha and the visual result; preserve original bytes and copy the selected asset into the project with a matching filename extension. For explicitly chosen CLI mode, use `references/cli.md` and inspect the saved file locally; `measuredImage` is Pi-only metadata.
 
 ### style-transfer
 ```

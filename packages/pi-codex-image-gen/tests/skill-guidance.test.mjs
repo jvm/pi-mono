@@ -18,4 +18,6 @@ test("skill preserves Pi-specific delivery, reference, transport, and quota safe
     assert.ok(content.includes(required), required);
   }
   assert.doesNotMatch(content, /\$CODEX_HOME|generatedImage\(result\)|@exec/);
+  assert.match(content, /Use a matching extension/);
+  assert.match(content, /Do not simply rename JPEG bytes/);
 });

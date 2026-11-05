@@ -135,6 +135,10 @@ The opt-in transport is PNG-only. It follows Codex's client contract:
 of which model weights are served. Explicit routing `model` arguments and
 JPEG/WebP output reject before generation; configured routing models apply
 only to Responses. Per-call `transport` overrides configuration.
+When `background` is omitted, new Images generation uses `opaque`, while
+reference edits use `auto` rather than forcing opacity. Explicitly request
+`transparent` when an edit must preserve alpha; automatic background selection
+is not a guarantee.
 
 There is no automatic transport fallback after any failure. This avoids
 duplicate quota consumption and silent changes in output behavior. GIF, SVG,

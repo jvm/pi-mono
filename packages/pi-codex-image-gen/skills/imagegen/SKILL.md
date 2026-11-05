@@ -61,6 +61,7 @@ Pi tool save-path policy:
   3. If the image is only for preview or brainstorming, render it inline; the underlying file can remain at the default `<pi-agent-dir>/generated-images/<pi-session-id>/*` path.
 - Never leave a project-referenced asset only at the default `<pi-agent-dir>/generated-images/<pi-session-id>/*` path.
 - Move or delete a Pi-generated original only when the user explicitly requests it.
+- Use a matching extension when copying returned bytes to a project filename. If the requested filename's extension differs from the actual format, report the mismatch and use the actual extension. Do not simply rename JPEG bytes to `.png` or otherwise disguise the format; an exact-format conversion must be a separate, explicit local operation that preserves the original.
 - Do not overwrite an existing asset unless the user explicitly asked for replacement; otherwise create a sibling versioned filename such as `hero-v2.png` or `item-icon-edited.png`.
 
 Shared prompt guidance for both modes lives in `references/prompting.md` and `references/sample-prompts.md`.

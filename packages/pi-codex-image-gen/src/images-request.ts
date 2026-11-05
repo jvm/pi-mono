@@ -10,7 +10,7 @@ export function buildImagesRequest(
 ) {
   return {
     prompt,
-    background: background ?? "opaque",
+    background: background ?? (images.length ? "auto" : "opaque"),
     model: "gpt-image-2",
     quality: "auto",
     size: "auto",
