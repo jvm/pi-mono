@@ -7,6 +7,7 @@ description: "Generate or edit raster images when the task benefits from AI-crea
 
 > Adapted from OpenAI Codex's `imagegen` skill for Pi.
 > Original source: https://github.com/openai/codex/tree/main/codex-rs/skills/src/assets/samples/imagegen
+> Subscription guidance reconciled with Codex `rust-v0.168.0-alpha.3`, including the model-facing image-tool instructions.
 > Required Pi modifications: use Pi's `codex_generate_image` tool name, Pi artifact paths, and the bundled helper path.
 
 Generates or edits images for the current project (for example website assets, game assets, UI mockups, product mockups, wireframes, logo design, photorealistic images, or infographics).
@@ -15,8 +16,8 @@ Generates or edits images for the current project (for example website assets, g
 
 This skill has exactly two top-level modes:
 
-- **Default Pi tool mode (preferred):** Pi `codex_generate_image` tool for new image generation, edits using up to five local or recent conversation images, reference variants, and simple transparent-image requests. Does not require `OPENAI_API_KEY`.
-- **Fallback CLI mode:** `scripts/image_gen.py` CLI. Use when the user explicitly asks for the CLI/API/model path, or after the user explicitly confirms a native transparency API fallback. Requires `OPENAI_API_KEY` and separate API billing.
+- **Default Pi tool mode (preferred):** Pi `codex_generate_image` tool for new image generation, edits using up to five local or recent conversation images, reference variants, and native transparent-image requests. Does not require `OPENAI_API_KEY`.
+- **Fallback CLI mode:** `scripts/image_gen.py` CLI. Use only when the user explicitly asks for or confirms the CLI/API/model path. Requires `OPENAI_API_KEY` and separate API billing.
 
 Within CLI fallback, the CLI exposes three subcommands:
 
@@ -28,7 +29,7 @@ Rules:
 - Recover existing current-branch artifacts with `tools.codex_list_image_artifacts({})` after a later script failure; inspect availability and use returned paths instead of generating again. Listing consumes no image quota. Continue paginated listings with revision/nextOffset.
 - Direct and artifact requests share bounded account admission (two active, eight queued). Queue time counts toward the five-minute total deadline. Queueing does not authorize extra assets; cancellation after dispatch can still consume quota. Reported metadata is not measured pixel properties or verified cost.
 - Use the Pi `codex_generate_image` tool by default for new image generation requests.
-- `codex_generate_image` is model-only; call it directly, never through codemode. For scripted workflows use `tools.codex_generate_image_artifact(...)`, which returns `{ summary, artifact: { path, mimeType, byteCount }, savedPath?, saveWarning? }` without image bytes. Both tools support the same generation/edit parameters and subscription login. Use Pi >=1.1.0.
+- `codex_generate_image` is model-only; call it directly, never through codemode. For scripted workflows use `tools.codex_generate_image_artifact(...)`, which returns `{ summary, artifact: { path, mimeType, byteCount }, savedPath?, saveWarning? }` without image bytes. Both tools support the same generation/edit parameters and subscription login. Use Pi 1.4.0 or later.
 - To display an artifact, call `tools.read({path: result.artifact.path})`, then `image(block)` if the returned value is an image block. Pi can resize or omit an un-decodable display image; the original remains unchanged. Never print or store base64 image bytes. Pass artifact paths directly through `referencedImagePaths` for chained edits.
 - Artifact `save: "none"` still writes a private temporary original; it means no persistent user copy. Completed originals survive script failure/timeout, reload, shutdown, and branch changes until user/OS cleanup. Copy needed project assets to persistent storage. Run `/image-artifacts` to recover current-branch paths without generation. Recent-image selection includes branch-local original artifacts, even if never displayed; reference-size limits still apply.
 - Do not retry artifact-storage failures automatically. Known storage failures reject before generation; failures after backend success can already have consumed quota. A successful requested persistent save can be used as recovery if the temporary write fails. If neither succeeds, the tool explicitly reports that no artifact is recoverable.
@@ -37,12 +38,14 @@ Rules:
 - `codex-images` has no native Pi image-model entry. Do not substitute `models.generateImages()` or an OpenRouter image model for these subscription tools: native image calls do not inherit their approval, save/recovery, output-size, or billing contracts.
 - The tool's `model` parameter selects a Codex routing model, not Flare or Sunburst. Do not claim a specific served image model unless the response reports it. Read `details.reportedImage` for backend-reported output settings, then inspect the actual image; prompt requests for quality, dimensions, or transparency are not guarantees.
 - The default routing model is `gpt-6-astra`. Explicit tool parameters and configuration values override this default.
+- Keep the default `responses` transport unless the user explicitly selects `images` or trusted configuration selects it. `images` is PNG-only, uses automatic size/quality, and rejects a per-call routing `model`. Never switch transports automatically after a failure.
+- `requestedImage` is intent, `reportedImage` is the server report, and `measuredImage` contains independently decoded dimensions and alpha properties. `imageWarning` does not authorize regeneration. Preserve originals if inspection is unavailable or a format differs.
+- Do not request GIF, SVG, complexity, masks, markup, or Flare/Sunburst selection through these subscription tools. GIF client support exists upstream but server access is not verified for this extension.
 - Do not automatically repeat quota, connection, timeout, or incomplete-stream failures. The remote generation may already have consumed quota.
-- Use `referencedImagePaths` for edits when every target has a local path. Use `numLastImagesToInclude` only when a target is available solely in recent conversation history. Never provide both selectors. Masks and advanced CLI-only controls still require confirmed CLI fallback.
+- Use `referencedImagePaths` for edits when every target has a local path. Inspect unseen local targets with Pi `read` first. Use `numLastImagesToInclude` only when a target is available solely in recent conversation history. Never provide both selectors. Masks and advanced CLI-only controls still require confirmed CLI fallback.
 - Do not switch to CLI fallback for ordinary generation quality, size, or output file-path control.
-- If the user explicitly asks for a transparent image/background, stay on Pi `codex_generate_image` first: prompt for a flat removable chroma-key background, then remove it locally with the installed helper at `scripts/remove_chroma_key.py`.
+- For cutouts or background removal, set `background: "transparent"` and use PNG or WebP. For edits, preserve existing transparency unless the user asks to change it.
 - Never silently switch from Pi `codex_generate_image` or CLI `gpt-image-2` to CLI `gpt-image-1.5`. Treat this as a model/path downgrade and ask the user before doing it, unless the user has already explicitly requested `gpt-image-1.5`, `scripts/image_gen.py`, or CLI fallback.
-- If a transparent request appears too complex for clean chroma-key removal, asks for true/native transparency, or local removal fails validation, offer CLI `gpt-image-2 --background transparent --output-format png` (native transparency preview). Run the CLI fallback only after the user confirms.
 - The word `batch` by itself does not mean CLI fallback. If the user asks for many assets or says to batch-generate assets without explicitly asking for CLI/API/model controls, stay on the Pi tool path and issue one Pi tool call per requested asset or variant.
 - If the Pi tool fails or is unavailable, tell the user the CLI fallback exists and that it requires `OPENAI_API_KEY`. Proceed only if the user explicitly asks for that fallback.
 - If the user explicitly asks for CLI mode, use the bundled `scripts/image_gen.py` workflow. Do not create one-off SDK runners.
@@ -58,6 +61,7 @@ Pi tool save-path policy:
   3. If the image is only for preview or brainstorming, render it inline; the underlying file can remain at the default `<pi-agent-dir>/generated-images/<pi-session-id>/*` path.
 - Never leave a project-referenced asset only at the default `<pi-agent-dir>/generated-images/<pi-session-id>/*` path.
 - Move or delete a Pi-generated original only when the user explicitly requests it.
+- Use a matching extension when copying returned bytes to a project filename. If the requested filename's extension differs from the actual format, report the mismatch and use the actual extension. Do not simply rename JPEG bytes to `.png` or otherwise disguise the format; an exact-format conversion must be a separate, explicit local operation that preserves the original.
 - Do not overwrite an existing asset unless the user explicitly asked for replacement; otherwise create a sibling versioned filename such as `hero-v2.png` or `item-icon-edited.png`.
 
 Shared prompt guidance for both modes lives in `references/prompting.md` and `references/sample-prompts.md`.
@@ -69,7 +73,7 @@ Fallback-only docs/resources for CLI mode:
 - `scripts/image_gen.py`
 
 Local post-processing helper:
-- `scripts/remove_chroma_key.py`: removes a flat chroma-key background from a generated image and writes a PNG/WebP with alpha. Prefer auto-key sampling, soft matte, and despill for antialiased edges.
+- `scripts/remove_chroma_key.py`: optional local recovery for an existing chroma-key source. It is not the normal transparency workflow.
 
 ## When to use
 - Generate a new image (concept art, product shot, cover, website hero)
@@ -96,11 +100,13 @@ Intent:
 - If the user provides no images, treat the request as **generate**.
 
 Pi edit semantics:
+- Inspect unseen local targets with Pi `read` before editing, while passing original file paths to the generation tool.
 - Use `referencedImagePaths` when all edit targets have readable local paths, with at most five paths.
 - Use `numLastImagesToInclude` for the smallest recent-conversation window containing all targets, from one to five images.
 - Never provide both image selectors. If neither can include every target, ask the user to attach or provide the missing image.
 - Use confirmed CLI fallback only for masks or other explicit CLI-only parameters.
 - For edits, preserve invariants aggressively and save non-destructively by default.
+- Preserve existing alpha with `background: "transparent"` unless the user requests an opaque background.
 
 Execution strategy:
 - In the Pi tool default path, produce many assets or variants by issuing one `codex_generate_image` call per requested asset or variant.
@@ -110,7 +116,7 @@ Execution strategy:
 Assume the user wants a new image unless they clearly ask to change an existing one.
 
 ## Workflow
-1. Decide the top-level mode: Pi tool by default for generation, supported edits, and simple transparent-output requests; fallback CLI only if explicitly requested or after the user confirms an unsupported edit control or transparent-output fallback.
+1. Decide the top-level mode: Pi tool by default, including native transparent-output requests; fallback CLI only if explicitly requested or confirmed.
 2. Decide the intent: `generate` or `edit`.
 3. Decide whether the output is preview-only or meant to be consumed by the current project.
 4. Decide the execution strategy: single asset vs repeated Pi tool calls vs CLI `generate-batch`.
@@ -119,13 +125,13 @@ Assume the user wants a new image unless they clearly ask to change an existing 
    - reference image
    - edit target
    - supporting insert/style/compositing input
-7. For local edit targets, pass up to five paths through `referencedImagePaths`. For pathless conversation images, use the smallest valid `numLastImagesToInclude`.
+7. Inspect unseen local targets with Pi `read`, then pass up to five original paths through `referencedImagePaths`. For pathless conversation images, use the smallest valid `numLastImagesToInclude`.
 8. If the user asked for a photo, illustration, sprite, product image, banner, or other explicitly raster-style asset, use `codex_generate_image` rather than substituting SVG/HTML/CSS placeholders. If the request is for an icon, logo, or UI graphic that should match existing repo-native SVG/vector/code assets, prefer editing those directly instead.
 9. Augment the prompt based on specificity:
    - If the user's prompt is already specific and detailed, normalize it into a clear spec without adding creative requirements.
    - If the user's prompt is generic, add tasteful augmentation only when it materially improves output quality.
 10. Use the Pi `codex_generate_image` tool by default for generation and supported existing-image edits. Ask for CLI fallback confirmation only when the request requires unsupported controls such as masks.
-11. For transparent-output requests, follow the transparent image guidance below: generate with Pi `codex_generate_image` on a flat chroma-key background, copy the selected output into the workspace or `tmp/imagegen/`, run the installed `scripts/remove_chroma_key.py` helper, and validate the alpha result before using it. If this path looks unsuitable or fails, ask before switching to the API CLI.
+11. For transparent-output requests, set `background: "transparent"` and preserve the returned alpha. For edits, preserve existing transparency unless asked to change it.
 12. Inspect outputs and validate: subject, style, composition, text accuracy, and invariants/avoid items.
 13. Iterate with a single targeted change, then re-check.
 14. For preview-only work, render the image inline; the underlying file may remain at the default `<pi-agent-dir>/generated-images/<pi-session-id>/<image-call-id>.*` path.
@@ -136,43 +142,19 @@ Assume the user wants a new image unless they clearly ask to change an existing 
 
 ## Transparent image requests
 
-Transparent-image requests still use Pi `codex_generate_image` first. Because the Pi tool does not expose a true transparent-background control, create a removable chroma-key source image and then convert the key color to alpha locally.
+Use Pi's native `background: "transparent"` control, including for hair, glass,
+soft shadows, and other subjects that chroma keying handles poorly. Use PNG or
+WebP with Responses; the opt-in Images transport supports PNG only.
 
-Default sequence:
-1. Use Pi `codex_generate_image` to generate the requested subject on a perfectly flat solid chroma-key background.
-2. Choose a key color that is unlikely to appear in the subject: default `#00ff00`, use `#ff00ff` for green subjects, and avoid `#0000ff` for blue subjects.
-3. After generation, copy the selected source image from `<pi-agent-dir>/generated-images/<pi-session-id>/<image-call-id>.*` into the workspace or `tmp/imagegen/` and leave the original in place.
-4. Run the bundled helper from this skill directory:
-   ```bash
-   python "scripts/remove_chroma_key.py" \
-     --input <source> \
-     --out <final.png> \
-     --auto-key border \
-     --soft-matte \
-     --transparent-threshold 12 \
-     --opaque-threshold 220 \
-     --despill
-   ```
-5. Validate that the output has an alpha channel, transparent corners, plausible subject coverage, and no obvious key-color fringe. If a thin fringe remains, retry once with `--edge-contract 1`; use `--edge-feather 0.25` only when the edge is visibly stair-stepped and the subject is not shiny or reflective.
-6. Save the final alpha PNG/WebP in the project if the asset is project-bound. Never leave a project-referenced transparent asset only under `<pi-agent-dir>/generated-images/<pi-session-id>/*`.
+Preserve the original bytes and alpha. Check `measuredImage.hasTransparency`
+when available and inspect the visual result for edge quality, subject coverage,
+and unwanted background. If inspection is unavailable, report that uncertainty;
+do not automatically regenerate or switch to paid API billing.
 
-Prompt transparent requests like this:
-
-```text
-Create the requested subject on a perfectly flat solid #00ff00 chroma-key background for background removal.
-The background must be one uniform color with no shadows, gradients, texture, reflections, floor plane, or lighting variation.
-Keep the subject fully separated from the background with crisp edges and generous padding.
-Do not use #00ff00 anywhere in the subject.
-No cast shadow, no contact shadow, no reflection, no watermark, and no text unless explicitly requested.
-```
-
-Do not automatically use CLI `gpt-image-2 --background transparent --output-format png` instead of chroma keying. Ask the user first when the user asks for true/native transparency, when local removal fails validation, or when the requested image is complex: hair, fur, feathers, smoke, glass, liquids, translucent materials, reflective objects, soft shadows, realistic product grounding, or subject colors that conflict with all practical key colors.
-
-Use a concise confirmation like:
-
-```text
-This likely needs native transparency. The Pi tool uses chroma-key removal. The API CLI supports native transparency in preview with gpt-image-2. It requires OPENAI_API_KEY and separate API billing. Should I use that fallback?
-```
+For transparent-image edits, repeat the invariants and preserve existing alpha
+unless the user requests a different background. Do not add key colors or ban
+shadows and reflections merely to simplify background removal. Keep project
+assets in persistent workspace storage, leaving private originals intact.
 
 ## Prompt augmentation
 
@@ -220,7 +202,7 @@ Edit:
 - identity-preserve — try-on, person-in-scene; lock face/body/pose.
 - precise-object-edit — remove/replace a specific element (including interior swaps).
 - lighting-weather — time-of-day/season/atmosphere changes only.
-- background-extraction — transparent background / clean cutout. Use Pi `codex_generate_image` with chroma-key removal first for simple opaque subjects; ask before using CLI true transparency for complex subjects.
+- background-extraction — transparent background / clean cutout. Set `background: "transparent"` and preserve fine edges, label text, and alpha.
 - style-transfer — apply reference style while changing subject/scene.
 - compositing — multi-image insert/merge with matched lighting/perspective.
 - sketch-to-render — drawing/line art to photoreal render.
@@ -249,7 +231,7 @@ Avoid: <negative constraints>
 Notes:
 - `Asset type` and `Input images` are prompt scaffolding, not dedicated CLI flags.
 - `Scene/backdrop` refers to the visual setting. It is not the same as the fallback CLI `background` parameter, which controls output transparency behavior.
-- Fallback-only execution notes such as `Quality:`, `Input fidelity:`, masks, output format, and output paths belong in the CLI path only. Do not treat them as Pi `codex_generate_image` tool arguments.
+- Quality, input fidelity, and masks are not Pi subscription parameters. Use Pi's actual camelCase `outputFormat`, `save`, `saveDir`, `background`, and `transport` controls, not CLI flag names.
 
 Augmentation rules:
 - Keep it short.
@@ -291,7 +273,7 @@ Constraints: change only the background; keep the product and its edges unchange
 - If the prompt is generic, add only the extra detail that will materially help.
 - If the prompt is already detailed, normalize it instead of expanding it.
 - For CLI fallback only, see `references/cli.md` and `references/image-api.md` for model, `quality`, `input_fidelity`, masks, output format, and output-path guidance.
-- For transparent images, use the built-in-first chroma-key workflow unless the request needs native CLI transparency; ask before switching to the API CLI.
+- For transparent images, request native transparency and preserve alpha. Do not switch billing merely for a cutout.
 
 More principles shared by both modes: `references/prompting.md`.
 Copy/paste specs shared by both modes: `references/sample-prompts.md`.
@@ -338,7 +320,7 @@ Required Python package:
 uv pip install openai
 ```
 
-Required for local chroma-key removal and optional downscaling:
+Optional for local inspection, chroma-key recovery, and downscaling:
 ```bash
 uv pip install pillow
 ```
@@ -370,5 +352,5 @@ If installation is not possible in this environment, tell the user which depende
 - `references/cli.md`: fallback-only CLI usage via `scripts/image_gen.py`.
 - `references/image-api.md`: fallback-only API/CLI parameter reference.
 - `references/codex-network.md`: fallback-only network/sandbox troubleshooting for CLI mode.
-- `scripts/image_gen.py`: fallback-only CLI implementation. Do not load or use it unless the user explicitly chooses CLI mode or explicitly confirms a transparent request's true CLI transparency fallback.
+- `scripts/image_gen.py`: fallback-only CLI implementation. Do not load or use it unless the user explicitly chooses or confirms CLI mode.
 - `scripts/remove_chroma_key.py`: local post-processing helper for Pi-tool transparent-image requests.

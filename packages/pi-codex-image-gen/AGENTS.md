@@ -41,7 +41,10 @@ generation, typed artifact generation, and read-only artifact listing.
 
 Generation snapshots arguments, loads trusted config, resolves OAuth, waits for
 account admission, loads reference bytes, reserves artifact storage, then sends the
-Responses request. The routing default is `gpt-6-astra`, not an image-model
+Responses request by default. The opt-in `images` transport uses the fixed Codex
+Images generation/edit routes, PNG only, `gpt-image-2`, and automatic size/quality.
+Never fall back between transports or to public API billing after failure.
+The Responses routing default is `gpt-6-astra`, not an image-model
 selector. Inline results include an image; artifact results return original
 paths without bytes. Listing performs no generation.
 
@@ -50,7 +53,10 @@ Save-mode precedence (`resolveSaveConfig`): `params.save` → `PI_CODEX_IMAGE_SA
 Skill invariants (`skills/imagegen/SKILL.md`):
 
 - Two top-level modes only: Pi tool mode (default) and CLI fallback. "Batch" alone does not opt into CLI mode; issue one tool call per asset.
-- Transparent images: use chroma-key removal first; native-transparency CLI fallback requires explicit confirmation and separate API billing. Follow the skill's current model guidance.
+- Transparent images: request native `background: "transparent"` first and preserve existing alpha during edits. PNG/WebP only. Chroma-key removal is an optional local fallback, not the default or a reason to switch billing.
+- Inspect unseen local references with Pi `read`. Preserve Pi's direct-path selectors, artifact recovery, and non-destructive copying; do not copy Codex-only paths or code-mode directives.
+- Keep requested, backend-reported, and measured image properties separate. Commit originals before bounded worker inspection. Inspection failure or format mismatch must preserve the original without retrying generation.
+- GIF, SVG, image-model selection, complexity, masks, and markup are not subscription tool parameters. Revisit GIF only after server access is verified, not merely because a client feature flag exists.
 - `references/` files (`cli.md`, `image-api.md`, `codex-network.md`) are CLI-fallback-only; load them only when relevant.
 
 ## Editing guidance

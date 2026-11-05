@@ -254,6 +254,7 @@ test("malformed backend payload fails before saving or returning image content",
 
 async function harness(t, responder, registerProvider) {
   const cwd = await mkdtemp(join(tmpdir(), "imagegen-contract-"));
+  isolateAgentDir(t, cwd);
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const originalFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = originalFetch; });
@@ -305,7 +306,6 @@ test("tool sends an honest Pi User-Agent, blocks redirects, and retains the subs
 
 test("owned image OAuth uses the Astra default and preserves config and per-call routing overrides", async (t) => {
   const h = await harness(t, () => sseResponse());
-  isolateAgentDir(t, h.cwd);
   const ctx = context(h.cwd);
   ctx.modelRegistry.getProviderAuth = async provider => {
     assert.equal(provider, IMAGE_AUTH_PROVIDER);
@@ -405,6 +405,20 @@ test("tool falls back to legacy auth only when package-owned credentials are abs
   assert.equal(result.details.provider, "openai-codex");
   assert.equal(h.calls[0].url, "https://chatgpt.com/backend-api/codex/responses");
   assert.equal(h.calls[0].headers.Authorization, `Bearer ${jwt()}`);
+});
+
+test("configured but unresolved owned credentials still block legacy fallback", async t => {
+  const h = await harness(t, () => assert.fail("No generation"));
+  const ctx = context(h.cwd);
+  const resolvedProviders = [];
+  ctx.modelRegistry.getProviderAuthStatus = () => ({ configured: true });
+  ctx.modelRegistry.getProviderAuth = async provider => {
+    resolvedProviders.push(provider);
+    return undefined;
+  };
+  await assert.rejects(h.run({}, undefined, undefined, ctx), /login codex-images/);
+  assert.deepEqual(resolvedProviders, [IMAGE_AUTH_PROVIDER]);
+  assert.equal(h.calls.length, 0);
 });
 
 test("tool rejects missing subscription auth and API-key-only auth before a request", async (t) => {
@@ -511,6 +525,160 @@ test("tool handles fragmented CRLF events and reports backend metadata and progr
   assert.ok(updates.some(update => update.details?.stage === "generating"));
   assert.deepEqual(result.details.usage, { total_tokens: 10, input_tokens_details: { cached_tokens: 4 } });
   assert.equal(cancelled, true);
+});
+
+test("native backgrounds are wired through the direct tool without changing omitted defaults", async t => {
+  const h = await harness(t, () => sseResponse());
+  for (const background of ["transparent", "opaque", "auto"]) {
+    const result = await h.run({ background });
+    assert.equal(JSON.parse(h.calls.at(-1).body).tools[0].background, background);
+    assert.equal(result.details.requestedImage.background, background);
+    assert.deepEqual(result.details.measuredImage, {
+      outputFormat: "png", width: 1, height: 1, alphaMin: 255, alphaMax: 255, hasTransparency: false,
+    });
+    if (background === "transparent") assert.match(result.details.imageWarning, /transparency is absent/);
+  }
+  await h.run();
+  assert.equal("background" in JSON.parse(h.calls.at(-1).body).tools[0], false);
+  assert.ok(h.tool.promptGuidelines.some(line => /preserve existing transparency/i.test(line)));
+});
+
+test("invalid backgrounds and transparent JPEG reject before authentication or network", async t => {
+  const h = await harness(t, () => assert.fail("No network"));
+  const ctx = context(h.cwd);
+  ctx.modelRegistry.getApiKeyForProvider = () => assert.fail("No auth resolution");
+  for (const params of [{ background: "invalid" }, { background: "transparent", outputFormat: "jpeg" }]) {
+    await assert.rejects(h.run(params, undefined, undefined, ctx), /background|PNG or WebP/);
+  }
+  assert.equal(h.calls.length, 0);
+});
+
+test("format mismatches preserve originals using actual MIME and persistent filenames", async t => {
+  const h = await harness(t, () => sseResponse());
+  const result = await h.run({ outputFormat: "webp", save: "custom", saveDir: "out" });
+  assert.equal(result.content.find(block => block.type === "image").mimeType, "image/png");
+  assert.equal(result.details.outputFormat, "png");
+  assert.equal(result.details.requestedImage.outputFormat, "webp");
+  assert.match(result.details.imageWarning, /Requested webp.*returned png/);
+  assert.ok(result.details.savedPath.endsWith(".png"));
+  assert.deepEqual(await readFile(result.details.savedPath), PNG);
+  assert.equal(h.calls.length, 1);
+});
+
+test("failed pixel inspection preserves a completed image without claiming measured properties", async t => {
+  const truncated = PNG.subarray(0, 8);
+  const h = await harness(t, () => sseResponse(truncated.toString("base64")));
+  const result = await h.run({ save: "custom", saveDir: "out" });
+  assert.equal(result.details.measuredImage, undefined);
+  assert.match(result.details.imageWarning, /unverified/);
+  assert.deepEqual(await readFile(result.details.savedPath), truncated);
+  assert.equal(h.calls.length, 1);
+});
+
+test("dedicated Images transport follows the subscription generation/edit contract and retains IDs", async t => {
+  const h = await harness(t, () => Response.json({
+    data: [{ b64_json: PNG.toString("base64"), generation_id: "gen-image" }],
+    size: "1254x1254", quality: "low", output_format: "png",
+    usage: { total_tokens: 9, input_tokens_details: { image_tokens: 3, text_tokens: 2, private_data: "PRIVATE" } },
+  }, { headers: { "x-request-id": "req-safe", "x-codex-imagegen-request-id": "req-image-safe" } }));
+  const generated = await h.run({ transport: "images", background: "transparent" });
+  assert.equal(h.calls[0].url, "https://chatgpt.com/backend-api/codex/images/generations");
+  assert.deepEqual(JSON.parse(h.calls[0].body), {
+    prompt: "test", model: "gpt-image-2", quality: "auto", size: "auto", background: "transparent",
+  });
+  assert.equal(h.calls[0].headers.originator, "pi");
+  assert.equal(h.calls[0].headers["User-Agent"], "pi-codex-image-gen");
+  assert.equal(h.calls[0].headers.accept, "application/json");
+  assert.ok(h.calls[0].headers["x-codex-image-turn-id"]);
+  assert.equal(h.calls[0].redirect, "error");
+  assert.equal(generated.details.model, undefined);
+  assert.equal(generated.details.transport, "codex-images");
+  assert.equal(generated.details.backendImageModel, "unknown");
+  assert.equal(generated.details.requestId, "req-safe");
+  assert.equal(generated.details.imagegenRequestId, "req-image-safe");
+  assert.match(generated.details.imageWarning, /dimensions differ/);
+  assert.deepEqual(generated.details.usage, { total_tokens: 9, input_tokens_details: { image_tokens: 3, text_tokens: 2 } });
+  await writeFile(join(h.cwd, "input.png"), PNG);
+  await h.run({ transport: "images", referencedImagePaths: ["input.png"] });
+  assert.equal(h.calls[1].url, "https://chatgpt.com/backend-api/codex/images/edits");
+  assert.deepEqual(JSON.parse(h.calls[1].body).images, [{ image_url: `data:image/png;base64,${PNG.toString("base64")}` }]);
+  assert.equal(JSON.parse(h.calls[1].body).background, "auto");
+  await h.run({ transport: "images", referencedImagePaths: ["input.png"], background: "opaque" });
+  assert.equal(JSON.parse(h.calls[2].body).background, "opaque");
+});
+
+test("the shared harness isolates global agent settings and retains default Responses routing", async t => {
+  const h = await harness(t, () => sseResponse());
+  assert.equal(process.env.PI_CODING_AGENT_DIR, join(h.cwd, "isolated-agent"));
+  await h.run();
+  assert.equal(h.calls[0].url, "https://chatgpt.com/backend-api/codex/responses");
+});
+
+test("new Images generation defaults to opaque while edits leave background selection automatic", async t => {
+  const h = await harness(t, () => Response.json({ data: [{ b64_json: PNG.toString("base64") }] }));
+  await h.run({ transport: "images" });
+  assert.equal(JSON.parse(h.calls[0].body).background, "opaque");
+});
+
+test("Images transport rejects incompatible options before auth and honors only trusted config", async t => {
+  const h = await harness(t, (_url) => String(_url).includes("/images/")
+    ? Response.json({ data: [{ b64_json: PNG.toString("base64") }] }) : sseResponse());
+  const ctx = context(h.cwd);
+  const noAuth = { ...ctx, modelRegistry: { getApiKeyForProvider: () => assert.fail("No authentication") } };
+  for (const params of [{ transport: "invalid" }, { transport: "images", outputFormat: "webp" },
+    { transport: "images", outputFormat: "jpeg" }, { transport: "images", model: "gpt-6-astra" }]) {
+    await assert.rejects(h.run(params, undefined, undefined, noAuth), /transport/);
+  }
+  await mkdir(join(h.cwd, ".pi", "extensions"), { recursive: true });
+  await writeFile(join(h.cwd, ".pi", "extensions", "codex-image-gen.json"),
+    JSON.stringify({ transport: "images", model: "unused-routing-model" }));
+  await h.run({}, undefined, undefined, ctx);
+  assert.equal(h.calls.at(-1).url.endsWith("/responses"), true);
+  ctx.isProjectTrusted = () => true;
+  const result = await h.run({}, undefined, undefined, ctx);
+  assert.equal(h.calls.at(-1).url.endsWith("/images/generations"), true);
+  assert.equal(result.details.model, undefined);
+  await h.run({ transport: "responses" }, undefined, undefined, ctx);
+  assert.equal(h.calls.at(-1).url.endsWith("/responses"), true);
+});
+
+test("JSON detail gates and SSE failures report safe IDs without transport fallback", async t => {
+  const h = await harness(t, () => Response.json({
+    detail: "GIF output is not enabled for this request.",
+  }, { status: 400, headers: { "x-request-id": "req-gate", "x-codex-imagegen-request-id": jwt() } }));
+  await assert.rejects(h.run({ transport: "images" }), error => {
+    assert.equal(error.diagnostics.category, "unsupported-feature");
+    assert.equal(error.diagnostics.requestId, "req-gate");
+    assert.equal(error.diagnostics.imagegenRequestId, undefined);
+    assert.match(error.message, /not enabled|not support/);
+    assert.doesNotMatch(error.message, new RegExp(jwt().replaceAll(".", "\\.")));
+    return true;
+  });
+  assert.equal(h.calls.length, 1);
+  globalThis.fetch = async () => new Response(`data: ${JSON.stringify({
+    type: "response.failed", response: { error: { code: "invalid_complexity", message: jwt() } },
+  })}\n\n`, { headers: { "x-request-id": "req-stream" } });
+  await assert.rejects(h.run(), error => error.diagnostics.category === "unsupported-feature"
+    && error.message.includes("req-stream") && !error.message.includes(jwt()));
+});
+
+test("malformed, multiple, and failed Images JSON responses never trigger another request", async t => {
+  for (const body of ["not-json", { data: [] }, { data: [{ b64_json: PNG.toString("base64") }, { b64_json: PNG.toString("base64") }] },
+    { error: { code: "insufficient_quota", message: jwt() } }]) {
+    await t.test(typeof body === "string" ? body : JSON.stringify(Object.keys(body)), async t => {
+      const h = await harness(t, () => new Response(typeof body === "string" ? body : JSON.stringify(body)));
+      await assert.rejects(h.run({ transport: "images" }), error => !error.message.includes(jwt()));
+      assert.equal(h.calls.length, 1);
+    });
+  }
+});
+
+test("a local fallback filename is not reported as a backend generation ID", async t => {
+  const h = await harness(t, () => Response.json({ data: [{ b64_json: PNG.toString("base64") }] }));
+  const result = await h.run({ transport: "images", save: "custom", saveDir: "out" });
+  assert.equal(result.details.imageGenerationId, undefined);
+  assert.ok(result.details.savedPath.endsWith(".png"));
+  assert.deepEqual(await readFile(result.details.savedPath), PNG);
 });
 
 test("tool accepts completion-only image output and only records a model when explicitly reported", async (t) => {

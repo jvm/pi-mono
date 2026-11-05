@@ -70,7 +70,9 @@ export async function readArtifactManifest(reservation: ArtifactReservation): Pr
 		}
 		if (total > 8192) return undefined;
 		const record = artifactRecord(JSON.parse(buffer.subarray(0, total).toString("utf8")));
-		return record?.toolCallId === reservation.toolCallId && record.artifact.mimeType === reservation.mimeType ? record : undefined;
+		// The reservation MIME is requested, while the completed MIME is actual.
+		// A backend format mismatch must remain recoverable from this anchor.
+		return record?.toolCallId === reservation.toolCallId ? record : undefined;
 	} catch {
 		return undefined;
 	} finally {
@@ -111,18 +113,30 @@ export async function reserveArtifact(extension: string, root = tmpdir()) {
 		throw new Error("Image artifact storage is unavailable. No generation request was made.");
 	}
 	const handle = file;
+	let outputPath = path;
 	return {
 		path,
 		async commit(bytes: Buffer, mimeType: string): Promise<ImageArtifact> {
-			await handle.writeFile(bytes);
-			await handle.sync();
-			const info = await handle.stat();
-			const visible = await lstat(path);
-			if (!visible.isFile() || info.ino !== visible.ino || info.dev !== visible.dev || visible.size !== bytes.length) {
-				throw new Error("Image artifact is no longer available at its reserved path.");
+			if (committed) throw new Error("Image artifact was already committed.");
+			const actualExtension = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" }[mimeType];
+			if (!actualExtension) throw new Error("Unsupported artifact MIME type.");
+			const actualPath = join(dir, `original.${actualExtension}`);
+			const output = actualPath === path ? handle
+				: await open(actualPath, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0), 0o600);
+			outputPath = actualPath;
+			try {
+				await output.writeFile(bytes);
+				await output.sync();
+				const info = await output.stat();
+				const visible = await lstat(outputPath);
+				if (!visible.isFile() || info.ino !== visible.ino || info.dev !== visible.dev || visible.size !== bytes.length) {
+					throw new Error("Image artifact is no longer available at its reserved path.");
+				}
+				committed = true;
+				return { path: outputPath, mimeType, byteCount: bytes.length };
+			} finally {
+				if (output !== handle) await output.close().catch(() => undefined);
 			}
-			committed = true;
-			return { path, mimeType, byteCount: bytes.length };
 		},
 		async publish(record: ArtifactRecord) {
 			const validated = artifactRecord(record);
@@ -137,6 +151,7 @@ export async function reserveArtifact(extension: string, root = tmpdir()) {
 				await manifest.close();
 			}
 			if (record.artifact.path !== path) await rm(path, { force: true });
+			if (outputPath !== path && record.artifact.path !== outputPath) await rm(outputPath, { force: true });
 			committed = true; // Retain fallback manifests too, never incomplete originals.
 		},
 		async dispose() {

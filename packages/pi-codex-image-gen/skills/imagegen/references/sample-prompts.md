@@ -2,7 +2,7 @@
 
 These prompt recipes are shared across both top-level modes of the skill:
 - Pi `codex_generate_image` tool (default)
-- `scripts/image_gen.py` CLI fallback for explicit CLI/API/model requests or user-confirmed true-transparent-output fallback requests
+- `scripts/image_gen.py` CLI fallback for explicit or user-confirmed CLI/API/model requests
 
 Use these as starting points. They are intentionally complete prompt recipes, not the default amount of augmentation to add to every user request.
 
@@ -13,13 +13,13 @@ When adapting a user's prompt:
 
 The labeled lines are prompt scaffolding, not a closed schema. `Asset type` and `Input images` are prompt-only scaffolding; the CLI does not expose them as dedicated flags.
 
-Execution details such as explicit CLI flags, `quality`, `input_fidelity`, masks, output formats, and local output paths depend on mode. Use the built-in tool by default, including simple transparent-image requests. For transparent images, prompt for a flat chroma-key background and remove it locally with `python "scripts/remove_chroma_key.py"`; only apply CLI-specific controls when the user explicitly opts into fallback mode or explicitly confirms that the transparent request should use true CLI transparency.
+Execution details depend on mode. Use Pi by default, set `background: "transparent"` for cutouts, and preserve alpha. Pi supports `outputFormat`, `save`, and `saveDir`; quality, fidelity, and masks are not subscription controls. Only use CLI-specific controls when the user explicitly chooses or confirms CLI mode.
 
 CLI model notes:
 - `gpt-image-2` is the fallback CLI default for new workflows.
 - `gpt-image-2` supports `quality` values `low`, `medium`, `high`, and `auto`.
 - For 4K-style `gpt-image-2` output, use `3840x2160` or `2160x3840`.
-- For native transparency, offer CLI `gpt-image-2 --background transparent --output-format png` (preview). Ask before switching from Pi's chroma-key path to separate API billing.
+- Native Pi transparency does not require this API fallback or separate billing.
 - Do not set `input_fidelity` with `gpt-image-2`; image inputs already use high fidelity.
 
 For prompting principles (structure, specificity, invariants, iteration), see `references/prompting.md`.
@@ -391,11 +391,11 @@ Constraints: preserve subject identity, geometry, camera angle, and composition;
 Use case: background-extraction
 Input images: Image 1: product photo
 Primary request: isolate the product on a clean transparent background
-Scene/backdrop: perfectly flat solid #00ff00 chroma-key background for local background removal
-Constraints: background must be one uniform color with no shadows, gradients, texture, reflections, floor plane, or lighting variation; crisp silhouette; generous padding; no halos or fringing; preserve label text exactly; no restyling; do not use #00ff00 anywhere in the subject
+Scene/backdrop: genuinely transparent background
+Constraints: preserve product identity, geometry, fine edges, and label text exactly; no halos, fringing, or restyling
 ```
 
-Post-process note: after Pi tool generation, run `python "scripts/remove_chroma_key.py" --input <source> --out <final.png> --auto-key border --soft-matte --transparent-threshold 12 --opaque-threshold 220 --despill`. For native transparency, failed validation, or complex subjects, offer CLI `gpt-image-2 --background transparent --output-format png` (preview). Ask before switching to separate API billing.
+Pi tool settings: use `background: "transparent"` and `outputFormat: "png"`. Inspect measured alpha and the visual result; preserve original bytes and copy the selected asset into the project with a matching filename extension. For explicitly chosen CLI mode, use `references/cli.md` and inspect the saved file locally; `measuredImage` is Pi-only metadata.
 
 ### style-transfer
 ```

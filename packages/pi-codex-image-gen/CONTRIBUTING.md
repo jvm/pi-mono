@@ -41,6 +41,33 @@ Check that a nested call to `codex_generate_image` is unavailable without making
 another image request. Do not retry an ambiguous connection/quota failure.
 Do not use the separately billed API CLI.
 
+### Background, transport, and inspection smoke test
+
+Offline tests cover both tool entry points, actual-format recovery, JSON/SSE
+failures, worker cancellation/pixel limits, and transparent PNG/WebP/JPEG
+decoding. Run them from the repository root:
+
+```bash
+npm run -w packages/pi-codex-image-gen check
+npm test -w packages/pi-codex-image-gen
+```
+
+When explicitly authorized to consume subscription quota, keep a two-call
+budget: generate one PNG with `background: "transparent"` through Responses,
+then use its original artifact path for one edit with `transport: "images"`
+and the same background. Use `save: "none"` for private temporary originals.
+Verify the original files, measured dimensions/alpha, routing metadata, request
+IDs when present, and branch-local recovery. Inspect cutout edges visually.
+Stop on an ambiguous error; do not regenerate to complete the check.
+
+Verify JPEG/transparency and Images/WebP combinations reject before credential
+resolution, using mocks rather than live quota. Do not add a served-model claim
+from the fixed `gpt-image-2` Images request identifier. The
+[Codex alpha tool contract](https://github.com/openai/codex/blob/rust-v0.168.0-alpha.3/codex-rs/ext/image-generation/src/tool.rs)
+uses automatic quality/size. Its GIF client flag is not evidence of backend
+access; GIF, SVG, complexity, markup, masks, and image-model selectors remain
+outside this extension's subscription schema.
+
 For a one-off run without changing settings:
 
 ```bash
@@ -103,7 +130,7 @@ Before opening a pull request:
 
 ## Coding guidelines
 
-- Keep extension logic in `index.ts` unless there is a clear reason to split.
+- Keep Pi registration/wiring in `extensions/index.ts`, reusable logic in `src/`, and the root `index.ts` a thin re-export.
 - When changing tool parameters, update both the Typebox `TOOL_PARAMS` schema and the `promptGuidelines` strings — Pi surfaces both to the model.
 - Treat save-mode names, config file keys, and auth flow as public interface; changes to defaults or precedence are breaking changes.
 - Do not modify `skills/imagegen/scripts/image_gen.py` without a documented reason; it is a vendored fallback.
