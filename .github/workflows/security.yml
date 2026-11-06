@@ -25,7 +25,7 @@ jobs:
 
       - name: Run TruffleHog on pull request diff
         if: github.event_name == 'pull_request'
-        uses: trufflesecurity/trufflehog@4dd8831c5f12599465d4d45c3c447b4018a34c85 # v3.97.9
+        uses: trufflesecurity/trufflehog@31ce31ee1abbcc7dc8eee5764c17121c3044c8b2 # v3.99.7
         with:
           path: ./
           base: ${{ github.event.pull_request.base.sha }}
@@ -35,7 +35,7 @@ jobs:
 
       - name: Run TruffleHog on push diff
         if: github.event_name == 'push'
-        uses: trufflesecurity/trufflehog@4dd8831c5f12599465d4d45c3c447b4018a34c85 # v3.97.9
+        uses: trufflesecurity/trufflehog@31ce31ee1abbcc7dc8eee5764c17121c3044c8b2 # v3.99.7
         with:
           path: ./
           base: ${{ github.event.before }}
@@ -45,7 +45,7 @@ jobs:
 
       - name: Run TruffleHog on current tree
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        uses: trufflesecurity/trufflehog@4dd8831c5f12599465d4d45c3c447b4018a34c85 # v3.97.9
+        uses: trufflesecurity/trufflehog@31ce31ee1abbcc7dc8eee5764c17121c3044c8b2 # v3.99.7
         with:
           path: ./
           version: 3.95.8
