@@ -1,7 +1,7 @@
 {
   "name": "pi-insomnia",
   "version": "0.3.1",
-  "description": "Prevent macOS idle sleep while Pi agents are working.",
+  "description": "Prevent macOS and Linux idle sleep while Pi agents are working.",
   "type": "module",
   "license": "MIT",
   "author": "Jose Mocito",
@@ -19,6 +19,7 @@
     "pi-extension",
     "pi",
     "macos",
+    "linux",
     "sleep",
     "caffeinate",
     "insomnia"

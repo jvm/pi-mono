@@ -1,6 +1,6 @@
 # pi-insomnia
 
-Keep long-running [Pi](https://pi.dev) tasks alive when you step away from your Mac.
+Keep long-running [Pi](https://pi.dev) tasks alive when you step away from your Mac or Linux machine.
 
 `pi-insomnia` automatically prevents idle system sleep while Pi is working, then releases the sleep assertion as soon as the agent fully settles. No commands or manual activation needed.
 
@@ -11,7 +11,7 @@ Keep long-running [Pi](https://pi.dev) tasks alive when you step away from your 
 
 - **Automatic protection** — inhibit idle sleep only while Pi has active work.
 - **Full-run awareness** — stay awake through retries, compaction, and queued follow-up work, then release when Pi settles.
-- **Automatic setup** — use macOS built-in `caffeinate`; no commands, behavior configuration, or third-party runtime dependency.
+- **Automatic setup** — use macOS built-in `caffeinate` or Linux `systemd-inhibit`; no commands, behavior configuration, or third-party runtime dependency.
 - **Compact state** — show one coffee-cup icon in the TUI footer while sleep inhibition is active.
 - **Safe cleanup** — release assertions on session shutdown, reload, and quit.
 
@@ -31,7 +31,9 @@ indicator, not sleep inhibition.
 
 ## Platform support
 
-`pi-insomnia` currently targets macOS. On non-macOS platforms it silently no-ops.
+`pi-insomnia` supports macOS and Linux with systemd-logind. On other platforms it silently no-ops.
+
+### macOS
 
 On macOS, the extension launches:
 
@@ -40,6 +42,19 @@ On macOS, the extension launches:
 ```
 
 `-i` prevents idle system sleep while the process is running. `-w <pi-pid>` also ties the assertion to the Pi process so the helper exits if Pi exits unexpectedly. The extension still explicitly terminates the helper when Pi becomes fully idle after any automatic retries, compaction retries, or queued follow-up work.
+
+### Linux
+
+On Linux, the extension launches `/usr/bin/systemd-inhibit` (or `/bin/systemd-inhibit`):
+
+```bash
+systemd-inhibit --what=idle:sleep --who=pi-insomnia --why="Pi agent is working" \
+  --mode=block --no-ask-password /usr/bin/cat
+```
+
+The lock blocks idle handling and suspend/hibernate, not shutdown. `systemd-inhibit` holds it until `cat` exits. `cat` reads a pipe from Pi, so the lock ends when the extension terminates the helper on settle or shutdown, and also when Pi exits unexpectedly and the pipe closes.
+
+If `systemd-inhibit` is not installed, or logind refuses the lock (for example in a remote SSH session where polkit requires interactive authentication, or in a container without logind), the extension shows one warning in the TUI and stays inactive for the rest of the session. It never prompts for a password. Print, JSON, and RPC modes show no notice.
 
 ## Installation
 
@@ -76,7 +91,7 @@ This is an npm-compatible TypeScript Pi package. There is no runtime build step.
 | `PI_OFFLINE=1` | Disables install/update telemetry. |
 | `PI_TELEMETRY=0` | Disables install/update telemetry. |
 
-`pi-insomnia` has no behavior configuration. If the package is installed and Pi is running on macOS, sleep inhibition is automatic while the agent is working.
+`pi-insomnia` has no behavior configuration. If the package is installed and Pi is running on macOS or Linux, sleep inhibition is automatic while the agent is working.
 
 ## Notes
 
