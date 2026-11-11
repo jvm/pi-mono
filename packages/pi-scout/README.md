@@ -13,6 +13,7 @@ Give [Pi](https://pi.dev) proven codebases to learn from before it changes yours
 - **One-step registration** — add Git URLs, local paths, or GitHub `owner/repo` shorthand from `/scout` or natural-language requests.
 - **Fast local exploration** — shallow-clone references into a reusable private cache compatible with Pi's normal file tools.
 - **Cross-session memory** — keep registered references available while their cached clones exist.
+- **No duplicate clones** — adding an already registered source and branch reuses its clone; `refresh` fast-forwards it to upstream.
 - **Clean context** — tell the agent only which references exist and where to inspect them; stale clones are pruned automatically.
 
 ## Typed reference discovery
@@ -116,14 +117,39 @@ Pi records section updates in the session transcript. Providers that do not supp
 
 | Tool | Purpose |
 |---|---|
-| `scout_add` | Clone and register a Git repository as a local reference codebase. Takes only `source`: Git URL, local path, or GitHub `owner/repo` shorthand. |
+| `scout_add` | Clone and register a Git repository as a local reference codebase, or reuse its existing clone. Takes `source` (Git URL, local path, or GitHub `owner/repo` shorthand), optional `branch` (branch or tag), and optional `refresh`. |
 | `scout_rm` | Remove a repository from Pi Scout records, optionally deleting the temporary clone. Available to the model only while repos are registered. |
+
+### Reuse and refresh
+
+`scout_add` reuses the existing clone when the same source and `branch` are
+already registered. Equivalent spellings match: `owner/repo` and its GitHub
+HTTPS URL, scheme/host case, a trailing `.git` or `/` on remote URLs, URL
+credentials/query, relative and absolute local paths, and `file://` URLs.
+Different transports (HTTPS vs. SSH) and different branches get separate clones.
+Relative local paths resolve against Pi's working directory. GitHub shorthand
+needs an owner that starts with a letter or digit, so `./repo` and `../repo` are
+local paths.
+
+`branch` accepts a branch or tag name valid for `git clone --branch`. Names that
+start with `-` or break Git ref-name rules are rejected before Git runs.
+
+`refresh: true` fetches the clone's recorded upstream and fast-forwards it. It
+uses the same 120-second timeout as cloning. If the remote is unreachable,
+authentication fails, local edits conflict, or upstream history was rewritten,
+the call fails and the existing clone stays unchanged. Without `refresh`, reuse
+makes no network request. Only clones in the current private clone directory can
+be refreshed; remove and re-add older clones elsewhere.
+
+`name` and `depth` stay out of the model-facing schema: names are inferred and
+selection uses IDs, and shallow depth `1` is the intended mode for code
+exploration. `/scout` still accepts an optional friendly name.
 
 ### Script results and discovery
 
 Both tools declare output schemas and return objects, not strings, in codemode:
 
-- `scout_add`: `{ repo }`.
+- `scout_add`: `{ repo, status }`, where `status` is `cloned`, `reused`, or `refreshed`.
 - `scout_rm`: `{ removed: repo | null, deletedClone: boolean }`.
 - `repo`: `{ id, name, path, branch?, createdAt, lastSeenAt }`. Origin/source
   metadata is deliberately excluded from text, structured results, and renderer
@@ -153,8 +179,8 @@ Human-readable direct results and the `/scout` menu remain available without
 codemode.
 
 Both tools run sequentially within Pi's dispatch queue. Await dependent calls;
-this is not a cross-process transaction. Addition is a non-idempotent local
-mutation that may contact a Git host. Removal is destructive, non-idempotent
+this is not a cross-process transaction. Addition is an idempotent local mutation
+for an equivalent source and branch; cloning and `refresh` may contact a Git host. Removal is destructive, non-idempotent
 (repeated names can match different records), and local-only. These advisory
 hints do not authorize cloning or deletion; existing approval hooks still run.
 
@@ -169,7 +195,7 @@ transition can activate it again. Use a CLI exclusion for a lasting prohibition.
 
 - On startup, Pi Scout sends a best-effort install/update telemetry ping once per package version unless Pi telemetry is disabled, offline mode is enabled, or Pi runs in CI.
 - Pi Scout uses local file access for exploration. It does not provide web search or remote content-fetching tools.
-- Registering a Git URL still uses `git clone`, so Git may contact the configured remote.
+- Registering a Git URL still uses `git clone`, and `refresh` uses `git fetch`, so Git may contact the configured remote.
 - Registered repositories are intended as read-only references unless the user explicitly asks otherwise.
 - Repository state changes are serialized and persisted with atomic file replacement.
 - The system prompt includes only registered repo names and local paths, not origin URLs or branch metadata.

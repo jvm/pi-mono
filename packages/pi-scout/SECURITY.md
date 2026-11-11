@@ -34,16 +34,28 @@ Do not commit API keys, tokens, credentials, local settings, or machine-specific
 
 On startup, `@mocito/install-telemetry` sends a best-effort install/update telemetry ping to the configured telemetry endpoint once per package version unless Pi telemetry is disabled, offline mode is enabled, or Pi runs in CI. The ping includes only the package name, version, and parsed platform/runtime/architecture from its User-Agent; it does not include prompts, repository sources, clone paths, config values, or API keys.
 
-`pi-scout` stores repository records under Pi's agent directory and clones registered repositories into the OS temporary directory. It does not provide web search or content-fetching tools, but registering a Git URL uses `git clone`, which may contact the configured remote. Registered repository paths are appended to the system prompt so the agent can inspect them with local file tools.
+`pi-scout` stores repository records under Pi's agent directory and clones registered repositories into the OS temporary directory. It does not provide web search or content-fetching tools, but registering a Git URL uses `git clone`, and `scout_add` with `refresh: true` uses `git fetch` and a fast-forward-only merge, which may contact the configured remote. Reusing an already registered source makes no network request. Registered repository paths are appended to the system prompt so the agent can inspect them with local file tools.
 
 Direct tool text, structured results and renderer details expose only repository
 IDs, names, local paths, optional branches and timestamps—not origin/source
 metadata. URL userinfo/query/fragment are not used to infer public clone names.
-Git receives arguments without a shell and with an option terminator; clone
-failures do not echo stderr or remote response bodies. This does not remove
-caller-supplied origins from Pi's tool-call transcript, Scout's private records,
-the local `/scout` listing, or Git configuration. Prefer Git's credential
-mechanisms to embedding credentials in URLs.
+Git receives arguments without a shell and with an option terminator. Branch
+and tag names are validated against Git ref-name rules, must not start with `-`,
+and are passed as `--branch=<name>`. Refresh passes no caller input to Git; it
+uses the refspec Git recorded at clone time and runs only in a real directory
+inside the private clone root that the current user owns. Every network Git call
+sets `protocol.ext.allow=never` and `credential.interactive=false`, so
+configuration cannot enable command transports and Git fails instead of
+prompting on the terminal. Clone/fetch failures and timeouts do not echo stderr
+or remote response bodies.
+
+URL passwords, non-SSH usernames, query strings and fragments are removed from
+Scout's persisted records, the `/scout` listing, and the clone's `origin` URL in
+`.git/config`, which the agent can read. Records written by earlier versions are
+redacted when loaded; their existing clone configuration is not rewritten. A
+refresh of a credential-stripped clone uses Git's credential helpers. This does
+not remove caller-supplied origins from Pi's tool-call transcript. Prefer Git's
+credential mechanisms to embedding credentials in URLs.
 
 Scout tool calls run sequentially within one Pi dispatcher; atomic state writes
 remain separate from clone creation/deletion and are not a cross-process

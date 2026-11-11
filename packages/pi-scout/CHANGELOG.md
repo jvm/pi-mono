@@ -6,6 +6,17 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Reuse the existing clone when `scout_add` receives an already registered source and branch, including equivalent URL, shorthand and local-path spellings. Results add `status: cloned | reused | refreshed`.
+- Add `branch` (branch or tag) and `refresh` (fetch and fast-forward an existing clone) to `scout_add`.
+
+### Fixed
+
+- Remove URL credentials, query strings and fragments from persisted records, the `/scout` listing, and the clone's Git `origin` URL; redact records from earlier versions on load.
+- Treat `./repo` and `../repo` as local paths instead of GitHub shorthand.
+- Disable Git's `ext` transport and interactive credential prompts for Scout Git calls; report timeouts as failures.
+
 ## [0.3.0] - 2026-10-30
 
 ### Changed
