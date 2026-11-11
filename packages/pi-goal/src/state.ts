@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BranchEntry, GoalMutation, GoalMutationMeta, GoalState, GoalStatus } from "./types.js";
 import { GOAL_ENTRY_TYPE, GOAL_SCHEMA_VERSION } from "./types.js";
 import { withPiGoalVersion } from "./metadata.js";
-import { newGoalId, nowIso } from "./utils.js";
+import { newGoalId, nowIso, secondsBetween } from "./utils.js";
 
 export function appendGoalMutation(pi: ExtensionAPI, mutation: GoalMutation): void {
   pi.appendEntry(GOAL_ENTRY_TYPE, mutation);
@@ -55,8 +55,18 @@ export function applyGoalMutation(current: GoalState | null, mutation: GoalMutat
     return current;
   }
   switch (mutation.kind) {
-    case "edit":
-      return { ...current, objective: mutation.objective, status: mutation.status ?? current.status, updatedAt: mutation.at, activeStartedAt: mutation.status === "active" ? mutation.at : current.activeStartedAt };
+    case "edit": {
+      const status = mutation.status ?? current.status;
+      const wasActive = current.status === "active";
+      // An edit never resets elapsed time. Keep a running active segment; open
+      // one only when the edit reactivates the goal; close it if the edit stops it.
+      if (status === "active") {
+        const activeStartedAt = wasActive && current.activeStartedAt ? current.activeStartedAt : mutation.at;
+        return { ...current, objective: mutation.objective, status, updatedAt: mutation.at, activeStartedAt };
+      }
+      const timeUsedSeconds = wasActive ? current.timeUsedSeconds + secondsBetween(current.activeStartedAt, Date.parse(mutation.at)) : current.timeUsedSeconds;
+      return { ...current, objective: mutation.objective, status, timeUsedSeconds, updatedAt: mutation.at, activeStartedAt: undefined };
+    }
     case "status":
       return { ...current, status: mutation.status, timeUsedSeconds: mutation.timeUsedSeconds ?? current.timeUsedSeconds, activeStartedAt: mutation.activeStartedAt, updatedAt: mutation.at };
     case "budget":

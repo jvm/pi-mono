@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve elapsed goal time across `/goal edit`. Editing an active goal no longer resets its time to zero, and sessions that contain such edits reconstruct the correct time on reload.
+
 ## [0.3.1] - 2026-10-30
 
 ### Changed
