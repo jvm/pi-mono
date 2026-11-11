@@ -78,7 +78,7 @@ async function makeOrigin(name) {
   return { bare, work };
 }
 
-const SAFE = ["-c", "protocol.ext.allow=never", "-c", "credential.interactive=false"];
+const SAFE = ["-c", "protocol.ext.allow=never", "-c", "credential.interactive=false", "-c", "core.askPass=true"];
 const BATCH_SSH = ["-c", "core.sshCommand=ssh -oBatchMode=yes"];
 const EXEC_LIMITS = { timeout: 120_000, maxBuffer: 1024 * 1024 };
 
@@ -321,6 +321,53 @@ test("file URLs stored unescaped by earlier builds are re-normalised on load", a
   assert.ok((await loadState()).repos.some(repo => repo.id === "legacy-hash" && repo.source === pathToFileURL(bare).href));
 });
 
+const hasScript = process.platform === "linux" && await new Promise(resolve => execFile("script", ["--version"], error => resolve(!error)));
+
+/**
+ * Pi host whose exec runs Git on a pseudo-terminal (util-linux `script`) with
+ * no prompt-disabling environment, so a credential prompt would wait for
+ * input until the host timeout. `dropArgs` emulates a Git that ignores a
+ * `-c` setting.
+ */
+function loadScoutOnTerminal({ dropArgs = [] } = {}) {
+  const env = { ...process.env };
+  for (const name of ["GIT_TERMINAL_PROMPT", "GIT_ASKPASS", "SSH_ASKPASS"]) delete env[name];
+  const quote = value => `'${value.replaceAll("'", `'\\''`)}'`;
+  const outputs = [];
+  const host = loadScout((_command, args, execOptions) => new Promise((resolve) => {
+    const kept = args.filter((arg, index) => !(arg === "-c" && dropArgs.includes(args[index + 1])) && !dropArgs.includes(arg));
+    const command = ["git", ...kept].map(quote).join(" ");
+    execFile("script", ["-qec", command, "/dev/null"], { cwd: execOptions?.cwd, env, timeout: 10_000, maxBuffer: 1 << 20 }, (error, stdout) => {
+      outputs.push(stdout);
+      resolve({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0, stdout, stderr: "", killed: Boolean(error?.killed) });
+    });
+  }));
+  return { ...host, outputs };
+}
+
+(hasScript ? test : test.skip)("HTTP authentication failures never prompt on the terminal", async () => {
+  const { createServer } = await import("node:http");
+  const server = createServer((_request, response) => {
+    response.writeHead(401, { "WWW-Authenticate": "Basic realm=\"scout\"" });
+    response.end();
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    // Current Git honours credential.interactive; older Git ignores it.
+    for (const dropArgs of [[], ["credential.interactive=false"]]) {
+      const { add, outputs } = loadScoutOnTerminal({ dropArgs });
+      const started = performance.now();
+      await assert.rejects(add({ source: `${base}/private.git` }),
+        { message: "Git clone failed (exit code 128). Check the source and Git authentication." }, `dropped: ${dropArgs}`);
+      assert.ok(performance.now() - started < 5_000, "fails without waiting for input");
+      assert.doesNotMatch(outputs.join("\n"), /Username for|Password for/);
+    }
+  } finally {
+    server.close();
+  }
+});
+
 test("relative ./ and ../ paths are local paths, not GitHub shorthand", async () => {
   const { add, calls } = loadScout(async (_command, args) => {
     if (args.includes("clone")) await mkdir(args.at(-1), { recursive: true });
@@ -348,14 +395,14 @@ test("Git calls are non-interactive and output-bounded", async () => {
 test("a user-chosen SSH command is kept unchanged", async () => {
   const configured = loadScout(stubGit({ sshCommand: "my-ssh-wrapper" }));
   await configured.add({ source: "git@fixture.invalid:team/configured.git" });
-  assert.deepEqual(configured.calls.at(-1).slice(0, 5), [...SAFE, "clone"]);
+  assert.deepEqual(configured.calls.at(-1).slice(0, SAFE.length + 1), [...SAFE, "clone"]);
 
   process.env.GIT_SSH_COMMAND = "ssh -i synthetic-key";
   try {
     const env = loadScout(stubGit());
     await env.add({ source: "git@fixture.invalid:team/env.git" });
     assert.equal(env.calls.length, 1, "no config read when GIT_SSH_COMMAND decides");
-    assert.deepEqual(env.calls[0].slice(0, 5), [...SAFE, "clone"]);
+    assert.deepEqual(env.calls[0].slice(0, SAFE.length + 1), [...SAFE, "clone"]);
   } finally {
     delete process.env.GIT_SSH_COMMAND;
   }

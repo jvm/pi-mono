@@ -44,9 +44,15 @@ and tag names are validated against Git ref-name rules, must not start with `-`,
 and are passed as `--branch=<name>`. Refresh passes no caller input to Git; it
 uses the refspec Git recorded at clone time and runs only in a real directory
 inside the private clone root that the current user owns. Every network Git call
-sets `protocol.ext.allow=never` and `credential.interactive=false`, so
-configuration cannot enable command transports and Git fails instead of
-prompting on the terminal. SSH runs with `ssh -oBatchMode=yes` (through
+sets `protocol.ext.allow=never`, so configuration cannot enable command
+transports. It also sets `credential.interactive=false` and `core.askPass=true`,
+so Git fails instead of prompting for a username or password on the terminal:
+Git that implements `credential.interactive` stops before prompting, and older
+Git gets an empty answer from `true` instead of reading the terminal. Both work
+through `-c`, because `pi.exec` cannot set `GIT_TERMINAL_PROMPT=0`. Credential
+helpers still run first. A user-set `GIT_ASKPASS` takes precedence over
+`core.askPass` and may still prompt on Git versions without
+`credential.interactive`. SSH runs with `ssh -oBatchMode=yes` (through
 `-c core.sshCommand`, because `pi.exec` cannot set environment variables), so
 passphrase, password and unknown-host prompts fail. A user-set
 `GIT_SSH_COMMAND`, `GIT_SSH` or `core.sshCommand` is kept unchanged and may

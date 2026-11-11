@@ -30,8 +30,12 @@ const GIT_TIMEOUT_MS = 120_000;
 // older hosts ignore the option.
 export const GIT_MAX_BUFFER = 1024 * 1024;
 // Never let configuration enable arbitrary-command transports, and fail
-// instead of prompting on a terminal that Pi's TUI owns.
-const GIT_SAFETY_ARGS = ["-c", "protocol.ext.allow=never", "-c", "credential.interactive=false"];
+// instead of prompting on a terminal that Pi's TUI owns. Git that supports
+// `credential.interactive` stops before prompting. Older Git ignores it and
+// asks `core.askPass`; `true` answers empty, so Git never falls back to the
+// terminal prompt. Credential helpers still run first. A `GIT_ASKPASS`
+// environment variable overrides `core.askPass` and is kept as the user's choice.
+const GIT_SAFETY_ARGS = ["-c", "protocol.ext.allow=never", "-c", "credential.interactive=false", "-c", "core.askPass=true"];
 const BATCH_SSH_ARGS = ["-c", "core.sshCommand=ssh -oBatchMode=yes"];
 
 /** The subset of `pi.exec` options Scout uses; `maxBuffer` exists from Pi 1.5. */
