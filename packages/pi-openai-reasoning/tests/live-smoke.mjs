@@ -44,6 +44,14 @@ async function prompt(text) {
   assert.equal(h.session.messages.at(-1).stopReason, "stop", "Codex request failed");
 }
 try {
+  // Optional: verify another enabled Codex model, such as gpt-6.1-sol or gpt-6.1-terra.
+  const modelId = process.env.PI_CODEX_LIVE_MODEL;
+  if (modelId) {
+    const selected = modelRuntime.getModel("openai-codex", modelId);
+    assert.ok(selected, `Pi catalog has no openai-codex/${modelId}`);
+    await h.session.setModel(selected);
+    h.session.setThinkingLevel("low");
+  }
   h.session.setActiveToolsByName(["apply_patch"]);
   // Keep the real grammar schema on the wire, but disallow filesystem execution.
   h.api.on("before_provider_request", (event) => ({ ...event.payload, tool_choice: "none" }));
@@ -68,7 +76,7 @@ try {
   assert.equal(requests.at(-1).effort, "medium");
   assert.deepEqual(h.errors, []);
   console.log(JSON.stringify({
-    passed: true, model: h.model.id, requests,
+    passed: true, model: h.session.model.id, requests,
     compactionTokens: checkpoint.usage.totalTokens,
     totalTokens: h.session.getSessionStats().tokens,
   }));
