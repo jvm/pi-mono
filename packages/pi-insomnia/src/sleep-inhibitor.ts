@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { LinuxSleepInhibitor } from "./linux-sleep-inhibitor.js";
 
 export const DEFAULT_CAFFEINATE_PATH = "/usr/bin/caffeinate";
 
@@ -81,4 +82,18 @@ export class MacSleepInhibitor {
     this.child = undefined;
     if (!child.killed) child.kill("SIGTERM");
   }
+}
+
+export interface SleepInhibitor {
+  readonly isInhibiting: boolean;
+  acquire(): boolean;
+  release(): void;
+  forceStop(): void;
+  /** Set by the extension; called at most once when inhibition becomes unavailable. */
+  onUnavailable?: ((message: string) => void) | undefined;
+}
+
+/** Select the platform backend: `caffeinate` on macOS, `systemd-inhibit` on Linux, no-op elsewhere. */
+export function createSleepInhibitor(platform: NodeJS.Platform = process.platform): SleepInhibitor {
+  return platform === "linux" ? new LinuxSleepInhibitor({ platform }) : new MacSleepInhibitor({ platform });
 }

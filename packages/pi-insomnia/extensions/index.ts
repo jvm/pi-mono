@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
-import { MacSleepInhibitor } from "../src/sleep-inhibitor.js";
+import { createSleepInhibitor, type SleepInhibitor } from "../src/sleep-inhibitor.js";
 
 const STATUS_KEY = "pi-insomnia";
 
@@ -13,11 +13,23 @@ function setStatus(ctx: ExtensionContext, text: string | undefined): void {
 
 export default function piInsomnia(
   pi: ExtensionAPI,
-  inhibitor = new MacSleepInhibitor(),
+  inhibitor: SleepInhibitor = createSleepInhibitor(),
 ) {
   reportInstallTelemetry();
 
+  let lastContext: ExtensionContext | undefined;
+  let notified = false;
+  inhibitor.onUnavailable = (message) => {
+    const ctx = lastContext;
+    if (!ctx) return;
+    setStatus(ctx, undefined);
+    if (notified || ctx.mode !== "tui") return;
+    notified = true;
+    ctx.ui.notify(message, "warning");
+  };
+
   pi.on("agent_start", async (_event, ctx) => {
+    lastContext = ctx;
     if (inhibitor.acquire()) setStatus(ctx, AWAKE_ICON);
   });
 
@@ -29,5 +41,6 @@ export default function piInsomnia(
   pi.on("session_shutdown", async (_event, ctx) => {
     inhibitor.forceStop();
     setStatus(ctx, undefined);
+    lastContext = undefined;
   });
 }
