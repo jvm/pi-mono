@@ -93,6 +93,8 @@ export class ProcessRuntime {
   private closed = false;
   // Reservations prevent concurrent spawn calls from exceeding the limit.
   private launching = 0;
+  // Startups still spawning; close waits so no child outlives the runtime.
+  private readonly startups = new Set<Promise<void>>();
   private readonly logs = new OutputLogs();
   private readonly subscribers = new Set<() => void>();
 
@@ -132,6 +134,10 @@ export class ProcessRuntime {
       listeners: new Set(), queue: Promise.resolve(), queued: 0,
     };
     let reserved = true;
+    let startupDone!: () => void;
+    const startup = new Promise<void>(resolve => { startupDone = resolve; });
+    this.startups.add(startup);
+    const settleStartup = () => { this.startups.delete(startup); startupDone(); };
     try {
       this.logs.create(job.id);
       job.transport = await launch({
@@ -158,10 +164,17 @@ export class ProcessRuntime {
           this.maybeNotify(job);
         },
       });
-      this.jobs.set(job.id, job);
       this.launching--;
       reserved = false;
-      if (this.closed || signal?.aborted) {
+      if (this.closed) {
+        // close() already released records and logs; stop this child before it settles.
+        job.stopRequested = !job.exited;
+        await this.stop(job);
+        throw new Error("Process runtime is closed");
+      }
+      this.jobs.set(job.id, job);
+      settleStartup();
+      if (signal?.aborted) {
         if (!job.exited && !job.timedOut) job.stopRequested = true;
         await this.stop(job);
         throw new Error("Process operation cancelled");
@@ -189,6 +202,7 @@ export class ProcessRuntime {
       throw error;
     } finally {
       if (reserved) this.launching--;
+      settleStartup();
     }
   }
 
@@ -344,6 +358,7 @@ export class ProcessRuntime {
   async close(): Promise<void> {
     this.closed = true;
     this.stateChanged();
+    await Promise.all([...this.startups]);
     await Promise.all([...this.jobs.values()].map(job => this.stop(job)));
     for (const job of this.jobs.values()) job.transport?.dispose();
     this.jobs.clear();
