@@ -11,8 +11,8 @@ import { commandPreview } from "../src/display-text.ts";
 import { changes as changeSignal, fixture, textOf, until } from "./process-fixture.mjs";
 
 const dataOf = result => result.structuredContent ?? result.details ?? JSON.parse(textOf(result));
-// Wait for the redraw/lifecycle event, not a polling window; the test timeout
-// bounds a missing event.
+// Wait for the redraw/lifecycle event, not a polling window; `until` rejects a
+// missing event before this test timeout.
 const bounded = { timeout: 30_000 };
 function terminal() {
   return {
@@ -135,7 +135,8 @@ test("PTY background remains visible after rejecting input; approval still contr
   assert.equal(accepted.isError, false);
   // The yield window may end before the shell answers; wait for exit and read
   // the retained, non-consuming log instead of one bounded poll.
-  await h.run("process_wait", { session_ids: [job.session_id] });
+  const [exit] = dataOf(await h.run("process_wait", { session_ids: [job.session_id], timeout_ms: 15_000 })).processes;
+  assert.equal(exit.status, "exited");
   assert.match(dataOf(await h.run("process_output", { session_id: job.session_id })).output, /received:approved/);
   assert.ok(!widget);
   assert.equal(h.confirmations.length, 2);

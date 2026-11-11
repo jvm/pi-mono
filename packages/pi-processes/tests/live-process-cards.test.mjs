@@ -10,7 +10,8 @@ import { LiveProcessCards } from "../src/live-process-cards.ts";
 import { changes, fixture, textOf, until } from "./process-fixture.mjs";
 
 const dataOf = r => r.structuredContent ?? r.details ?? JSON.parse(textOf(r));
-// A missing lifecycle event fails through the test timeout, not a polling window.
+// Waits use lifecycle events, not a polling window; `until` rejects a missing
+// event, with the rendered card, before this test timeout.
 const bounded = { timeout: 30_000 };
 function terminal() {
   return {
@@ -42,8 +43,9 @@ async function cardFixture(t, Engine, args) {
   t.after(() => tui.stop());
   t.after(h.session.subscribe(() => changed.notify()));
   return { ...h, term, tui, card, launched, original, redraws: () => redraws,
-    until: check => until(changed.subscribe, check),
-    lines: () => stripVTControlCharacters(card.render(100).join("\n")) };
+    until: check => until(changed.subscribe, check, { describe: lines }),
+    lines };
+  function lines() { return stripVTControlCharacters(card.render(100).join("\n")); }
 }
 
 for (const Engine of [TuiMainScreen, TuiAltScreen]) {

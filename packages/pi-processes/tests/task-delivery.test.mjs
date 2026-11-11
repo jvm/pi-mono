@@ -13,8 +13,8 @@ import { requestBody, textResponse } from "../../../tests/codex-harness.mjs";
 const dataOf = result => result.structuredContent ?? result.details ?? JSON.parse(textOf(result));
 const fixture = (t, options = {}) => dcgFixture(t, { ...options, omitShell: true });
 const notices = h => h.session.messages.filter(m => m.customType === "pi-processes-completed");
-// Wait for the status/session event, not a polling window; the test timeout
-// bounds a missing event.
+// Wait for the status/session event, not a polling window; `until` rejects a
+// missing event before this test timeout.
 const bounded = { timeout: 30_000 };
 function response(calls, n) {
   const output = calls.map((c, i) => ({

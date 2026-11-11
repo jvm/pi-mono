@@ -10,7 +10,8 @@ import { requestBody } from "../../../tests/codex-harness.mjs";
 
 const dataOf = result => result.structuredContent ?? result.details ?? JSON.parse(textOf(result));
 const pushed = body => JSON.stringify(body.input).includes("Background process completed.");
-// A missing event fails through the test timeout instead of a polling window.
+// Waits use events, not a polling window; `until` rejects a missing event
+// before this test timeout.
 const bounded = { timeout: 30_000 };
 
 /** Runtime whose completion callback is an explicit signal for the test. */

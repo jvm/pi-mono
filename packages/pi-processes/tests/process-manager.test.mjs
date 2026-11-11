@@ -9,8 +9,8 @@ import { ProcessPanel } from "../src/process-panel.ts";
 import { ProcessDisplay } from "../src/process-widget.ts";
 import { changes, until } from "./process-fixture.mjs";
 
-// Wait for the runtime lifecycle/output event, not a polling window; the test
-// timeout bounds a missing event.
+// Wait for the runtime lifecycle/output event, not a polling window; `until`
+// rejects a missing event before this test timeout.
 const bounded = { timeout: 30_000 };
 const lifecycle = (rt, check) => until(listener => rt.subscribe(listener), check);
 const spawn = (rt, command, mode = "foreground", timeout = 5000, title) =>
@@ -77,7 +77,7 @@ test("attention sorts first; acknowledge all retains records and excludes future
   await h.rt.kill(running.session_id);
 });
 
-test("intentional stops are distinct from signals/timeouts and never clear an existing failure", async t => {
+test("intentional stops are distinct from signals/timeouts and never clear an existing failure", bounded, async t => {
   const h = setup(t);
   const stopped = await spawn(h.rt, "sleep 30", "service");
   h.manager.handleInput("s");
@@ -149,11 +149,11 @@ test("cleanup skips external readers, preserves quota, and never stops a launch"
   assert.equal(h.rt.views().length, 0);
 });
 
-test("unacknowledged background failures are evicted last and never block admission", async t => {
+test("unacknowledged background failures are evicted last and never block admission", bounded, async t => {
   const h = setup(t, { active: 4, retained: 3, outputBytes: 1024, killGraceMs: 10 });
   const ids = async (command, mode) => (await spawn(h.rt, command, mode)).session_id;
   const failure = await ids("exit 1", "background");
-  await eventually(() => h.rt.views()[0]?.attention === "needs_attention");
+  await lifecycle(h.rt, () => h.rt.views()[0]?.attention === "needs_attention");
   const success = await ids("printf ok", "foreground");
   const foregroundFailure = await ids("exit 2", "foreground");
   const has = id => h.rt.views().some(p => p.session_id === id);
@@ -169,20 +169,20 @@ test("unacknowledged background failures are evicted last and never block admiss
   // With only background failures left, the oldest one makes room.
   const later = [];
   for (let i = 0; i < 3; i++) later.push(await ids(`exit ${10 + i}`, "background"));
-  await eventually(() => h.rt.views().every(p => p.status === "exited"));
+  await lifecycle(h.rt, () => h.rt.views().every(p => p.status === "exited"));
   const last = await ids("exit 20", "background");
-  await eventually(() => h.rt.views().filter(p => p.attention === "needs_attention").length === 3);
+  await lifecycle(h.rt, () => h.rt.views().filter(p => p.attention === "needs_attention").length === 3);
   assert.ok(!has(failure) && !has(later[0]) && has(later[1]) && has(later[2]) && has(last));
   h.manager.handleInput("r");
   assert.match(h.text(), /3 need attention/);
   assert.match(h.text(), /! exit 20/);
 });
 
-test("admission fails only when every retained record is running or in use", async t => {
+test("admission fails only when every retained record is running or in use", bounded, async t => {
   const h = setup(t, { active: 3, retained: 3, outputBytes: 1024, killGraceMs: 10 });
   const live = [await spawn(h.rt, "sleep 30", "service"), await spawn(h.rt, "sleep 30", "service")];
   const failure = await spawn(h.rt, "exit 1", "background");
-  await eventually(() => h.rt.views().some(p => p.attention === "needs_attention"));
+  await lifecycle(h.rt, () => h.rt.views().some(p => p.attention === "needs_attention"));
   const release = h.rt.hold([failure.session_id]);
   await assert.rejects(spawn(h.rt, "printf rejected"),
     /At most 3 process records can be retained, and every record is running or in use by a reader/);

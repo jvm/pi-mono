@@ -9,17 +9,27 @@ export async function fixture(t, options = {}) {
 
 /**
  * Resolve once `check` passes, re-checking only when `subscribe` reports a
- * change. Tests wait for the event they depend on instead of a polling window;
- * the test's own timeout bounds a missing event.
+ * change. Tests wait for the event they depend on instead of a polling window.
+ * Each wait has its own deadline, shorter than the 30-second test timeout, so a
+ * missing event rejects with `describe()` context and always releases the
+ * timer and subscription, even when nothing else ends the wait.
  */
-export function until(subscribe, check) {
+export function until(subscribe, check, { timeout = 15_000, describe } = {}) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let unsubscribe;
-    // Production refresh timers are unref'd; keep the loop alive while waiting
-    // so they can fire. This never re-checks or resolves anything itself.
-    const keepAlive = setInterval(() => {}, 1 << 30);
-    const finish = () => { settled = true; clearInterval(keepAlive); unsubscribe?.(); };
+    // Production refresh timers are unref'd; this referenced deadline keeps the
+    // loop alive so they can fire. It never re-checks or resolves anything.
+    const deadline = setTimeout(() => {
+      if (settled) return;
+      finish();
+      let detail = "";
+      if (describe) {
+        try { detail = `\n${describe()}`; } catch (error) { detail = `\n(describe failed: ${error})`; }
+      }
+      reject(new Error(`expected event did not arrive within ${timeout} ms${detail}`));
+    }, timeout);
+    const finish = () => { settled = true; clearTimeout(deadline); unsubscribe?.(); };
     const evaluate = () => {
       if (settled) return;
       let passed;

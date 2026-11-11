@@ -164,7 +164,7 @@ test("managed-only options require mode and invalid timeouts never start", async
   }
 });
 
-test("managed bash PTY input still requires per-write RPC approval", async t => {
+test("managed bash PTY input still requires per-write RPC approval", { timeout: 30_000 }, async t => {
   let approve = false;
   const h = await setup(t, { uiMode: "rpc", confirm: async () => approve });
   const r = await h.run("bash", { command: "read -r answer; printf 'received:%s' \"$answer\"", mode: "service", tty: true });
@@ -176,7 +176,7 @@ test("managed bash PTY input still requires per-write RPC approval", async t => 
   assert.equal(accepted.isError, false);
   // The yield window may end before the shell answers; wait for its exit and
   // read the retained, non-consuming log instead of one bounded poll.
-  const finished = dataOf(await h.run("process_wait", { session_ids: [session_id] }));
+  const finished = dataOf(await h.run("process_wait", { session_ids: [session_id], timeout_ms: 15_000 }));
   const [exit] = finished.processes;
   assert.equal(exit.status, "exited");
   const output = dataOf(await h.run("process_output", { session_id })).output;
