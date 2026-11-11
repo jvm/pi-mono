@@ -92,9 +92,13 @@ test("origin credentials never become a public clone name or path; clone options
   for (const source of ["https://synthetic-user:synthetic-password@fixture.invalid", "https://fixture.invalid/repo.git?token=synthetic-secret#fragment"]) {
     const repo = await registerRepo(pi, { source });
     assert.doesNotMatch(JSON.stringify(publicRepo(repo)) + formatPublicRepo(repo), /synthetic|source|fragment/);
-    assert.equal(calls.at(-1).at(-3), "--");
-    assert.equal(calls.at(-1).at(-2), source);
+    const clone = calls.findLast(args => args.includes("clone"));
+    assert.equal(clone.at(-3), "--");
+    assert.equal(clone.at(-2), source);
+    // The clone's Git config, readable by the agent, loses the secret parts.
+    assert.deepEqual(calls.at(-1), ["-C", repo.path, "remote", "set-url", "--", "origin", "https://fixture.invalid" + (source.includes("repo.git") ? "/repo.git" : "")]);
   }
+  assert.doesNotMatch(await readFile(getScoutStatePath(), "utf8"), /synthetic/, "persisted records hold no credentials");
   const before = (await loadState()).repos.length;
   await assert.rejects(registerRepo({ exec: async () => { throw new Error("private process output"); } }, { source: "owner/failure" }),
     { message: "Git clone could not run. Check Git and authentication." });

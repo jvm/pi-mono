@@ -1,0 +1,149 @@
+import { isAbsolute, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+export interface ResolvedSource {
+  /** Exact argument passed to `git clone`; may contain caller-supplied credentials. */
+  clone: string;
+  /** Source safe to persist and display: URL userinfo secrets, query and fragment removed. */
+  stored: string;
+  /** Equivalence key used to reuse existing clones. Never contains credentials. */
+  key: string;
+}
+
+const SCHEME_URL = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//;
+// GitHub owners start with an alphanumeric character, so `./repo` and
+// `../repo` stay local relative paths instead of becoming GitHub URLs.
+const GITHUB_SHORTHAND = /^([A-Za-z0-9][A-Za-z0-9_.-]*)\/([A-Za-z0-9_.-]+)$/;
+const SCP_LIKE = /^(?:([^/@:]+)@)?([^/:]{2,}):(?!\/\/)(.*)$/;
+const SSH_SCHEMES = new Set(["ssh:", "git+ssh:", "ssh+git:"]);
+
+export function parseGitHubShorthand(source: string): { owner: string; repo: string } | undefined {
+  const match = source.match(GITHUB_SHORTHAND);
+  if (!match) return undefined;
+  const repo = match[2]!.replace(/\.git$/i, "");
+  if (!repo || repo === "." || repo === "..") return undefined;
+  return { owner: match[1]!, repo };
+}
+
+/**
+ * Resolve a caller-supplied source to the clone argument, a credential-free
+ * persisted form and an equivalence key. Equivalent spellings share a key:
+ * `owner/repo`, `https://GitHub.com/owner/repo.git/`, scheme/host case,
+ * trailing `.git` or slash on remote URLs, and `file://` vs. local paths.
+ */
+export function resolveSource(raw: string, cwd: string): ResolvedSource {
+  const source = raw.trim();
+  if (!source) throw new Error("Repository source is required.");
+
+  const shorthand = parseGitHubShorthand(source);
+  if (shorthand) {
+    const url = `https://github.com/${shorthand.owner}/${shorthand.repo}.git`;
+    return { clone: url, stored: url, key: urlKey(new URL(url)) };
+  }
+
+  if (SCHEME_URL.test(source)) {
+    let url: URL;
+    try { url = new URL(source); }
+    catch { throw new Error("Repository source is not a valid URL."); }
+    if (url.protocol === "file:") {
+      const path = stripTrailingSeparators(fileURLToPath(url));
+      return { clone: source, stored: `file://${path}`, key: `path:${path}` };
+    }
+    const stored = redactUrl(url);
+    return { clone: source, stored, key: urlKey(url) };
+  }
+
+  // Git's `<transport>::<address>` remote helpers are passed through unchanged.
+  if (/^[A-Za-z][A-Za-z0-9+.-]*::/.test(source)) return { clone: source, stored: source, key: `raw:${source}` };
+
+  const scp = source.match(SCP_LIKE);
+  if (scp && !isAbsolute(source)) {
+    const [, user, host, path] = scp;
+    const normalizedPath = stripGitSuffix(path!);
+    return { clone: source, stored: source, key: `scp:${user ? `${user}@` : ""}${host!.toLowerCase()}:${normalizedPath}` };
+  }
+
+  const path = stripTrailingSeparators(resolve(cwd, source));
+  return { clone: path, stored: path, key: `path:${path}` };
+}
+
+/** Remove credentials from a persisted source written by an earlier version. */
+export function redactStoredSource(source: string): string {
+  if (!SCHEME_URL.test(source)) return source;
+  try {
+    const url = new URL(source);
+    return url.protocol === "file:" ? source : redactUrl(url);
+  } catch {
+    return source;
+  }
+}
+
+/** Equivalence key for a persisted record, or undefined when it cannot be derived. */
+export function storedSourceKey(source: string): string | undefined {
+  try { return resolveSource(source, "/").key; }
+  catch { return undefined; }
+}
+
+/** True when the clone URL carries data that must not stay in the clone's Git config. */
+export function hasSecretUrlParts(source: string): boolean {
+  if (!SCHEME_URL.test(source)) return false;
+  try {
+    const url = new URL(source);
+    if (url.protocol === "file:") return false;
+    return Boolean(url.password || url.search || url.hash || (url.username && !SSH_SCHEMES.has(url.protocol)));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validate a branch or tag name for `git clone --branch`. Follows
+ * git-check-ref-format rules and rejects a leading `-` so the value can never
+ * be read as an option.
+ */
+export function validateRef(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const ref = value.trim();
+  if (!ref) return undefined;
+  const invalid = ref.length > 255
+    || ref.startsWith("-")
+    || ref.startsWith("/")
+    || ref.endsWith("/")
+    || ref.endsWith(".")
+    || ref.endsWith(".lock")
+    || ref === "@"
+    || ref.includes("..")
+    || ref.includes("//")
+    || ref.includes("@{")
+    || ref.split("/").some((part) => part.startsWith("."))
+    // Control characters, space and characters Git forbids in ref names.
+    || /[\u0000- \u007f~^:?*[\\]/.test(ref);
+  if (invalid) throw new Error("Invalid branch or tag name.");
+  return ref;
+}
+
+function redactUrl(url: URL): string {
+  const user = SSH_SCHEMES.has(url.protocol) && url.username ? `${url.username}@` : "";
+  const port = url.port ? `:${url.port}` : "";
+  return `${url.protocol}//${user}${url.hostname}${port}${url.pathname === "/" ? "" : url.pathname}`;
+}
+
+function urlKey(url: URL): string {
+  const protocol = url.protocol.toLowerCase();
+  const host = url.hostname.toLowerCase();
+  const user = SSH_SCHEMES.has(protocol) && url.username ? `${url.username}@` : "";
+  const port = url.port ? `:${url.port}` : "";
+  let path = stripGitSuffix(url.pathname);
+  // GitHub owner and repository names are case-insensitive.
+  if (host === "github.com" || host === "www.github.com") path = path.toLowerCase();
+  return `${protocol}//${user}${host === "www.github.com" ? "github.com" : host}${port}${path}`;
+}
+
+function stripGitSuffix(path: string): string {
+  return stripTrailingSeparators(stripTrailingSeparators(path).replace(/\.git$/i, ""));
+}
+
+function stripTrailingSeparators(path: string): string {
+  const stripped = path.replace(/[\\/]+$/, "");
+  return stripped || path.slice(0, 1);
+}

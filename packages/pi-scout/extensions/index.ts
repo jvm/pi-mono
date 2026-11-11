@@ -1,17 +1,21 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
-import { buildScoutPrompt, formatRepo, loadPrunedState, registerRepo, removeRepo } from "../src/index.js";
+import { addRepo, buildScoutPrompt, formatRepo, loadPrunedState, registerRepo, removeRepo } from "../src/index.js";
 import { ADD_REPO_OUTPUT, REMOVE_REPO_OUTPUT, LIST_REPOS_OUTPUT, SCOUT_NAMESPACE, formatPublicRepo, publicRepo, listPublicRepos } from "../src/tool-contracts.js";
 
 const RegisterRepoParams = Type.Object({
   source: Type.String({ description: "Git URL/path or owner/repo." }),
-});
+  branch: Type.Optional(Type.String({ description: "Branch or tag; default branch if omitted.", minLength: 1, maxLength: 255, pattern: "^[^-]" })),
+  refresh: Type.Optional(Type.Boolean({ description: "Fetch and fast-forward if already registered." })),
+}, { additionalProperties: false });
 
 const RemoveRepoParams = Type.Object({
   idOrName: Type.String({ description: "Repo id or name." }),
   deleteClone: Type.Optional(Type.Boolean({ description: "Delete temp clone too." })),
 });
+
+const STATUS_TEXT = { cloned: "Registered", reused: "Reused existing", refreshed: "Refreshed existing" } as const;
 
 export default function piScout(pi: ExtensionAPI) {
   reportInstallTelemetry();
@@ -105,22 +109,26 @@ export default function piScout(pi: ExtensionAPI) {
     namespace: SCOUT_NAMESPACE,
     outputSchema: ADD_REPO_OUTPUT,
     executionMode: "sequential",
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    // Equivalent source and ref reuse the existing clone.
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     label: "Scout Add",
-    description: "Clone/register a reference repo.",
+    description: "Clone/register a reference repo, or reuse its existing clone.",
     promptSnippet: "Add Scout reference repos.",
     promptGuidelines: [
       "Use scout_add to register a Git repo for code exploration.",
     ],
     parameters: RegisterRepoParams,
-    async execute(_toolCallId, rawParams, signal) {
-      const params = rawParams as { source: string };
-      const repo = await registerRepo(pi, { source: params.source, signal });
+    async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
+      const params = rawParams as { source: string; branch?: string; refresh?: boolean };
+      const { repo, status } = await addRepo(pi, {
+        source: params.source, branch: params.branch, refresh: params.refresh, cwd: ctx?.cwd, signal,
+      });
       await syncScoutRmTool();
+      const payload = { repo: publicRepo(repo), status };
       return {
-        content: [{ type: "text", text: `Registered Pi Scout repository:\n${formatPublicRepo(repo)}` }],
-        structuredContent: { repo: publicRepo(repo) },
-        details: { repo: publicRepo(repo) },
+        content: [{ type: "text", text: `${STATUS_TEXT[status]} Pi Scout repository:\n${formatPublicRepo(repo)}` }],
+        structuredContent: payload,
+        details: payload,
       };
     },
   });
@@ -150,9 +158,9 @@ async function handleScoutCommand(
 ): Promise<void> {
   const trimmed = args.trim();
   if (trimmed) {
-    const repo = await registerRepo(pi, { source: trimmed });
+    const { repo, status } = await addRepo(pi, { source: trimmed, cwd: ctx.cwd });
     await syncScoutRmTool();
-    ctx.ui.notify(`Pi Scout registered ${repo.name}`, "info");
+    ctx.ui.notify(`Pi Scout ${status === "reused" ? "already has" : "registered"} ${repo.name}`, "info");
     return;
   }
 
@@ -166,7 +174,7 @@ async function handleScoutCommand(
     const source = await ctx.ui.input("Repository URL or local path", "https://github.com/owner/repo.git");
     if (!source?.trim()) return;
     const name = await ctx.ui.input("Optional friendly name", "");
-    const repo = await registerRepo(pi, { source, name: name?.trim() || undefined });
+    const repo = await registerRepo(pi, { source, name: name?.trim() || undefined, cwd: ctx.cwd });
     await syncScoutRmTool();
     ctx.ui.notify(`Pi Scout registered ${repo.name}`, "info");
     return;
