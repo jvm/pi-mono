@@ -299,7 +299,8 @@ function resolveSaveConfig(params: ToolParams, cwd: string, sessionId: string, c
 	}
 	if (mode === "custom") {
 		const configuredDir = params.saveDir || process.env.PI_CODEX_IMAGE_SAVE_DIR || config.saveDir;
-		if (!configuredDir || !configuredDir.trim()) {
+		// Config files are untrusted JSON; a non-string value must not reach path APIs.
+		if (typeof configuredDir !== "string" || !configuredDir.trim()) {
 			throw new Error("save=custom requires saveDir or PI_CODEX_IMAGE_SAVE_DIR.");
 		}
 		return { mode, outputDir: join(resolveUnderCwd(cwd, configuredDir), safeSessionId) };
