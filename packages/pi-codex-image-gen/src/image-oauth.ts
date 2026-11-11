@@ -9,7 +9,8 @@ export const IMAGE_AUTH_PROVIDER = "codex-images";
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize";
 const TOKEN_URL = "https://auth.openai.com/oauth/token";
-const REDIRECT_URI = "http://localhost:1455/auth/callback";
+const CALLBACK_PORT = 1455;
+const REDIRECT_URI = `http://localhost:${CALLBACK_PORT}/auth/callback`;
 const AUTH_CLAIM = "https://api.openai.com/auth";
 const LOGIN_TIMEOUT_MS = 10 * 60_000;
 const TOKEN_TIMEOUT_MS = 30_000;
@@ -54,7 +55,15 @@ export function parseImageOAuthCallback(input: string, state: string): string {
 	}
 }
 
-async function startCallback(state: string): Promise<{ server: Server; code: Promise<string> }> {
+/** Test seam only: the redirect URI always names port 1455, as registered for this client. */
+export interface ImageOAuthOptions {
+	/** Port the loopback listener binds; 0 picks a free port. Defaults to 1455. */
+	callbackPort?: number;
+	/** Reports the bound listener port. */
+	onCallbackListening?: (port: number) => void;
+}
+
+async function startCallback(state: string, options: ImageOAuthOptions): Promise<{ server: Server; code: Promise<string> }> {
 	let settle!: (code: string) => void;
 	let reject!: (error: Error) => void;
 	const code = new Promise<string>((resolve, rejectCode) => { settle = resolve; reject = rejectCode; });
@@ -85,8 +94,10 @@ async function startCallback(state: string): Promise<{ server: Server; code: Pro
 	try {
 		await new Promise<void>((resolve, reject) => {
 			server.once("error", reject);
-			server.listen(1455, "127.0.0.1", () => {
+			server.listen(options.callbackPort ?? CALLBACK_PORT, "127.0.0.1", () => {
 				server.removeListener("error", reject);
+				const address = server.address();
+				if (address && typeof address === "object") options.onCallbackListening?.(address.port);
 				resolve();
 			});
 		});
@@ -144,7 +155,7 @@ async function requestTokens(body: URLSearchParams, signal: AbortSignal): Promis
 	}
 }
 
-async function login(interaction: ProviderAuthInteraction): Promise<OAuthCredential> {
+async function login(interaction: ProviderAuthInteraction, options: ImageOAuthOptions = {}): Promise<OAuthCredential> {
 	const deadline = AbortSignal.any([interaction.signal, AbortSignal.timeout(LOGIN_TIMEOUT_MS)]);
 	const manualAbort = new AbortController();
 	let callback: Awaited<ReturnType<typeof startCallback>> | undefined;
@@ -154,7 +165,7 @@ async function login(interaction: ProviderAuthInteraction): Promise<OAuthCredent
 		const verifier = randomBytes(32).toString("base64url");
 		const challenge = createHash("sha256").update(verifier).digest("base64url");
 		try {
-			callback = await startCallback(state);
+			callback = await startCallback(state, options);
 		} catch {
 			interaction.notify({ type: "info", message: "The local callback port is unavailable. Paste the full redirect URL to finish image login." });
 		}
@@ -193,24 +204,28 @@ async function login(interaction: ProviderAuthInteraction): Promise<OAuthCredent
 	}
 }
 
-export const imageOAuth: OAuthAuth = {
-	name: "Codex Images (ChatGPT subscription)",
-	isSubscription: true,
-	loginLabel: "Sign in with ChatGPT for images",
-	login,
-	async refresh(credential, signal) {
-		if (typeof credential.refresh !== "string" || !credential.refresh || credential.refresh.length > MAX_TOKEN_RESPONSE_BYTES) {
-			throw new Error(`Missing image OAuth refresh token. ${LOGIN_HINT}`);
-		}
-		return requestTokens(new URLSearchParams({
-			grant_type: "refresh_token", client_id: CLIENT_ID, refresh_token: credential.refresh,
-		}), signal);
-	},
-	async toAuth(credential) {
-		extractImageAccountId(credential.access);
-		return { apiKey: credential.access };
-	},
-};
+export function createImageOAuth(options: ImageOAuthOptions = {}): OAuthAuth {
+	return {
+		name: "Codex Images (ChatGPT subscription)",
+		isSubscription: true,
+		loginLabel: "Sign in with ChatGPT for images",
+		login: interaction => login(interaction, options),
+		async refresh(credential, signal) {
+			if (typeof credential.refresh !== "string" || !credential.refresh || credential.refresh.length > MAX_TOKEN_RESPONSE_BYTES) {
+				throw new Error(`Missing image OAuth refresh token. ${LOGIN_HINT}`);
+			}
+			return requestTokens(new URLSearchParams({
+				grant_type: "refresh_token", client_id: CLIENT_ID, refresh_token: credential.refresh,
+			}), signal);
+		},
+		async toAuth(credential) {
+			extractImageAccountId(credential.access);
+			return { apiKey: credential.access };
+		},
+	};
+}
+
+export const imageOAuth: OAuthAuth = createImageOAuth();
 
 // Authentication-only provider: no chat models or model-picker entries.
 export const imageAuthProvider: Provider = {
