@@ -14,18 +14,42 @@ and continue inference without Pi stopping for a separate summary request.
 
 ### Codemode and current-host compatibility
 
-Compatibility tests target Pi 1.4.0 only in an isolated installation,
+Compatibility tests target Pi 1.5.2 only in an isolated installation,
 including zero-inline-budget discovery, deferred activation, reload and
 checkpoint replay. Consumed structured intermediates do not enter conversation
 history unless the script prints them. Hidden/model-only tools stay outside
 nested discovery.
 
-Pi 1.4 emits chronological `configuration_update` items for reasoning effort.
-The adapter preserves exact updates with only `type` and `reasoning.effort`
-(`none`, `minimal`, `low`, `medium`, `high`, `xhigh`), including between a
-summary and retained assistant output. Unknown configuration remains
-unsupported and disables automatic adaptation. No host serializer or private
-API is patched.
+**Reasoning effort with compaction:** on GPT-6 models with an API key, Pi
+sends the thinking level as `configuration_update` input items, even at the
+default level and on the first request. The public API rejects any request that
+contains both such an item and `context_management` (HTTP 400, "The
+'configuration_update' item type is not supported with compaction"; verified
+live). On every request where this package adds `context_management`, it removes
+those items and sends the latest effort as top-level `reasoning.effort`. Pi has
+already mapped that value to the model's API vocabulary (`low` to `max`, or
+`none` when thinking is off). The model runs at the level you chose, and the
+same rewrite on every compacted request keeps the input prefix stable for
+prompt caching. Any effort token is accepted, so a new level does not turn
+compaction off; the server validates it. An update with any other field is not
+rewritten, and that request is sent unchanged without `context_management`.
+With `/server-compaction off`, Pi's payload, including its updates, is sent as
+is. No host serializer or private API is patched.
+
+Caching cost: a top-level effort change invalidates the provider's prompt
+cache for that one request; `configuration_update` items did not. In live Pi
+1.5.2 runs with a 1000-token threshold, requests that kept the previous effort
+reused the cached prefix (for example 3,920 of 4,049 input tokens), and each
+request with a new effort read 0 cached tokens. Over six- and seven-turn scripts
+that changed effort on most turns, 23-25% of input tokens were cached, against
+61-76% with `/server-compaction off` (which keeps Pi's updates but does not
+compact). If you switch effort often in a short session, that difference costs
+more than compaction saves; `/server-compaction off` keeps the cache.
+
+If the API still returns that 400 (for example because a later extension adds an
+update after this one), automatic compaction pauses for the session and the
+failed turn is retried once without `context_management`, so the turn still gets
+an answer. The rejected request costs nothing. Other failures are not retried.
 
 **Pi 1.4 compatibility:** inline `additional_tools` are adapted automatically.
 A stable namespace base keeps tools available during compaction; later inline
@@ -33,7 +57,7 @@ updates retain their original positions and preserve cached prefixes. Each
 compaction starts a fresh base from Pi's current tool state. There is no
 tool-strategy setting or opt-in.
 
-Targets **Pi 1.4.0**. The package name is unchanged, but the legacy
+Targets **Pi 1.5.2**. The package name is unchanged, but the legacy
 `openai-codex` provider is no longer supported.
 
 ## Installation
@@ -56,7 +80,7 @@ pi -e /path/to/pi-mono/packages/pi-codex-compaction
 
 Pi supplies the host packages through its extension loader; this package does
 not install or resolve a separate physical copy of Pi AI. No manual dependency
-installation is required. See Pi's [package dependency contract](https://github.com/earendil-works/pi/blob/v1.4.0/packages/coding-agent/docs/packages.md#declare-dependencies).
+installation is required. See Pi's [package dependency contract](https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/docs/packages.md#declare-dependencies).
 
 Select a GPT-5/GPT-6 model on provider `openai`, API `openai-responses`, at
 `https://api.openai.com/v1`. No enable command is needed. A previously saved
@@ -156,7 +180,7 @@ RemoteCompactionV2 protocol.
 | Legacy `openai-codex`, custom endpoints, other providers, routed model mismatch | Left unchanged; no compaction or auth hooks for those routes |
 
 Virtual-model selections are also ineligible, including when their physical
-dispatch returns to the same public OpenAI model. Pi 1.4.0 request hooks expose
+dispatch returns to the same public OpenAI model. Pi 1.5.2 request hooks expose
 the selected virtual model, not a complete physical request/auth identity.
 Existing checkpoints use their bounded readable fallback rather than opaque
 replay. Pi's ordinary routed context-limit checks and standard compaction remain
@@ -167,7 +191,7 @@ Model eligibility is not proof of account availability.
 No default model is changed. See the [provider migration assessment](../pi-openai-reasoning/README.md#provider-migration-assessment)
 for the separate reasoning-update limitation.
 
-- Requests with unmappable inline tools, `configuration_update`, `compaction_trigger`, an existing
+- Requests with unmappable inline tools, non-effort `configuration_update`, `compaction_trigger`, an existing
   `context_management`, stateful continuation, truncation, background processing,
   or enabled multi-agent mode are not opted in.
 - Pi 1.4's inline tools need the automatic namespace base. Inline-only requests
@@ -234,8 +258,8 @@ this change removes only their obsolete direct-compaction adapters.
 
 `pi-openai-reasoning` remains a legacy-provider-only extension. This package
 does not migrate it or enable its reasoning-update feature on the public route.
-Automatic compaction and histories containing `configuration_update` are
-incompatible in the public API.
+See **Reasoning effort with compaction** above for Pi's own effort updates
+together with automatic compaction.
 
 ## Validation and measured results
 
@@ -280,7 +304,7 @@ namespaced calls, calls before and after checkpoints, tool removal/redefinition,
 mode-off, reload, branches, codemode-hidden tools, multiple compaction epochs,
 cache-prefix stability, user-fact recall and Pi's threshold safety net.
 Host suites are skipped by ordinary `npm test` unless the host entry is supplied.
-The pinned development baseline and isolated host checks both use Pi 1.4.0.
+The pinned development baseline and isolated host checks both use Pi 1.5.2.
 Run `npm run test:host` from the repository root to include these additional
 host suites and the native inline serializer contracts.
 

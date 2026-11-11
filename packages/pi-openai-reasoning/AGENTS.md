@@ -4,7 +4,9 @@ Root `AGENTS.md` applies.
 
 ## Invariants
 
-- Enable only Codex OAuth model/mode pairs verified against the live backend.
+- Enable only Codex OAuth model/mode pairs verified against the live backend or
+  marked `supports_reasoning_effort_updates` in the upstream Codex catalog. An
+  explicit model `compat.supportsMidConvoEffort` boolean overrides this list.
 - Use Pi's existing thinking controls; do not register a replacement provider.
 - Keep the request effort fixed within a context window and replay updates at
   checked history boundaries. Never emit adjacent updates.

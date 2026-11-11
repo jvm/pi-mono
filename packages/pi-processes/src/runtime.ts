@@ -93,6 +93,8 @@ export class ProcessRuntime {
   private closed = false;
   // Reservations prevent concurrent spawn calls from exceeding the limit.
   private launching = 0;
+  // Startups still spawning; close waits so no child outlives the runtime.
+  private readonly startups = new Set<Promise<void>>();
   private readonly logs = new OutputLogs();
   private readonly subscribers = new Set<() => void>();
 
@@ -116,7 +118,7 @@ export class ProcessRuntime {
     }
     this.evict(1);
     if (this.jobs.size + this.launching >= this.limits.retained) {
-      throw new Error(`At most ${this.limits.retained} process records can be retained; acknowledge or remove completed records, or release active readers`);
+      throw new Error(`At most ${this.limits.retained} process records can be retained, and every record is running or in use by a reader; stop a process or wait for readers to finish`);
     }
     this.launching++;
     const job: Job = {
@@ -132,6 +134,10 @@ export class ProcessRuntime {
       listeners: new Set(), queue: Promise.resolve(), queued: 0,
     };
     let reserved = true;
+    let startupDone!: () => void;
+    const startup = new Promise<void>(resolve => { startupDone = resolve; });
+    this.startups.add(startup);
+    const settleStartup = () => { this.startups.delete(startup); startupDone(); };
     try {
       this.logs.create(job.id);
       job.transport = await launch({
@@ -158,10 +164,17 @@ export class ProcessRuntime {
           this.maybeNotify(job);
         },
       });
-      this.jobs.set(job.id, job);
       this.launching--;
       reserved = false;
-      if (this.closed || signal?.aborted) {
+      if (this.closed) {
+        // close() already released records and logs; stop this child before it settles.
+        job.stopRequested = !job.exited;
+        await this.stop(job);
+        throw new Error("Process runtime is closed");
+      }
+      this.jobs.set(job.id, job);
+      settleStartup();
+      if (signal?.aborted) {
         if (!job.exited && !job.timedOut) job.stopRequested = true;
         await this.stop(job);
         throw new Error("Process operation cancelled");
@@ -189,6 +202,7 @@ export class ProcessRuntime {
       throw error;
     } finally {
       if (reserved) this.launching--;
+      settleStartup();
     }
   }
 
@@ -344,6 +358,7 @@ export class ProcessRuntime {
   async close(): Promise<void> {
     this.closed = true;
     this.stateChanged();
+    await Promise.all([...this.startups]);
     await Promise.all([...this.jobs.values()].map(job => this.stop(job)));
     for (const job of this.jobs.values()) job.transport?.dispose();
     this.jobs.clear();
@@ -461,14 +476,26 @@ export class ProcessRuntime {
     return job.stopping;
   }
 
+  /**
+   * Oldest-first eviction of completed, unused records. Detached failures that
+   * still need human attention go last, but never block admission: only the
+   * terminal user can acknowledge them, and the model may be running unattended.
+   * Foreground failures already returned their result in the tool call.
+   */
   private evict(space = 0): void {
-    for (const [id, job] of this.jobs) {
-      if (this.jobs.size + this.launching <= this.limits.retained - space) break;
-      if (job.exited && job.attention !== "needs_attention" && !job.activeReads && !job.pins && !job.queued && !job.stopping) {
+    let evicted = false;
+    for (const protectFailures of [true, false]) {
+      for (const [id, job] of this.jobs) {
+        if (this.jobs.size + this.launching <= this.limits.retained - space) break;
+        if (!job.exited || job.activeReads || job.pins || job.queued || job.stopping) continue;
+        if (protectFailures && job.attention === "needs_attention" && job.detached) continue;
         job.transport?.dispose();
         this.jobs.delete(id);
         this.logs.remove(id);
+        evicted = true;
       }
     }
+    // Observers such as the open manager must not keep showing evicted records.
+    if (evicted) this.stateChanged();
   }
 }

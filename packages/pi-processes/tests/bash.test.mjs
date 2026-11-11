@@ -199,6 +199,25 @@ test("print sessions do not require terminal-only acknowledgment to admit more f
   assert.match(textOf(r), /"count":32,"lastExit":1/);
 });
 
+for (const mode of ["foreground", "background"]) {
+  test(`TUI sessions admit more than 32 failed ${mode} commands without human acknowledgment`, { timeout: 60_000 }, async t => {
+    const h = await setup(t, { uiMode: "tui", uiContext: { setStatus() {} } });
+    const r = await h.script(`
+      for (let i=0;i<33;i++) {
+        const r=await tools.bash({command:"exit "+(i+1),mode:${JSON.stringify(mode)}});
+        if (r.status!=="exited") await tools.process_wait({session_ids:[r.session_id],acknowledge:true});
+      }
+      const records = await tools.process_list({});
+      text({count:records.processes.length,lastExit:records.processes.at(-1).exit_code});
+    `);
+    assert.equal(r.isError, false, textOf(r));
+    assert.match(textOf(r), /"count":32,"lastExit":33/);
+    const next = await h.run("bash", { command: "printf admitted", mode: "foreground" });
+    assert.equal(next.isError, false, textOf(next));
+    assert.equal(dataOf(next).output, "admitted");
+  });
+}
+
 test("aborting managed bash in a TUI session retains an intentional stop without an attention warning", { timeout: 10_000 }, async t => {
   const statuses = new Map();
   const h = await setup(t, { uiMode: "tui",

@@ -15,7 +15,7 @@
 - Bound private temporary logs, completion tails, aggregate result batches, and every visible preview. Readers and UI must not consume each other's output. Never accept caller-supplied log paths.
 - Model completion messages are hidden in the visible conversation. Use renderers, lifecycle-driven status and `/processes` for human feedback; do not attach command/input arguments to completion context.
 - Keep the widget terminal-only, detached-process-only, and output-free. Drive membership from lifecycle events, not model/tool polling; stop its clock and clear only its own slot on teardown.
-- Keep human attention separate from output inspection and model completion acknowledgment. Protect unacknowledged failures from eviction; intentional stops are not failures.
+- Keep human attention separate from output inspection and model completion acknowledgment. Evict unacknowledged detached failures last, but never let pending attention block admission; intentional stops are not failures.
 - The live manager uses local, bounded reads. UI retention pins must not delay model delivery. Confirm stop/removal, delete only completed unpinned owned output, and release subscriptions/timers/pins on close.
 - This is local execution, not a sandbox. DCG startup coverage belongs in `pi-dcg`; never claim DCG validates incremental stdin.
 

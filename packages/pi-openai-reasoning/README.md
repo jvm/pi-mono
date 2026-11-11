@@ -9,7 +9,7 @@ request effort and needlessly invalidating its cached prefix.
 
 ## Installation
 
-Requires Pi 0.85.1 or later and an existing Pi `openai-codex` OAuth login.
+Requires Pi 1.5.2 and an existing Pi `openai-codex` OAuth login.
 
 ```bash
 pi install npm:pi-openai-reasoning
@@ -29,23 +29,59 @@ There is no public OpenAI API support in this first version and no API-key fallb
 
 | Provider / API | Authentication and model | Behavior / fallback |
 | --- | --- | --- |
-| `openai-codex` / `openai-codex-responses` | Legacy Codex OAuth; `gpt-6-astra`, standard single-agent, supported efforts below | Cache-preserving updates; subscription usage, no API-key fallback |
-| `openai` / `openai-responses` | ChatGPT sign-in or API key; any model | Unchanged Pi thinking controls; no updates from this extension |
-| Other providers, GPT-6.1 Sol, Pro or multi-agent requests | Any | Unchanged; no inferred protocol support |
+| `openai-codex` / `openai-codex-responses` | Legacy Codex OAuth; `gpt-6-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, standard single-agent, supported efforts below | Cache-preserving updates; subscription usage, no API-key fallback |
+| `openai-codex` / `openai-codex-responses` | Other models, such as `gpt-6-sol`, `gpt-6-luna`, GPT-5.6 | Unchanged unless opted in with `models.json` (below) |
+| `openai` / `openai-responses` | ChatGPT sign-in or API key; any model | Unchanged; Pi itself sends updates for GPT-6 with an API key |
+| Other providers, Pro or multi-agent requests | Any | Unchanged; no inferred protocol support |
 
-Pi labels `openai-codex` **OpenAI Codex (legacy)**. Signing in with ChatGPT on
+Pi labels `openai-codex` **OpenAI Codex**. Signing in with ChatGPT on
 `openai` does not enable this extension. Pi's per-thinking-level sampling settings
 change ordinary request parameters; they do not implement the pinned request
 effort and history-positioned `configuration_update` protocol.
 
-The verified model is `openai-codex/gpt-6-astra`, standard single-agent Responses,
-with `low`, `medium`, `high`, `xhigh` or `max` effort. Other models/providers,
+Enabled models are the Codex models that the upstream Codex client's catalog
+marks with `supports_reasoning_effort_updates` (checked at
+[`openai/codex@32234dd`](https://github.com/openai/codex/blob/32234ddac478f362ef12f3bf3c26d1861ea54b4a/codex-rs/models-manager/models.json)):
+`gpt-6-astra`, `gpt-6.1-sol` and `gpt-6.1-terra`, standard single-agent
+Responses, with `low`, `medium`, `high`, `xhigh` or `max` effort. Only Astra is
+verified by this package's live smoke test; GPT-6.1 Sol and Terra follow the
+upstream client and are **not yet verified against the live backend**. The same
+catalog marks `gpt-6-sol`, `gpt-6-luna` and GPT-5.6 as not supporting updates,
+so they keep Pi's ordinary request effort.
+
+Thinking `off` (effort `none`, for example on GPT-6.1 Terra) is sent as Pi's
+ordinary request effort, without an update, like Pi's own public GPT-6
+transport. That request does not reuse the cached prefix. The next change after
+it uses an update again.
+
+To opt a Codex model in or out, set Pi's documented
+`compat.supportsMidConvoEffort` flag in `models.json`. Pi's Codex transport does
+not use this flag, so this extension treats it as an explicit override:
+
+```json
+{
+  "providers": {
+    "openai-codex": {
+      "modelOverrides": {
+        "gpt-6-luna": { "compat": { "supportsMidConvoEffort": true } },
+        "gpt-6.1-terra": { "compat": { "supportsMidConvoEffort": false } }
+      }
+    }
+  }
+}
+```
+
+An opted-in model that the backend does not support can fail requests that
+contain an update; remove the override to recover.
+
+Other models/providers,
 Pro mode, backend multi-agent requests, server auto-compaction/truncation, stored
 conversation references and requests already containing configuration updates are
-left unchanged. This package does not add async tools or mid-turn steering.
+left unchanged, so an update that Pi or another extension already added is never
+duplicated. This package does not add async tools or mid-turn steering.
 
 Virtual-model selections are ineligible even when they dispatch to legacy
-Astra. On Pi 1.4.0, request hooks still see the virtual selection; this extension
+Astra. On Pi 1.5.2, request hooks still see the virtual selection; this extension
 does not infer physical protocol support from a display name, payload, or prior
 response. Pi uses the router's ordinary physical thinking level without this
 extension's cache-preserving updates.
@@ -91,7 +127,7 @@ documentation, not new transport support:
 | Fast on public OpenAI with API key or ChatGPT login | Already supported by `pi-fast`; tier selection is authentication-specific. Mocked transport tests cover both; historical subscription probes establish acceptance, not delivered speed or billing. |
 | Public automatic compaction | Implemented separately in PR #174. The [compaction guide](https://developers.openai.com/api/docs/guides/compaction) distinguishes ordinary `context_management` from standalone `/responses/compact`. Existing live replay evidence is Astra-only. |
 | Public cache-preserving reasoning updates | Separately implementable candidate, **not enabled here**. The [deployment checklist](https://developers.openai.com/api/docs/guides/deployment-checklist) documents standard single-agent GPT-6 updates, but forbids combining them with automatic compaction/truncation and rejects them in `/responses/compact` histories. A follow-up needs explicit compaction policy, transport/auth coverage, and approval; merely widening the provider guard is not sufficient. |
-| GPT-6.1 Sol reasoning updates on legacy Codex | Unverified; retain Astra-only support. Public model guidance is not evidence for a private backend protocol. No new model default or allowlist expansion. |
+| GPT-6.1 Sol/Terra reasoning updates on legacy Codex | Enabled because the upstream Codex client catalog marks them `supports_reasoning_effort_updates` and sends updates for them; not yet live-verified by this package. Public model guidance alone is not treated as evidence. Other models need an explicit `models.json` opt-in. |
 | Images through public ChatGPT plan-sharing token | Unsupported by the [preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations). Keep independent `codex-images` login; never copy the chat token to the private image backend. |
 | Native image-provider integration | Separate #169 investigation; not required for existing image OAuth. A new adapter requires verified host/API support and must preserve credentials, quota, and no automatic API-billing fallback. |
 
@@ -129,6 +165,10 @@ compacts and checks continuation. It never generates images.
 ```bash
 PI_CODEX_LIVE_SMOKE=1 PI_TELEMETRY=0 npm run -w packages/pi-openai-reasoning smoke:live
 ```
+
+The test uses Astra by default. Set `PI_CODEX_LIVE_MODEL=gpt-6.1-sol` or
+`PI_CODEX_LIVE_MODEL=gpt-6.1-terra` to verify a model that is enabled from the
+upstream catalog but not yet live-verified.
 
 In the TUI, use the existing thinking selector for low/high, send a short prompt
 after each change, then `/compact` and continue. The selector should still show

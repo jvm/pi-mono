@@ -96,7 +96,7 @@ pi -e /path/to/pi-mono/packages/pi-web-kit --web-provider-fetch markdown_new --p
 ```
 
 This is an npm-compatible TypeScript Pi package. Bun is not required.
-Use Pi 1.4.0 and Node.js >=22.19.0 for the supported structured tool contracts.
+Use Pi 1.5.2 and Node.js >=22.19.0 for the supported structured tool contracts.
 
 ## Quick usage
 
@@ -434,7 +434,7 @@ Resolves packages, frameworks, SDKs, APIs, CLIs, and libraries to canonical libr
 
 Both Context7 tools prefer provider-enforced strict argument schemas when
 supported. Unsupported providers or schemas retain best-effort tool calling;
-local validation always applies. In Pi 1.4.0, Anthropic falls back because its
+local validation always applies. In Pi 1.5.2, Anthropic falls back because its
 strict schemas do not support these numeric bounds.
 
 ### `library_docs`

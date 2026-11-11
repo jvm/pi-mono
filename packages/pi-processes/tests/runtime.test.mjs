@@ -210,6 +210,28 @@ test("retained-record admission never evicts pinned readers or grows beyond its 
   assert.throws(() => rt.output(ids[0], 0, 1024), /Unknown/);
 });
 
+test("closing during spawn stops the new process before close resolves", async t => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-processes-close-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const pidFile = join(dir, "pid");
+  const rt = new ProcessRuntime(() => {}, { ...limits, killGraceMs: 50 });
+  const pending = start(rt, `printf $$ > ${pidFile}; exec sleep 30`, { wait: 5000 });
+  const rejected = assert.rejects(pending, /closed/);
+  await rt.close();
+  let settled = false;
+  void rejected.then(() => { settled = true; });
+  await delay(0);
+  assert.equal(settled, true, "the startup must have stopped its child before close resolved");
+  await rejected;
+  assert.deepEqual(rt.list(), []);
+  const pid = Number(await readFile(pidFile, "utf8").catch(() => "0"));
+  if (pid) {
+    // Allow the killed group leader to be reaped; it must already have been signalled.
+    for (let i = 0; i < 50; i++) { try { process.kill(-pid, 0); } catch { break; } await delay(20); }
+    assert.throws(() => process.kill(-pid, 0), { code: "ESRCH" });
+  }
+});
+
 test("concurrent launch reservations also obey the retained-record cap", async t => {
   const rt = fixture(t, undefined, { active: 8, retained: 2 });
   const jobs = await Promise.allSettled([1, 2, 3].map(() => start(rt, "sleep 30", { wait: 0 })));

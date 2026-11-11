@@ -45,7 +45,7 @@ Each package installs independently. Pick the capability you need, then follow i
 
 This repo uses npm workspaces. Run commands from the repository root unless package-specific docs say otherwise.
 
-Use Node.js >=22.19.0. Pi 1.4.0 is the only development and contract-test target
+Use Node.js >=22.19.0. Pi 1.5.2 is the only development and contract-test target
 across all workspaces; Pi remains a host-supplied peer dependency. Older hosts
 are no longer in the test matrix. CI validates the minimum Node version and
 Node 24.
@@ -60,7 +60,7 @@ npm run test:host
 ```
 
 Package-specific validation and Pi smoke-test instructions live in each package's README and AGENTS.md.
-`test:host` verifies the pinned Pi 1.4.0 host in a disposable installation.
+`test:host` verifies the pinned Pi 1.5.2 host in a disposable installation.
 Run it after root validation, not concurrently: image OAuth fixtures share a
 loopback callback port.
 

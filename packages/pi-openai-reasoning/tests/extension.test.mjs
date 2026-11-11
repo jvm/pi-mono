@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { codexHarness, requestBody, textResponse } from "../../../tests/codex-harness.mjs";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
+import { codexHarness, requestBody, testToken, textResponse } from "../../../tests/codex-harness.mjs";
 
 process.env.CI = "1";
 process.env.PI_OFFLINE = "1";
@@ -225,6 +229,8 @@ test("unsupported models, endpoints, modes and malformed payloads remain untouch
   for (const other of [
     { ...model, provider: "openai" }, { ...model, api: "openai-responses" },
     { ...model, id: "gpt-5.5" }, { ...model, id: "gpt-6-astra-pro" },
+    { ...model, id: "gpt-6-sol" }, { ...model, id: "gpt-6-luna" }, { ...model, id: "gpt-5.6-sol" },
+    { ...model, compat: { supportsMidConvoEffort: false } },
     { ...model, baseUrl: "https://example.com/backend-api" },
     { ...model, baseUrl: "http://chatgpt.com/backend-api" },
     { ...model, baseUrl: "https://chatgpt.com:444/backend-api" },
@@ -344,6 +350,110 @@ test("real compaction failure and cancellation leave saved effort metadata intac
   } finally { await h.close(); }
 });
 
+// Issue #219: the upstream Codex catalog marks GPT-6.1 Sol and Terra with
+// supports_reasoning_effort_updates. Pi 1.4 lacks Terra, so derive it from Astra.
+const codexModel = (h, id, overrides = {}) =>
+  ({ ...(h.modelRuntime.getModel("openai-codex", id) ?? { ...h.model, id }), ...overrides });
+
+for (const id of ["gpt-6.1-sol", "gpt-6.1-terra"]) {
+  test(`real Pi pins effort and sends updates on ${id}`, async (t) => {
+    const requests = [];
+    t.mock.method(globalThis, "fetch", async (_url, init) => {
+      requests.push(requestBody(init)); return textResponse();
+    });
+    const h = await codexHarness([reasoning]);
+    try {
+      await h.session.setModel(codexModel(h, id));
+      for (const level of ["low", "high", "max"]) {
+        h.session.setThinkingLevel(level);
+        await h.session.prompt(`Reply OK at ${level}.`);
+        assert.equal(requests.at(-1).model, id);
+        assert.equal(requests.at(-1).reasoning.effort, "low");
+      }
+      assert.deepEqual(updates(requests.at(-1)).map((u) => u.reasoning.effort), ["high", "max"]);
+      assert.deepEqual(h.errors, []);
+    } finally { await h.close(); }
+  });
+}
+
+test("models.json compat.supportsMidConvoEffort opts Codex models in or out", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    requests.push(requestBody(init)); return textResponse();
+  });
+  const dir = await mkdtemp(join(tmpdir(), "pi-openai-reasoning-models-"));
+  const modelsPath = join(dir, "models.json");
+  await writeFile(modelsPath, JSON.stringify({ providers: { "openai-codex": { modelOverrides: {
+    "gpt-6-luna": { compat: { supportsMidConvoEffort: true } },
+    "gpt-6-astra": { compat: { supportsMidConvoEffort: false } },
+  } } } }));
+  const credentials = new InMemoryCredentialStore();
+  await credentials.modify("openai-codex", async () => ({
+    type: "oauth", access: testToken, refresh: "unused-fixture", expires: Date.now() + 3_600_000,
+  }));
+  const modelRuntime = await ModelRuntime.create({ credentials, modelsPath, modelsStorePath: join(dir, "store.json") });
+  const h = await codexHarness([reasoning], { modelRuntime });
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  try {
+    for (const [id, expected] of [["gpt-6-luna", ["high"]], ["gpt-6-astra", []]]) {
+      await h.session.setModel(modelRuntime.getModel("openai-codex", id));
+      h.session.setThinkingLevel("low");
+      await h.session.prompt(`first ${id}`);
+      h.session.setThinkingLevel("high");
+      await h.session.prompt(`second ${id}`);
+      assert.equal(requests.at(-1).model, id);
+      assert.equal(requests.at(-1).reasoning.effort, expected.length ? "low" : "high");
+      assert.deepEqual(updates(requests.at(-1)).map((u) => u.reasoning.effort), expected);
+    }
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
+test("thinking off sends Pi's request-level none, then updates resume", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    requests.push(requestBody(init)); return textResponse();
+  });
+  const h = await codexHarness([reasoning]);
+  try {
+    const terra = codexModel(h, "gpt-6.1-terra");
+    await h.session.setModel({ ...terra, thinkingLevelMap: { ...terra.thinkingLevelMap, off: "none" } });
+    await h.session.prompt("first");
+    h.session.setThinkingLevel("off");
+    await h.session.prompt("off");
+    assert.equal(requests.at(-1).reasoning.effort, "none");
+    assert.deepEqual(updates(requests.at(-1)), []);
+    h.session.setThinkingLevel("high");
+    await h.session.prompt("back");
+    assert.equal(requests.at(-1).reasoning.effort, "low");
+    assert.deepEqual(updates(requests.at(-1)).map((u) => u.reasoning.effort), ["high"]);
+    assert.equal(JSON.stringify(h.sessionManager.getBranch().filter((e) => e.customType === STATE_TYPE))
+      .includes('"none"'), false);
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
+
+test("an existing configuration update from Pi or another extension is never duplicated", async (t) => {
+  const requests = [];
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    requests.push(requestBody(init)); return textResponse();
+  });
+  let inject = false;
+  const native = (pi) => pi.on("before_provider_request", (event) => {
+    if (inject) return { ...event.payload, input: [...event.payload.input,
+      { type: "configuration_update", reasoning: { effort: event.payload.reasoning.effort } }] };
+  });
+  const h = await codexHarness([native, reasoning]);
+  try {
+    await h.session.prompt("first");
+    inject = true;
+    h.session.setThinkingLevel("high");
+    await h.session.prompt("second");
+    assert.deepEqual(updates(requests.at(-1)).map((u) => u.reasoning.effort), ["high"]);
+    assert.equal(requests.at(-1).reasoning.effort, "high");
+  } finally { await h.close(); }
+});
+
 test("model switches do not apply Astra updates to unsupported models", async (t) => {
   const requests = [];
   t.mock.method(globalThis, "fetch", async (_url, init) => {
@@ -354,7 +464,7 @@ test("model switches do not apply Astra updates to unsupported models", async (t
     await h.session.prompt("first");
     h.session.setThinkingLevel("high");
     await h.session.prompt("second");
-    const otherModel = h.modelRuntime.getModel("openai-codex", "gpt-6.1-sol");
+    const otherModel = h.modelRuntime.getModel("openai-codex", "gpt-6-sol");
     assert.ok(otherModel, "The pinned Pi catalog must include the unsupported reasoning-update control");
     await h.session.setModel(otherModel);
     await h.session.prompt("other model");

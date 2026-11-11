@@ -175,13 +175,41 @@ function replay(payload: Item, checkpoint: Checkpoint, ctx: ExtensionContext, pr
   ] };
 }
 
-/** Pi 1.4 emits exact reasoning-effort updates at turn boundaries. Keep them
- * chronological; unknown configuration remains unsupported/fail-closed. */
+/** Pi emits exact reasoning-effort updates at turn boundaries. Keep them
+ * chronological; other configuration shapes remain unsupported/fail-closed.
+ * The effort value is the model's own vocabulary (Pi 1.5 adds `max`), so any
+ * bounded token is accepted: an allowlist would silently disable compaction
+ * whenever a model gains a new effort level. The server validates the value. */
 function reasoningUpdate(item: Item): boolean {
   return Object.keys(item).length === 2 && record(item.reasoning) &&
     Object.keys(item.reasoning).length === 1 &&
-    typeof item.reasoning.effort === "string" &&
-    ["none", "minimal", "low", "medium", "high", "xhigh"].includes(item.reasoning.effort);
+    typeof item.reasoning.effort === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(item.reasoning.effort);
+}
+
+/**
+ * The public API rejects any request that combines `context_management` with a
+ * `configuration_update` input item (live HTTP 400, `unsupported_value`). Pi
+ * 1.4-1.5 sends the current effort as the last update, already mapped to the
+ * model's API vocabulary, with a fixed top-level `reasoning.effort`. Remove the
+ * updates and send the latest effort as `reasoning.effort` instead. Every
+ * compacted request is rewritten the same way, so its input prefix stays stable.
+ * Returns undefined when an update carries anything that cannot be hoisted.
+ */
+function hoistEffort(payload: Item): Item | undefined {
+  if (!Array.isArray(payload.input)) return undefined;
+  const isUpdate = (item: unknown) => record(item) && item.type === "configuration_update";
+  const updates = payload.input.filter(isUpdate) as Item[];
+  if (updates.length === 0) return payload;
+  if (!updates.every(reasoningUpdate) || (payload.reasoning != null && !record(payload.reasoning))) return undefined;
+  const effort = (updates.at(-1)!.reasoning as Item).effort;
+  return { ...payload, input: payload.input.filter((item) => !isUpdate(item)),
+    reasoning: { ...(record(payload.reasoning) ? payload.reasoning : {}), effort } };
+}
+
+/** The live 400 for `configuration_update` together with `context_management`. */
+function rejectedCombination(message: unknown): boolean {
+  return typeof message === "string" && message.includes("configuration_update") &&
+    message.includes("not supported with compaction");
 }
 
 function incompatible(payload: Item, supportedInline = false): boolean {
@@ -255,6 +283,8 @@ export function registerAutomaticCompaction(pi: ExtensionAPI): void {
   let blocked = false;
   let warmingModel: string | undefined;
   let currentToolNames: string[] | undefined;
+  let retryEntry: string | undefined;
+  let retryNotified = false;
   const modelKey = (model: Model<any>) => JSON.stringify([model.provider, model.api, model.id, model.baseUrl]);
 
   const enabled = () => override?.enabled ?? pi.getFlag("server-compaction") === true;
@@ -265,6 +295,8 @@ export function registerAutomaticCompaction(pi: ExtensionAPI): void {
     blocked = false;
     warmingModel = undefined;
     currentToolNames = undefined;
+    retryEntry = undefined;
+    retryNotified = false;
     override = undefined;
     for (const entry of ctx.sessionManager.getBranch()) {
       if (entry.type === "custom" && entry.customType === CONFIG && record(entry.data) &&
@@ -278,7 +310,7 @@ export function registerAutomaticCompaction(pi: ExtensionAPI): void {
   pi.on("session_start", reset);
   pi.on("session_tree", reset);
   pi.on("session_shutdown", () => { attempt = undefined; inTurn = false; warmingModel = undefined; });
-  pi.on("turn_start", () => { inTurn = true; attempt = undefined; currentToolNames = undefined; });
+  pi.on("turn_start", () => { inTurn = true; attempt = undefined; currentToolNames = undefined; retryEntry = undefined; });
   pi.on("session_before_compact", () => { compacting = true; attempt = undefined; });
   pi.on("session_compact", () => { compacting = false; });
   pi.on("session_compact_failed", () => { compacting = false; });
@@ -342,12 +374,32 @@ export function registerAutomaticCompaction(pi: ExtensionAPI): void {
     }
     // Do not configure standalone summarization, cache warming, or foreign nested calls.
     if (!enabled() || blocked || !inTurn || compacting || incompatible(payload, !!snapshot) || !validThreshold) return payload;
+    const hoisted = hoistEffort(payload);
+    if (!hoisted) return payload;
+    payload = hoisted;
     attempt = { sessionId: ctx.sessionManager.getSessionId(), model: ctx.model.id, identity: credential,
       leafId: ctx.sessionManager.getLeafId(), invalid: false, completed: false,
       items: new Map(), itemBytes: 0, started: performance.now() };
     warmingModel = modelKey(ctx.model);
     return { ...payload, store: false, stream: true,
       context_management: [{ type: "compaction", compact_threshold: threshold }] };
+  });
+
+  // turn_end cannot continue after an error response; agent_before_settle can.
+  // Remove the failed response from context and ask for one more request, which
+  // resends the same user turn. `blocked` keeps context_management off it.
+  pi.on("agent_before_settle", (event, ctx) => {
+    const target = retryEntry;
+    retryEntry = undefined;
+    if (!target || event.outcome !== "error" || ctx.signal?.aborted) return;
+    const branch = ctx.sessionManager.getBranch();
+    const index = branch.findIndex((entry) => entry.id === target);
+    if (index < 0 || branch.slice(index + 1).some((entry) => entry.type !== "custom")) return;
+    if (ctx.hasUI && !retryNotified) {
+      retryNotified = true;
+      ctx.ui.notify("OpenAI rejected server compaction together with a reasoning-effort update. Server compaction is paused for this session; retrying the turn without it. Pi compaction remains available.", "warning");
+    }
+    return { entries: [...event.entries, { type: "context_edit", targetId: target, replacement: null }], continue: true };
   });
 
   pi.on("provider_stream_event", (event) => {
@@ -388,9 +440,14 @@ export function registerAutomaticCompaction(pi: ExtensionAPI): void {
     // items carry the authoritative encrypted content; never use item.added.
     const streamed = [...attempt.items].sort(([a], [b]) => a - b);
     const output = streamed.length > 0 ? streamed.map(([, item]) => item) : response.output;
+    // Live GPT-6 responses re-encrypt reasoning items in the terminal output:
+    // same id and summary, different ciphertext than output_item.done. Pi keeps
+    // the done item, so compare everything except that opaque field.
+    const comparable = (items: unknown[]) => hash(sorted(items.map((item) =>
+      record(item) && item.type === "reasoning" ? { ...item, encrypted_content: null } : item)));
     if (streamed.some(([index], position) => index !== position) || !validOutput(output) ||
         (streamed.length > 0 && response.output.length > 0 &&
-          hash(sorted(response.output)) !== hash(sorted(output)))) {
+          comparable(response.output) !== comparable(output))) {
       attempt.invalid = true;
       return;
     }
@@ -406,7 +463,13 @@ export function registerAutomaticCompaction(pi: ExtensionAPI): void {
     inTurn = false;
     if (!current) return;
     if (event.outcome !== "completed" || current.invalid || !current.completed || !current.output) {
-      blocked = true; // No automatic paid retry without context_management.
+      blocked = true; // Later requests in this session omit context_management.
+      // The API rejected our context_management together with an effort update
+      // (for example one added by a later extension). That 400 is free and the
+      // turn produced nothing, so agent_before_settle retries it once without
+      // context_management. Every other failure is not retried.
+      if (event.outcome === "error" && event.message.role === "assistant" &&
+          rejectedCombination(event.message.errorMessage)) retryEntry = event.messageEntryId;
       return;
     }
     if (ctx.sessionManager.getSessionId() !== current.sessionId || !supports(ctx.model) ||

@@ -6,6 +6,11 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Allow Fast mode for GPT-6.1 Terra (`gpt-6.1-terra`) on `openai` and `openai-codex`, as advertised by the upstream Codex catalog and OpenAI's Fast documentation.
+- Add a catalog test that fails when the installed Pi adds a current-generation OpenAI model that is not classified for Fast support.
+
 ## [0.4.1] - 2026-10-30
 
 ### Changed

@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "./string-enum.js";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { accountUsageFromBranch } from "./accounting.js";
