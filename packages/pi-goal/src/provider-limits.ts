@@ -32,8 +32,13 @@ const QUOTA_PATTERNS = [
   /exceeded (?:your )?quota/i,
 ];
 
+// Match billing failures, not any mention of billing: request IDs, header names,
+// and URLs such as https://billing.example are not limit evidence.
 const BILLING_PATTERNS = [
-  /billing/i,
+  /\bbilling[_\s-](?:hard[_\s-]limit|not[_\s-]active|limit|required|issue|error|details|problem)/i,
+  /\b(?:check|update|review) your billing\b/i,
+  /\bplans? (?:&|and) billing\b/i,
+  /credit balance is too low/i,
   /available balance/i,
   /enable usage from your available balance/i,
   /payment required/i,
@@ -51,6 +56,8 @@ export function classifyProviderLimit(input: ProviderLimitInput): ProviderLimitC
   const status = input.status;
   const text = extractSearchableText(input);
   const retryAfterSeconds = parseRetryAfter(input.headers);
+  // A successful response, or one without a status or error text, is never limit evidence.
+  if (!text.trim() && (status == null || status < 400)) return { kind: "none", pause: false, retryAfterSeconds };
   const resetHint = extractResetHint(text);
 
   if (matchesAny(text, USAGE_LIMIT_PATTERNS)) return { kind: "usage_limit", pause: true, reason: "provider usage limit reached", retryAfterSeconds, resetHint };
@@ -76,16 +83,19 @@ export function classifyAssistantError(message: any): ProviderLimitClassificatio
   });
 }
 
+/**
+ * Only the provider's error text is evidence. Header names and values, provider
+ * and model IDs, and URLs routinely contain words such as "billing" or "limit".
+ */
 function extractSearchableText(input: ProviderLimitInput): string {
-  const parts = [input.errorMessage ?? "", input.provider ?? "", input.model ?? ""];
-  if (input.headers) parts.push(JSON.stringify(input.headers));
+  const parts = [input.errorMessage ?? ""];
   try {
     const match = (input.errorMessage ?? "").match(/\{[\s\S]*\}/);
     if (match) parts.push(JSON.stringify(JSON.parse(match[0])));
   } catch {
     // Keep the raw error text if provider payload is not valid JSON.
   }
-  return parts.join("\n");
+  return parts.join("\n").replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, " ");
 }
 
 function matchesAny(text: string, patterns: RegExp[]): boolean {

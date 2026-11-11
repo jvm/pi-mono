@@ -12,6 +12,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - Reject `/goal --budget 50000` without an objective, unknown `--` options, and `/goal budget` without a value with a usage error instead of creating a goal whose objective is the flag text. Accept `k`/`m` suffixes and `,`/`_` separators in token budgets (`50k`, `1.5m`, `50,000`) and `--budget=<tokens>`; reject zero, negative, fractional, and non-numeric budgets with a clear message.
 - Resume a `budget_limited` goal and schedule its continuation when `/goal budget` raises the budget above current usage or clears it.
 - Reject `/goal pause` unless the goal is active, and `/goal resume` on a complete goal or one whose token budget is still exhausted, with a message that names the next step. `/goal edit` no longer reactivates a goal whose budget is still exhausted.
+- Classify provider limits from the provider's error text and HTTP status only. Response header names and values, URLs, and provider/model IDs that mention "billing" or "limit" no longer mark a goal `usage_limited`, including on successful responses. Billing detection now requires billing-failure wording such as "billing hard limit" or "credit balance is too low".
 
 ## [0.3.1] - 2026-10-30
 
