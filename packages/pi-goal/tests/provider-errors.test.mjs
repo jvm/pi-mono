@@ -476,3 +476,32 @@ test("real billing and quota errors still mark the goal usage-limited", async ()
     assert.equal((await f.goal()).status, "usage_limited", errorMessage);
   }
 });
+
+test("adversarial provider error text classifies in bounded time with the correct result", async () => {
+  const { classifyAssistantError } = await import("../src/provider-limits.ts");
+  const braces = "{{".repeat(200_000);
+  const cases = [
+    { errorMessage: braces, kind: "none" },
+    { errorMessage: `${braces}x`, kind: "none" },
+    { errorMessage: `${braces}}`, kind: "none" },
+    { errorMessage: `429 {"error":{"code":"insufficient_quota"}}${braces}`, kind: "quota_exceeded" },
+    { errorMessage: `5 - hour usage limit reached ${braces}`, kind: "usage_limit" },
+    { errorMessage: `5${" ".repeat(200_000)}`, kind: "none" },
+    { errorMessage: "a.".repeat(200_000), kind: "none" },
+    { errorMessage: `${"a.".repeat(1_000)}://x see https://billing-hard-limit.example/x`, kind: "none" },
+  ];
+  for (const { errorMessage, kind } of cases) {
+    const started = performance.now();
+    const result = classifyAssistantError({ role: "assistant", stopReason: "error", errorMessage });
+    const elapsed = performance.now() - started;
+    assert.equal(result.kind, kind, errorMessage.slice(0, 60));
+    assert.ok(elapsed < 1_000, `classification took ${Math.round(elapsed)} ms for ${errorMessage.slice(0, 60)}`);
+  }
+
+  // The same input through the extension's failure handling.
+  const f = await fixture();
+  const started = performance.now();
+  await f.failedRun({ status: 400, errorMessage: `{"error":{"code":"insufficient_quota"}}${braces}` });
+  assert.ok(performance.now() - started < 1_000);
+  assert.equal((await f.goal()).status, "usage_limited");
+});

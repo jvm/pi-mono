@@ -19,7 +19,8 @@ export interface ProviderLimitClassification {
 const USAGE_LIMIT_PATTERNS = [
   /GoUsageLimitError/i,
   /\busage limit (?:reached|exceeded)/i,
-  /\b\d+\s*-?\s*hour usage limit/i,
+  // Not `\s*-?\s*`: adjacent ambiguous quantifiers backtrack quadratically on long whitespace runs.
+  /\b\d+\s*(?:-\s*)?hour usage limit/i,
   /\bdaily limit\b/i,
   /\bmonthly limit\b/i,
   /\bweekly limit\b/i,
@@ -127,14 +128,64 @@ export function classifyAssistantError(message: any, response?: Pick<ProviderLim
  * and model IDs, and URLs routinely contain words such as "billing" or "limit".
  */
 function extractSearchableText(input: ProviderLimitInput): string {
-  const parts = [input.errorMessage ?? ""];
-  try {
-    const match = (input.errorMessage ?? "").match(/\{[\s\S]*\}/);
-    if (match) parts.push(JSON.stringify(JSON.parse(match[0])));
-  } catch {
-    // Keep the raw error text if provider payload is not valid JSON.
+  // Error bodies come from the network: examine a bounded prefix only.
+  const raw = (input.errorMessage ?? "").slice(0, MAX_ERROR_TEXT_LENGTH);
+  const parts = [raw];
+  // The provider payload spans the first "{" to the last "}". Plain index
+  // scanning keeps this linear; a regex here backtracks polynomially.
+  const open = raw.indexOf("{");
+  const close = raw.lastIndexOf("}");
+  if (open >= 0 && close > open) {
+    try {
+      parts.push(JSON.stringify(JSON.parse(raw.slice(open, close + 1))));
+    } catch {
+      // Keep the raw error text if provider payload is not valid JSON.
+    }
   }
-  return parts.join("\n").replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, " ");
+  return stripUrls(parts.join("\n"));
+}
+
+/** Upper bound on the provider error text that classification examines. */
+export const MAX_ERROR_TEXT_LENGTH = 16_384;
+
+const isAsciiLetter = (code: number) => (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+const isAsciiDigit = (code: number) => code >= 48 && code <= 57;
+const isWordChar = (code: number) => isAsciiLetter(code) || isAsciiDigit(code) || code === 95;
+// RFC 3986 scheme characters after the first letter: letters, digits, "+", ".", "-".
+const isSchemeChar = (code: number) => isAsciiLetter(code) || isAsciiDigit(code) || code === 43 || code === 46 || code === 45;
+const isWhitespace = (char: string) => char.trim() === "";
+
+/**
+ * Replaces each URL (`scheme://non-space`) with a space in linear time. Same
+ * result as `/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi`, which backtracks quadratically
+ * on long runs of scheme characters without "://".
+ */
+function stripUrls(text: string): string {
+  let out = "";
+  let copied = 0;
+  let from = 0;
+  for (;;) {
+    const separator = text.indexOf("://", from);
+    if (separator < 0) break;
+    from = separator + 1;
+    // The scheme run cannot contain ":", so this backward walk stays linear overall.
+    let runStart = separator;
+    while (runStart > copied && isSchemeChar(text.charCodeAt(runStart - 1))) runStart--;
+    let start = -1;
+    for (let i = runStart; i < separator; i++) {
+      if (isAsciiLetter(text.charCodeAt(i)) && (i === 0 || !isWordChar(text.charCodeAt(i - 1)))) {
+        start = i;
+        break;
+      }
+    }
+    let end = separator + 3;
+    while (end < text.length && !isWhitespace(text[end])) end++;
+    if (start < 0 || end === separator + 3) continue;
+    out += text.slice(copied, start) + " ";
+    copied = end;
+    from = end;
+  }
+  return out + text.slice(copied);
 }
 
 function matchesAny(text: string, patterns: RegExp[]): boolean {
