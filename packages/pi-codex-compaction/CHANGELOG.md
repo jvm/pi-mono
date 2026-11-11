@@ -10,9 +10,13 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 - Keep automatic server compaction on when Pi sends a `max` reasoning-effort update (thinking level `max` on GPT-6 models). Effort updates accept any effort value instead of a fixed list, so future levels do not silently disable compaction ([#221](https://github.com/jvm/pi-mono/issues/221)).
 
+- Fix the first turn failing with HTTP 400 ("The 'configuration_update' item type is not supported with compaction") on GPT-6 models with an API key. Pi sends effort as `configuration_update` items even at the default thinking level, and the public API rejects them in any request with `context_management`. Compacted requests now drop those items and send the latest effort as `reasoning.effort`, so the chosen level still applies and compaction stays on. Verified live on Pi 1.5.2.
+- Keep automatic compaction on after a response with reasoning items. Live GPT-6 responses re-encrypt reasoning items in `response.completed`, and the strict comparison with `output_item.done` paused compaction for the rest of the session. Only that opaque ciphertext is now ignored.
+- If that 400 still occurs, pause automatic compaction for the session and retry the failed turn once without `context_management` instead of leaving it failed.
+
 ### Documentation
 
-- Replace the stale claim that requests with `configuration_update` are never combined with automatic compaction. Document that effort updates and `context_management` are sent together, that OpenAI's deployment checklist says the two cannot be combined, and that no live test has checked it.
+- Document the verified API limit on `configuration_update` with compaction, the effort rewrite, and its prompt-caching cost.
 
 ## [0.2.5] - 2026-10-30
 

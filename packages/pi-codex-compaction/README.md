@@ -20,24 +20,36 @@ checkpoint replay. Consumed structured intermediates do not enter conversation
 history unless the script prints them. Hidden/model-only tools stay outside
 nested discovery.
 
-Pi emits chronological `configuration_update` items for reasoning effort.
-The adapter preserves exact updates with only `type` and `reasoning.effort`,
-including between a summary and retained assistant output. Any effort value is
-accepted, such as `none`, `xhigh` or `max` (thinking level max on GPT-6), so a
-new effort level does not silently turn automatic compaction off; the server
-validates the value. Other configuration shapes remain unsupported and disable
-automatic adaptation. No host serializer or private API is patched.
+**Reasoning effort with compaction:** on GPT-6 models with an API key, Pi
+sends the thinking level as `configuration_update` input items, even at the
+default level and on the first request. The public API rejects any request that
+contains both such an item and `context_management` (HTTP 400, "The
+'configuration_update' item type is not supported with compaction"; verified
+live). On every request where this package adds `context_management`, it removes
+those items and sends the latest effort as top-level `reasoning.effort`. Pi has
+already mapped that value to the model's API vocabulary (`low` to `max`, or
+`none` when thinking is off). The model runs at the level you chose, and the
+same rewrite on every compacted request keeps the input prefix stable for
+prompt caching. Any effort token is accepted, so a new level does not turn
+compaction off; the server validates it. An update with any other field is not
+rewritten, and that request is sent unchanged without `context_management`.
+With `/server-compaction off`, Pi's payload, including its updates, is sent as
+is. No host serializer or private API is patched.
 
-**Unverified combination:** Pi adds these updates to GPT-6 requests that use an
-API key and a thinking level other than off; it does not add them with Sign in
-with ChatGPT. Since 0.2.5 this package sends `context_management` in the same
-request. OpenAI's
-[deployment checklist](https://developers.openai.com/api/docs/guides/deployment-checklist)
-says configuration updates "cannot be combined with automatic compaction or
-truncation". No live test of this package has checked that combination; only
-mocked transport covers it. If the server rejects such a request, automatic
-mode pauses after the failure and Pi's standard compactor remains available.
-Use `/server-compaction off` to avoid the combination.
+Caching cost: a top-level effort change invalidates the provider's prompt
+cache for that one request; `configuration_update` items did not. In live Pi
+1.5.2 runs with a 1000-token threshold, requests that kept the previous effort
+reused the cached prefix (for example 3,920 of 4,049 input tokens), and each
+request with a new effort read 0 cached tokens. Over six- and seven-turn scripts
+that changed effort on most turns, 23-25% of input tokens were cached, against
+61-76% with `/server-compaction off` (which keeps Pi's updates but does not
+compact). If you switch effort often in a short session, that difference costs
+more than compaction saves; `/server-compaction off` keeps the cache.
+
+If the API still returns that 400 (for example because a later extension adds an
+update after this one), automatic compaction pauses for the session and the
+failed turn is retried once without `context_management`, so the turn still gets
+an answer. The rejected request costs nothing. Other failures are not retried.
 
 **Pi 1.4 compatibility:** inline `additional_tools` are adapted automatically.
 A stable namespace base keeps tools available during compaction; later inline
@@ -246,8 +258,8 @@ this change removes only their obsolete direct-compaction adapters.
 
 `pi-openai-reasoning` remains a legacy-provider-only extension. This package
 does not migrate it or enable its reasoning-update feature on the public route.
-See **Unverified combination** above for Pi's own effort updates together with
-automatic compaction.
+See **Reasoning effort with compaction** above for Pi's own effort updates
+together with automatic compaction.
 
 ## Validation and measured results
 
