@@ -46,8 +46,14 @@ uses the refspec Git recorded at clone time and runs only in a real directory
 inside the private clone root that the current user owns. Every network Git call
 sets `protocol.ext.allow=never` and `credential.interactive=false`, so
 configuration cannot enable command transports and Git fails instead of
-prompting on the terminal. Clone/fetch failures and timeouts do not echo stderr
-or remote response bodies.
+prompting on the terminal. SSH runs with `ssh -oBatchMode=yes` (through
+`-c core.sshCommand`, because `pi.exec` cannot set environment variables), so
+passphrase, password and unknown-host prompts fail. A user-set
+`GIT_SSH_COMMAND`, `GIT_SSH` or `core.sshCommand` is kept unchanged and may
+still prompt. Git runs in the private clone root or the clone, not the project directory.
+Git output is discarded and capped at 1 MiB per call on Pi hosts that support
+`maxBuffer`; a command stopped at the cap fails. Clone/fetch failures and
+timeouts do not echo stderr or remote response bodies.
 
 URL passwords, non-SSH usernames, query strings and fragments are removed from
 Scout's persisted records, the `/scout` listing, and the clone's `origin` URL in

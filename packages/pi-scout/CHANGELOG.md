@@ -16,6 +16,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - Remove URL credentials, query strings and fragments from persisted records, the `/scout` listing, and the clone's Git `origin` URL; redact records from earlier versions on load.
 - Treat `./repo` and `../repo` as local paths instead of GitHub shorthand.
 - Disable Git's `ext` transport and interactive credential prompts for Scout Git calls; report timeouts as failures.
+- Run SSH in batch mode unless the user configured an SSH command, so Git cannot prompt on Pi's terminal.
+- Cap Git output at 1 MiB per call on Pi hosts with `pi.exec` `maxBuffer`, and run Git in the private clone root instead of the project directory.
 
 ## [0.3.0] - 2026-10-30
 
