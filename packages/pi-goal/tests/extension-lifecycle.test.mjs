@@ -166,12 +166,19 @@ test("session_start reconstructs branch goal and context handler prunes stale co
   assert.equal(result.messages[1].details.n, 2);
 });
 
-test("provider 429 transitions active goal to usage_limited", async () => {
+// Pi decides about auto-retry after message_end; pi-goal acts at settlement.
+const failedSettle = { type: "agent_before_settle", outcome: "error", entries: [], context: { pendingMessages: [], canContinue: false } };
+const rateLimited = { type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "Too many requests" } };
+
+test("provider 429 transitions active goal to usage_limited once the run settles", async () => {
   const pi = makePi();
   piGoal(pi);
   const ctx = makeCtx();
   await pi.commands.get("goal").handler("ship", ctx);
   await pi.handlers.get("after_provider_response")[0]({ type: "after_provider_response", status: 429, headers: {} }, ctx);
+  await pi.handlers.get("message_end")[0](rateLimited, ctx);
+  assert.equal(pi.entries.at(-1).data.status, undefined, "no pause while Pi may still retry");
+  await pi.handlers.get("agent_before_settle")[0](failedSettle, ctx);
   assert.equal(pi.entries.at(-1).data.status, "usage_limited");
   assert.equal(ctx.ui.statuses.get("pi-goal"), "\u{f08c9} \u{f051f}");
 });
@@ -182,6 +189,8 @@ test("provider 429 appends a notice without requesting another turn", async () =
   const ctx = makeCtx();
   await pi.commands.get("goal").handler("ship", ctx);
   await pi.handlers.get("after_provider_response")[0]({ type: "after_provider_response", status: 429, headers: {} }, ctx);
+  await pi.handlers.get("message_end")[0](rateLimited, ctx);
+  await pi.handlers.get("agent_before_settle")[0](failedSettle, ctx);
   const sent = pi.messages.at(-1).message;
   assert.match(sent.content, /provider_limit/);
   assert.equal(sent.display, true);
@@ -195,20 +204,21 @@ test("assistant usage-limit error transitions active goal to usage_limited", asy
   const ctx = makeCtx();
   await pi.commands.get("goal").handler("ship", ctx);
   await pi.handlers.get("message_end")[0]({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: '429 {"error":{"type":"GoUsageLimitError","message":"5-hour usage limit reached. Resets in 3hr 9min."}}' } }, ctx);
+  await pi.handlers.get("agent_before_settle")[0](failedSettle, ctx);
   assert.equal(pi.entries.at(-1).data.status, "usage_limited");
   assert.match(ctx.ui.notifications.at(-1).message, /resets in 3hr 9min/);
 });
 
-test("repeated assistant errors pause active goal", async () => {
+test("repeated failed runs pause active goal without claiming a usage limit", async () => {
   const pi = makePi();
   piGoal(pi);
   const ctx = makeCtx();
   await pi.commands.get("goal").handler("ship", ctx);
-  const handler = pi.handlers.get("message_end")[0];
-  await handler({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "terminated" } }, ctx);
-  await handler({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "terminated" } }, ctx);
-  await handler({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "terminated" } }, ctx);
-  assert.equal(pi.entries.at(-1).data.status, "usage_limited");
+  for (let run = 0; run < 3; run++) {
+    await pi.handlers.get("message_end")[0]({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "terminated" } }, ctx);
+    await pi.handlers.get("agent_before_settle")[0](failedSettle, ctx);
+  }
+  assert.equal(pi.entries.at(-1).data.status, "paused");
 });
 
 test("session_shutdown persists active elapsed time and clears UI", async () => {

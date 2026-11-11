@@ -8,6 +8,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ### Fixed
 
+- Mark a goal `usage_limited` only on real limit evidence (HTTP 429, quota, billing, balance, or subscription-limit text). Repeated generic provider errors, such as timeouts, now pause the goal as `paused` with the actual last error and a notice that does not claim a usage limit or suggest finalizing the goal; authentication failures pause the same way. Count failed runs only after Pi's auto-retry has finished, so pi-goal no longer pauses while Pi is still retrying, and scope the count to one provider/model: a successful response or a provider/model switch restarts it (#224).
+
 - Preserve elapsed goal time across `/goal edit`. Editing an active goal no longer resets its time to zero, and sessions that contain such edits reconstruct the correct time on reload.
 - Reject `/goal --budget 50000` without an objective, unknown `--` options, and `/goal budget` without a value with a usage error instead of creating a goal whose objective is the flag text. Accept `k`/`m` suffixes and `,`/`_` separators in token budgets (`50k`, `1.5m`, `50,000`) and `--budget=<tokens>`; reject zero, negative, fractional, and non-numeric budgets with a clear message.
 - Resume a `budget_limited` goal and schedule its continuation when `/goal budget` raises the budget above current usage or clears it.
