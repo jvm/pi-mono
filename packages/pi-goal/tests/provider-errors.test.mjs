@@ -101,7 +101,7 @@ test("issue #224: generic errors across providers pause with an accurate reason,
   const transition = f.pi.entries.at(-1).data;
   assert.equal(transition.meta.source, "provider-error");
   assert.equal(transition.meta.providerLimit.kind, "provider_error");
-  assert.match(transition.meta.providerLimit.reason, /3 consecutive runs failed on fixture-b\/model-1 after Pi's retries \(last error: "Request timed out\."\)/);
+  assert.match(transition.meta.providerLimit.reason, /3 consecutive runs failed on fixture-b\/model-1 \(last error: "Request timed out\."\)/);
   const [notice] = goalNotices(f);
   assert.equal(notice.message.details.kind, "provider_error");
   assert.equal(notice.options.triggerTurn, false);
@@ -233,6 +233,49 @@ test("auth evidence never comes from headers, URLs, or model IDs", async () => {
   assert.equal(await statusOf(f), "active");
 });
 
+const continuations = (f) => f.pi.messages.filter(({ message, options }) => message.customType === "pi-goal-context" && options?.triggerTurn);
+
+test("a failed run continues automatically with backoff and pauses when the retries are spent", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = await fixture();
+  const before = continuations(f).length;
+  await f.failedRun({ errorMessage: "Request timed out." });
+  assert.equal(await statusOf(f), "active");
+  assert.match(f.ctx.ui.notifications.at(-1).message, /^Goal run failed on fixture-a\/model-1 \(last error: "Request timed out\."\)\. Continuing automatically in 30s \(failed run 1 of 3\)\.$/);
+  t.mock.timers.tick(29_999);
+  assert.equal(continuations(f).length, before, "no continuation before the backoff elapses");
+  t.mock.timers.tick(1);
+  assert.equal(continuations(f).length, before + 1, "the goal does not wait for user input");
+  await f.emit("agent_start");
+  await f.failedRun({ errorMessage: "Request timed out." });
+  assert.match(f.ctx.ui.notifications.at(-1).message, /Continuing automatically in 120s \(failed run 2 of 3\)/);
+  t.mock.timers.tick(120_000);
+  assert.equal(continuations(f).length, before + 2);
+  await f.emit("agent_start");
+  await f.failedRun({ errorMessage: "Request timed out." });
+  assert.equal(await statusOf(f), "paused");
+  assert.match(f.ctx.ui.notifications.at(-1).message, /^Goal paused: 3 consecutive runs failed on fixture-a\/model-1 \(last error: "Request timed out\."\)/);
+  t.mock.timers.tick(600_000);
+  assert.equal(continuations(f).length, before + 2, "no continuation after the pause");
+});
+
+test("a pending automatic retry is cancelled by a new run, a pause, or a success", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = await fixture();
+  const before = continuations(f).length;
+  await f.failedRun({ errorMessage: "terminated" });
+  await f.emit("agent_start");
+  t.mock.timers.tick(30_000);
+  assert.equal(continuations(f).length, before, "a user run supersedes the retry");
+  await f.attempt();
+  await f.settle("completed");
+  await f.failedRun({ errorMessage: "terminated" });
+  assert.match(f.ctx.ui.notifications.at(-1).message, /in 30s \(failed run 1 of 3\)/, "a success restarts the backoff");
+  await f.pi.commands.get("goal").handler("pause", f.ctx);
+  t.mock.timers.tick(30_000);
+  assert.equal(continuations(f).length, before);
+});
+
 test("cancelled runs do not count as provider failures", async () => {
   const f = await fixture();
   for (let run = 0; run < 3; run++) {
@@ -285,6 +328,15 @@ function script(t, h, batch) {
 
 const runtimeState = (h) => reconstructGoalState(h.sessionManager.getBranch());
 const retry = { enabled: true, maxRetries: 3, baseDelayMs: 1, maxDelayMs: 1 };
+const noRetry = { enabled: false };
+
+async function fireRetry(t, h, delayMs) {
+  t.mock.timers.tick(delayMs);
+  // The retry's own run starts asynchronously from sendMessage.
+  await new Promise((resolve) => setImmediate(resolve));
+  await h.session.waitForIdle();
+}
+
 
 test("Pi's retries of a rate limit do not pause a goal whose retry succeeds", { timeout: 10_000 }, async (t) => {
   const h = await runtime(t, retry);
@@ -306,11 +358,15 @@ test("Pi's retries of a rate limit do not pause a goal whose retry succeeds", { 
 
 test("a run that exhausts Pi's retries counts once and is not usage-limited", { timeout: 10_000 }, async (t) => {
   const h = await runtime(t, retry);
-  script(t, h, Array.from({ length: 4 }, () => () => errorResponse("Request timed out.")));
+  const requests = script(t, h, Array.from({ length: 4 }, () => () => errorResponse("Request timed out.")));
   await h.session.prompt("Exhaust Pi's retry loop.");
   await h.session.waitForIdle();
   assert.equal(h.retries, 3);
   assert.equal(runtimeState(h).status, "active", "one failed run is below the pause threshold");
+  assert.equal(requests.length, 4);
+  // The goal is continued later, not left waiting for user input.
+  await fireRetry(t, h, 30_000);
+  assert.equal(requests.length, 5);
 });
 
 test("a real 401 with OpenAI's wording pauses on the first failed run", { timeout: 10_000 }, async (t) => {
@@ -325,6 +381,41 @@ test("a real 401 with OpenAI's wording pauses on the first failed run", { timeou
   assert.equal(state.status, "paused");
   const transition = h.sessionManager.getBranch().filter((entry) => entry.type === "custom" && entry.customType === "pi-goal").at(-1);
   assert.equal(transition.data.meta.providerLimit.kind, "auth_required");
+});
+
+test("with Pi's retries disabled, one transient failure continues the goal after a delay", { timeout: 10_000 }, async (t) => {
+  const h = await runtime(t, noRetry);
+  const requests = script(t, h, [
+    () => errorResponse("Request timed out."),
+    () => textResponse("Recovered."),
+  ]);
+  await h.session.prompt("Fail once without Pi retries.");
+  await h.session.waitForIdle();
+  assert.equal(h.retries, 0);
+  assert.equal(requests.length, 1);
+  assert.equal(runtimeState(h).status, "active");
+  await fireRetry(t, h, 30_000);
+  assert.ok(requests.length >= 2, "the goal continued without user input");
+  assert.equal(runtimeState(h).status, "active");
+});
+
+test("a provider that keeps failing pauses the goal after bounded automatic retries", { timeout: 10_000 }, async (t) => {
+  const h = await runtime(t, noRetry);
+  const requests = script(t, h, Array.from({ length: 3 }, () => () => errorResponse("Request timed out.")));
+  await h.session.prompt("Keep failing.");
+  await h.session.waitForIdle();
+  await fireRetry(t, h, 30_000);
+  assert.equal(requests.length, 2);
+  assert.equal(runtimeState(h).status, "active");
+  await fireRetry(t, h, 120_000);
+  assert.equal(requests.length, 3);
+  const state = runtimeState(h);
+  assert.equal(state.status, "paused");
+  const transition = h.sessionManager.getBranch().filter((entry) => entry.type === "custom" && entry.customType === "pi-goal").at(-1);
+  assert.equal(transition.data.meta.providerLimit.kind, "provider_error");
+  assert.match(transition.data.meta.providerLimit.reason, /3 consecutive runs failed on openai-codex\/gpt-6-astra \(last error: "Request timed out\."\)/);
+  await fireRetry(t, h, 600_000);
+  assert.equal(requests.length, 3, "no further request after the pause");
 });
 
 test("real billing and quota errors still mark the goal usage-limited", async () => {

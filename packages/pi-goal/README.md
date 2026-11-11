@@ -115,8 +115,11 @@ A context filter keeps only the latest message for the current active goal.
 Earlier messages remain in append-only session history.
 
 Cancellation, terminal assistant errors, and failed/cancelled automatic
-compaction suppress goal continuation for that run. Cancellation and ordinary
-errors leave the stored goal active; they do not silently pause or clear it.
+compaction suppress goal continuation inside that run's settlement.
+Cancellation leaves the stored goal active and does not restart it. A run that
+ends in an ordinary error is retried later by a bounded, delayed continuation
+(see the provider failure rules below), so an active goal never waits silently
+for user input.
 The compaction-failure stop survives queued steering/follow-up work and resets
 only when the whole run reaches the notification-only `agent_settled` event.
 Explicit new input can start work again. Use `/goal pause` to keep it paused.
@@ -173,7 +176,7 @@ Provider failure handling waits until Pi's own auto-retry has finished, so a fai
 
 - An HTTP 429 response, or error text that indicates a subscription, quota, billing, or balance limit, marks the goal `usage_limited`. Response headers, URLs, and provider/model names are not evidence.
 - An authentication or permission failure pauses the goal (`paused`) with that reason on the first failed run. HTTP 401, and HTTP 403 without rate-limit wording, are authentication failures whatever the provider's wording. Error text such as "Incorrect API key provided" or "API key not valid" counts only when the failure carries no other status.
-- Other errors, such as timeouts or dropped streams, pause the goal (`paused`) after three consecutive failed runs on the same provider/model. A successful response or a provider/model switch restarts the count. The notice states the last error and does not claim a usage limit.
+- Other errors, such as timeouts, server errors, or dropped streams, continue the goal automatically after 30 seconds, then after 2 minutes. A warning notification shows the real error and the next retry. A third consecutive failed run on the same provider/model pauses the goal (`paused`); the notice states the last error and does not claim a usage limit. A successful response or a provider/model switch restarts the count, and a new run, `/goal pause`, or a session change cancels a pending retry. This also covers `retry.enabled: false` or `retry.maxRetries: 0`, where a single transient failure does not pause the goal. With Pi's default retries, a provider that stays down costs at most three runs of four requests each before the goal pauses.
 
 This prevents automatic continuation from retrying indefinitely after provider limits such as 5-hour subscription caps. When the budget is exhausted or a provider limit is detected, a visible `pi-goal-event` notice is saved to model context without requesting a wrap-up turn. The model can act on that notice during a request independently started by Pi, the user, or another extension; the notice itself does not spend more tokens.
 
