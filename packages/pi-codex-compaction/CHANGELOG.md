@@ -10,6 +10,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 - Keep automatic server compaction on when Pi sends a `max` reasoning-effort update (thinking level `max` on GPT-6 models). Effort updates accept any effort value instead of a fixed list, so future levels do not silently disable compaction ([#221](https://github.com/jvm/pi-mono/issues/221)).
 
+### Documentation
+
+- Replace the stale claim that requests with `configuration_update` are never combined with automatic compaction. Document that effort updates and `context_management` are sent together, that OpenAI's deployment checklist says the two cannot be combined, and that no live test has checked it.
+
 ## [0.2.5] - 2026-10-30
 
 ### Changed

@@ -344,8 +344,9 @@ continuations. The packed-load suite can also target the installed bundled host
 through `PI_COMPACTION_HOST_ENTRY`, with only declared runtime dependencies and
 no physical Pi peers in the candidate directory. It exercises print, JSON and
 RPC modes. Static-catalog effort updates are disabled only in that compatible
-fixture; separate tests ensure requests containing `configuration_update` are
-not opted into automatic compaction.
+fixture; separate tests ensure requests containing non-effort
+`configuration_update` items are not opted into automatic compaction. Effort-only
+updates are opted in; that combination has no live measurement here.
 
 Codex source `970111f` informed the design, not the transport: its standard
 Responses path supplies request-level tools, while Responses Lite uses inline

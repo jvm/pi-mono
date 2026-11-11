@@ -28,6 +28,17 @@ new effort level does not silently turn automatic compaction off; the server
 validates the value. Other configuration shapes remain unsupported and disable
 automatic adaptation. No host serializer or private API is patched.
 
+**Unverified combination:** Pi adds these updates to GPT-6 requests that use an
+API key and a thinking level other than off; it does not add them with Sign in
+with ChatGPT. Since 0.2.5 this package sends `context_management` in the same
+request. OpenAI's
+[deployment checklist](https://developers.openai.com/api/docs/guides/deployment-checklist)
+says configuration updates "cannot be combined with automatic compaction or
+truncation". No live test of this package has checked that combination; only
+mocked transport covers it. If the server rejects such a request, automatic
+mode pauses after the failure and Pi's standard compactor remains available.
+Use `/server-compaction off` to avoid the combination.
+
 **Pi 1.4 compatibility:** inline `additional_tools` are adapted automatically.
 A stable namespace base keeps tools available during compaction; later inline
 updates retain their original positions and preserve cached prefixes. Each
@@ -235,8 +246,8 @@ this change removes only their obsolete direct-compaction adapters.
 
 `pi-openai-reasoning` remains a legacy-provider-only extension. This package
 does not migrate it or enable its reasoning-update feature on the public route.
-Automatic compaction and histories containing `configuration_update` are
-incompatible in the public API.
+See **Unverified combination** above for Pi's own effort updates together with
+automatic compaction.
 
 ## Validation and measured results
 
