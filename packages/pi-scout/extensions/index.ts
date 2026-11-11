@@ -2,10 +2,11 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { Type } from "typebox";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
 import { addRepo, buildScoutPrompt, formatRepo, loadPrunedState, registerRepo, removeRepo } from "../src/index.js";
+import { MAX_SOURCE_LENGTH } from "../src/source.js";
 import { ADD_REPO_OUTPUT, REMOVE_REPO_OUTPUT, LIST_REPOS_OUTPUT, SCOUT_NAMESPACE, formatPublicRepo, publicRepo, listPublicRepos } from "../src/tool-contracts.js";
 
 const RegisterRepoParams = Type.Object({
-  source: Type.String({ description: "Git URL/path or owner/repo." }),
+  source: Type.String({ description: "Git URL/path or owner/repo.", maxLength: MAX_SOURCE_LENGTH }),
   branch: Type.Optional(Type.String({ description: "Branch or tag; default branch if omitted.", minLength: 1, maxLength: 255, pattern: "^[^-]" })),
   refresh: Type.Optional(Type.Boolean({ description: "Fetch and fast-forward if already registered." })),
 }, { additionalProperties: false });

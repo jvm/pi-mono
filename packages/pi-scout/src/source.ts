@@ -16,6 +16,8 @@ const SCHEME_URL = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//;
 const GITHUB_SHORTHAND = /^([A-Za-z0-9][A-Za-z0-9_.-]*)\/([A-Za-z0-9_.-]+)$/;
 const SCP_LIKE = /^(?:([^/@:]+)@)?([^/:]{2,}):(?!\/\/)(.*)$/;
 const SSH_SCHEMES = new Set(["ssh:", "git+ssh:", "ssh+git:"]);
+/** Longest accepted source; bounds all parsing work on caller input. */
+export const MAX_SOURCE_LENGTH = 4096;
 
 export function parseGitHubShorthand(source: string): { owner: string; repo: string } | undefined {
   const match = source.match(GITHUB_SHORTHAND);
@@ -32,6 +34,7 @@ export function parseGitHubShorthand(source: string): { owner: string; repo: str
  * trailing `.git` or slash on remote URLs, and `file://` vs. local paths.
  */
 export function resolveSource(raw: string, cwd: string): ResolvedSource {
+  if (raw.length > MAX_SOURCE_LENGTH) throw new Error(`Repository source exceeds ${MAX_SOURCE_LENGTH} characters.`);
   const source = raw.trim();
   if (!source) throw new Error("Repository source is required.");
 
@@ -144,6 +147,23 @@ function stripGitSuffix(path: string): string {
 }
 
 function stripTrailingSeparators(path: string): string {
-  const stripped = path.replace(/[\\/]+$/, "");
+  const stripped = trimTrailing(path, "/\\");
   return stripped || path.slice(0, 1);
+}
+
+/**
+ * Remove trailing characters found in `chars`. A loop instead of a `[...]+$`
+ * regex, which backtracks quadratically on long runs of those characters.
+ */
+export function trimTrailing(value: string, chars: string): string {
+  let end = value.length;
+  while (end > 0 && chars.includes(value[end - 1]!)) end--;
+  return value.slice(0, end);
+}
+
+/** Remove leading characters found in `chars`. */
+export function trimLeading(value: string, chars: string): string {
+  let start = 0;
+  while (start < value.length && chars.includes(value[start]!)) start++;
+  return value.slice(start);
 }

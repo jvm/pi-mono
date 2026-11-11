@@ -3,7 +3,7 @@ import { basename, dirname, join } from "node:path";
 import { platform, tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { hasSecretUrlParts, parseGitHubShorthand, resolveSource, storedSourceKey, validateRef } from "./source.js";
+import { hasSecretUrlParts, parseGitHubShorthand, resolveSource, storedSourceKey, trimLeading, trimTrailing, validateRef } from "./source.js";
 import { loadPrunedState, mutateState, type ScoutRepo } from "./state.js";
 
 export interface RegisterRepoOptions {
@@ -258,15 +258,12 @@ function inferName(source: string): string {
     try { source = new URL(source).pathname; }
     catch { return "repo"; }
   }
-  const withoutTrailingSlash = source.replace(/[\\/]+$/, "");
+  const withoutTrailingSlash = trimTrailing(source, "/\\");
   const last = basename(withoutTrailingSlash).replace(/\.git$/i, "");
   return last || "repo";
 }
 
 function sanitizeName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 64) || "repo";
+  const dashed = name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
+  return trimLeading(trimTrailing(dashed, "-"), "-").slice(0, 64) || "repo";
 }

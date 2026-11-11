@@ -293,3 +293,59 @@ test("truncated output is non-fatal; a stopped command fails without output", as
     { message: "Git clone stopped: output exceeded 1048576 bytes. Check the source and Git authentication." });
   assert.deepEqual(await cloneDirs(), before, "partial clone removed");
 });
+
+/** Run `fn` and fail if it takes longer than a linear-time bound allows. */
+async function promptly(label, fn) {
+  const started = performance.now();
+  try { return await fn(); }
+  finally {
+    const elapsed = performance.now() - started;
+    assert.ok(elapsed < 1_000, `${label} took ${Math.round(elapsed)} ms`);
+  }
+}
+
+test("long runs of separators in a source are handled in linear time with unchanged results", async () => {
+  const { add } = loadScout(stubGit());
+  const run = (char, count) => char.repeat(count);
+
+  const trailing = await promptly("trailing slashes", () => add({ source: `https://fixture.invalid/team/trail${run("/", 4000)}` }));
+  assert.equal(trailing.structuredContent.status, "cloned");
+  assert.equal(trailing.structuredContent.repo.name, "trail");
+  assert.equal((await add({ source: "https://fixture.invalid/team/trail.git" })).structuredContent.repo.id, trailing.structuredContent.repo.id);
+
+  const tail = await promptly("slashes with a tail", () => add({ source: `https://fixture.invalid/team/${run("/", 4000)}slashy` }));
+  assert.equal(tail.structuredContent.repo.name, "slashy");
+
+  const scp = await promptly("scp-like trailing slashes", () => add({ source: `git@fixture.invalid:team/scp${run("/", 4000)}` }));
+  assert.equal((await add({ source: "git@fixture.invalid:team/scp.git" })).structuredContent.repo.id, scp.structuredContent.repo.id);
+
+  const dashes = await promptly("dashes around a name", () => add({ source: `https://fixture.invalid/team/${run("-", 2000)}dash${run("-", 2000)}` }));
+  assert.equal(dashes.structuredContent.repo.name, "dash");
+
+  const onlyDashes = await promptly("dashes with a non-matching tail", () => add({ source: `https://fixture.invalid/team/${run("-", 4000)}!` }));
+  assert.equal(onlyDashes.structuredContent.repo.name, "repo");
+});
+
+test("oversized sources and branches are rejected promptly before Git runs", async () => {
+  const { add, calls, tools } = loadScout(stubGit());
+  assert.equal(tools.get("scout_add").parameters.properties.source.maxLength, 4096);
+  for (const source of ["/".repeat(100_000), `${"/".repeat(100_000)}x`, `owner/${"-".repeat(100_000)}`, `https://fixture.invalid/${"-".repeat(100_000)}!`]) {
+    await promptly("oversized source", () => assert.rejects(add({ source }), { message: "Repository source exceeds 4096 characters." }));
+  }
+  for (const branch of ["/".repeat(100_000), `${"/".repeat(100_000)}x`, "-".repeat(100_000), `${"-".repeat(100_000)}x`, `x${"-".repeat(100_000)}`]) {
+    await promptly("oversized branch", () => assert.rejects(add({ source: "owner/repo", branch }), { message: "Invalid branch or tag name." }));
+  }
+  assert.equal(calls.length, 0);
+});
+
+test("a user-chosen name with long dash runs is sanitized in linear time", async () => {
+  const { registerRepo } = await import("../src/repo.ts");
+  const pi = { exec: stubGit() };
+  const dashes = "-".repeat(100_000);
+  const repo = await promptly("dashed name", () => registerRepo(pi, { source: "https://fixture.invalid/team/named", name: `${dashes}name${dashes}` }));
+  assert.equal(repo.name, "name");
+  const fallback = await promptly("dashes only", () => registerRepo(pi, { source: "https://fixture.invalid/team/named2", name: `${dashes}!` }));
+  assert.equal(fallback.name, "repo");
+  const inner = await promptly("inner dash run", () => registerRepo(pi, { source: "https://fixture.invalid/team/named3", name: `a${dashes}b` }));
+  assert.equal(inner.name, `a${"-".repeat(63)}`);
+});

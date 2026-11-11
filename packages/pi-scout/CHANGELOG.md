@@ -17,6 +17,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - Treat `./repo` and `../repo` as local paths instead of GitHub shorthand.
 - Disable Git's `ext` transport and interactive credential prompts for Scout Git calls; report timeouts as failures.
 - Run SSH in batch mode unless the user configured an SSH command, so Git cannot prompt on Pi's terminal.
+- Reject repository sources longer than 4096 characters, and trim trailing separators and dashes in linear time so long runs of `/` or `-` cannot stall validation.
 - Cap Git output at 1 MiB per call on Pi hosts with `pi.exec` `maxBuffer`, and run Git in the private clone root instead of the project directory.
 
 ## [0.3.0] - 2026-10-30
