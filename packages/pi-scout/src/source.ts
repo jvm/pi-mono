@@ -1,5 +1,5 @@
 import { isAbsolute, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export interface ResolvedSource {
   /** Exact argument passed to `git clone`; may contain caller-supplied credentials. */
@@ -60,8 +60,8 @@ export function resolveSource(raw: string, cwd: string): ResolvedSource {
     catch { throw new Error("Repository source is not a valid URL."); }
     if (!SUPPORTED_SCHEMES.has(url.protocol)) throw new Error(UNSUPPORTED_SOURCE);
     if (url.protocol === "file:") {
-      const path = stripTrailingSeparators(fileURLToPath(url));
-      return { clone: source, stored: `file://${path}`, key: `path:${path}` };
+      const path = fileUrlPath(source);
+      return { clone: source, stored: pathToFileURL(path).href, key: `path:${path}` };
     }
     const stored = redactUrl(url);
     return { clone: source, stored, key: urlKey(url) };
@@ -95,7 +95,8 @@ function redactStoredUrl(source: string): string {
   if (!SCHEME_URL.test(source)) return source;
   try {
     const url = new URL(source);
-    return url.protocol === "file:" ? source : redactUrl(url);
+    // Earlier builds stored `file://<path>` unescaped; re-encode it.
+    return url.protocol === "file:" ? pathToFileURL(fileUrlPath(source)).href : redactUrl(url);
   } catch {
     return source;
   }
@@ -143,6 +144,15 @@ export function validateRef(value: string | undefined): string | undefined {
     || /[\u0000- \u007f~^:?*[\\]/.test(ref);
   if (invalid) throw new Error("Invalid branch or tag name.");
   return ref;
+}
+
+/**
+ * Local path of a `file:` URL as Git reads it: `#` and `?` are literal path
+ * characters, not a fragment or query, and `%XX` escapes are decoded.
+ */
+export function fileUrlPath(source: string): string {
+  const literal = source.replace(/[#?]/g, (char) => (char === "#" ? "%23" : "%3F"));
+  return stripTrailingSeparators(fileURLToPath(new URL(literal)));
 }
 
 function redactUrl(url: URL): string {

@@ -282,6 +282,45 @@ test("remote-helper credentials persisted by earlier versions are redacted on lo
   assert.match(stored, /"https::https:\/\/fixture\.invalid\/legacy\.git"/);
 });
 
+test("file URLs with escaped or literal # and ? keep their path when stored and reused", async () => {
+  const hashed = await makeOrigin("demo#one");
+  const plain = await makeOrigin("demo");
+  const { add } = loadScout();
+  const encoded = pathToFileURL(hashed.bare).href;
+  assert.match(encoded, /demo%23one\.git$/);
+  const first = await add({ source: encoded });
+  assert.equal(first.structuredContent.status, "cloned");
+  assert.equal(first.structuredContent.repo.name, "demo-one");
+  const stored =(await loadState()).repos.find(repo => repo.id === first.structuredContent.repo.id).source;
+  assert.equal(new URL(stored).hash, "", `stored ${stored} has no fragment`);
+
+  // Git reads `#` in a file URL literally, so every spelling is the same repository.
+  for (const source of [encoded, hashed.bare, `file://${hashed.bare}`]) {
+    assert.equal((await add({ source })).structuredContent.repo.id, first.structuredContent.repo.id, source);
+  }
+  const other = await add({ source: plain.bare });
+  assert.equal(other.structuredContent.status, "cloned", "the prefix path is a different repository");
+  assert.notEqual(other.structuredContent.repo.id, first.structuredContent.repo.id);
+
+  const question = await makeOrigin("demo?two");
+  const q = await add({ source: `file://${question.bare}` });
+  assert.equal(q.structuredContent.status, "cloned");
+  assert.equal((await add({ source: question.bare })).structuredContent.repo.id, q.structuredContent.repo.id);
+});
+
+test("file URLs stored unescaped by earlier builds are re-normalised on load", async () => {
+  const { bare } = await makeOrigin("legacy#hash");
+  const clone = join(getScoutCloneRoot(), "legacy-hash");
+  await mkdir(clone, { recursive: true });
+  const state = await loadState();
+  const now = new Date().toISOString();
+  state.repos.push({ id: "legacy-hash", name: "legacy-hash", source: `file://${bare}`, path: clone, createdAt: now, lastSeenAt: now });
+  await saveState(state);
+  const { add } = loadScout();
+  assert.equal((await add({ source: bare })).structuredContent.repo.id, "legacy-hash");
+  assert.ok((await loadState()).repos.some(repo => repo.id === "legacy-hash" && repo.source === pathToFileURL(bare).href));
+});
+
 test("relative ./ and ../ paths are local paths, not GitHub shorthand", async () => {
   const { add, calls } = loadScout(async (_command, args) => {
     if (args.includes("clone")) await mkdir(args.at(-1), { recursive: true });

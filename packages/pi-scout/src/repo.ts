@@ -3,7 +3,7 @@ import { basename, dirname, join } from "node:path";
 import { platform, tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { hasSecretUrlParts, parseGitHubShorthand, resolveSource, storedSourceKey, trimLeading, trimTrailing, validateRef } from "./source.js";
+import { fileUrlPath, hasSecretUrlParts, parseGitHubShorthand, resolveSource, storedSourceKey, trimLeading, trimTrailing, validateRef } from "./source.js";
 import { loadPrunedState, mutateState, type ScoutRepo } from "./state.js";
 
 export interface RegisterRepoOptions {
@@ -255,8 +255,10 @@ function inferName(source: string): string {
   // URL userinfo/query/fragment may contain credentials. Never use them as a
   // public name or destination basename, including origins without a path.
   if (source.includes("://")) {
-    try { source = new URL(source).pathname; }
-    catch { return "repo"; }
+    try {
+      const url = new URL(source);
+      source = url.protocol === "file:" ? fileUrlPath(source) : url.pathname;
+    } catch { return "repo"; }
   }
   const withoutTrailingSlash = trimTrailing(source, "/\\");
   const last = basename(withoutTrailingSlash).replace(/\.git$/i, "");

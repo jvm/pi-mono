@@ -20,6 +20,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - Reject repository sources longer than 4096 characters, and trim trailing separators and dashes in linear time so long runs of `/` or `-` cannot stall validation.
 - Cap Git output at 1 MiB per call on Pi hosts with `pi.exec` `maxBuffer`, and run Git in the private clone root instead of the project directory.
 - Reject Git remote-helper sources (`<helper>::<address>`, including `ext::` and `fd::`) and unknown URL schemes, which run helper programs and could keep credentials in records; redact credentials inside helper sources stored by earlier versions.
+- Store `file://` sources percent-encoded and read `#` and `?` in them literally, as Git does, so a path such as `demo#one.git` keeps its own clone instead of matching `demo`; re-encode records stored unescaped on load.
 
 ## [0.3.0] - 2026-10-30
 
