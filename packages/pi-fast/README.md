@@ -75,8 +75,8 @@ remains `https://chatgpt.com/backend-api/codex/responses`.
 | Legacy `openai-codex` | Existing Codex OAuth; same allowlist | `priority`; subscription usage |
 | Other providers/APIs or non-allowlisted models | Any | Payload unchanged; footer shows the crossed-out bolt |
 
-GPT-6.1 Sol is already allowlisted here. That does not enable it in
-`pi-openai-reasoning`, whose private protocol remains verified only for Astra.
+This allowlist covers Fast only. `pi-openai-reasoning` keeps its own model
+list for reasoning updates.
 
 OpenAI's [API Fast documentation](https://developers.openai.com/api/docs/guides/fast-mode)
 uses `fast` as the current spelling and accepts `priority` as an equivalent alias.
