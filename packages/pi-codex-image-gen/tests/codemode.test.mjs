@@ -276,12 +276,20 @@ test("typed recovery survives later script failure without a new generation", as
   assert.match(JSON.stringify(missing.content), /missing/);
 });
 
-test("parallel direct and nested generation share account admission without deduplication", async t => {
+test("parallel direct and nested generation share account admission without deduplication", { timeout: 30_000 }, async t => {
   const h = await fixture(t, "on");
   let active = 0;
   let peak = 0;
+  // Callers reach admission at load-dependent times. Hold the first admitted
+  // request until a second one is admitted beside it, so the shared limit of
+  // two is observed instead of depending on a fixed overlap window.
+  let pairAdmitted;
+  const pair = new Promise(resolve => { pairAdmitted = resolve; });
   h.setImageHandler(async () => {
     peak = Math.max(peak, ++active);
+    if (active === 2) pairAdmitted();
+    await pair;
+    // Keep the pair admitted briefly; a third concurrent request would raise peak.
     await delay(25);
     active--;
     return imageResponse();
