@@ -177,9 +177,12 @@ test("managed bash PTY input still requires per-write RPC approval", async t => 
   // The yield window may end before the shell answers; wait for its exit and
   // read the retained, non-consuming log instead of one bounded poll.
   const finished = dataOf(await h.run("process_wait", { session_ids: [session_id] }));
-  assert.equal(finished.processes[0].status, "exited");
+  const [exit] = finished.processes;
+  assert.equal(exit.status, "exited");
   const output = dataOf(await h.run("process_output", { session_id })).output;
-  assert.match(output, /received:approved/);
+  // Exit facts separate a killed shell from PTY output lost after a normal exit.
+  assert.match(output, /received:approved/,
+    `exit_code=${exit.exit_code} signal=${exit.signal} timed_out=${exit.timed_out}`);
   assert.doesNotMatch(output, /rejected/);
   assert.equal(h.confirmations.length, 2);
   assert.equal(h.checks.length, 1);
