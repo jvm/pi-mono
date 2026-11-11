@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
-import { listWorkspacePackages } from "../../scripts/workspace-packages.mjs";
+import { prepareHostWorkspace } from "../../scripts/workspace-packages.mjs";
 
 const repo = process.cwd();
 const reference = process.env.PI_WEB_ACCESS_REFERENCE;
@@ -23,20 +23,7 @@ if (requestedHost) {
     assert.equal(result.status, 0, `${command} failed`);
   };
   try {
-    await cp(repo, dir, { recursive: true, filter: path =>
-      !["node_modules", ".git", ".pi", ".test-dist"].includes(basename(path)) });
-    const manifestPath = join(dir, "package.json");
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    manifest.devDependencies = Object.fromEntries(["pi-ai", "pi-coding-agent", "pi-tui"].map(n => [`@earendil-works/${n}`, requestedHost]));
-    await writeFile(manifestPath, JSON.stringify(manifest));
-    for (const name of await listWorkspacePackages(join(dir, "packages"))) {
-      const path = join(dir, "packages", name, "package.json");
-      const pkg = JSON.parse(await readFile(path, "utf8"));
-      for (const name of Object.keys(pkg.devDependencies ?? {})) {
-        if (name.startsWith("@earendil-works/pi-")) pkg.devDependencies[name] = requestedHost;
-      }
-      await writeFile(path, JSON.stringify(pkg));
-    }
+    await prepareHostWorkspace(repo, dir, requestedHost);
     run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"]);
     run(process.execPath, ["--import", "tsx", "docs/research/eval-codemode-decisions.mjs"]);
   } finally { await rm(dir, { recursive: true, force: true }); }

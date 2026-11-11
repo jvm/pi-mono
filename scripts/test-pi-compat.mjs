@@ -1,9 +1,9 @@
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { listWorkspacePackages } from "./workspace-packages.mjs";
+import { prepareHostWorkspace } from "./workspace-packages.mjs";
 
 const version = "1.5.2";
 if (process.argv.length > 3 || (process.argv[2] && process.argv[2] !== version)) {
@@ -19,25 +19,7 @@ const run = (command, args, env = {}) => {
   if (result.status !== 0) throw new Error(`${command} exited ${result.status}`);
 };
 try {
-  await cp(source, dir, {
-    recursive: true,
-    filter: path => !["node_modules", ".git", ".pi", ".test-dist"].includes(basename(path)),
-  });
-  const rootManifest = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
-  rootManifest.devDependencies = {
-    "@earendil-works/pi-ai": version,
-    "@earendil-works/pi-coding-agent": version,
-    "@earendil-works/pi-tui": version,
-  };
-  await writeFile(join(dir, "package.json"), JSON.stringify(rootManifest, null, 2) + "\n");
-  for (const name of await listWorkspacePackages(join(dir, "packages"))) {
-    const path = join(dir, "packages", name, "package.json");
-    const manifest = JSON.parse(await readFile(path, "utf8"));
-    for (const name of Object.keys(manifest.devDependencies ?? {})) {
-      if (name.startsWith("@earendil-works/pi-")) manifest.devDependencies[name] = version;
-    }
-    await writeFile(path, JSON.stringify(manifest, null, 2) + "\n");
-  }
+  await prepareHostWorkspace(source, dir, version);
   run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"]);
   const laneEnv = { PI_TEST_HOST_VERSION: version, PI_TEST_HOST_ROOT: resolve(dir) };
   run(process.execPath, ["--import", "tsx", "--test",
