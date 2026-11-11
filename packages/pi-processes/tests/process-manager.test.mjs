@@ -178,6 +178,35 @@ test("unacknowledged background failures are evicted last and never block admiss
   assert.match(h.text(), /! exit 20/);
 });
 
+test("service and background failures during the startup read are evicted last", bounded, async t => {
+  const h = setup(t, { active: 4, retained: 3, outputBytes: 1024, killGraceMs: 10 });
+  // A startup read that outlasts the command: the record has already exited
+  // when start() returns. The read is the event wait, bounded at 5 seconds.
+  const failed = async (command, mode) => {
+    const result = await h.rt.start(command, process.cwd(), false, 5000, false, 5000,
+      16_000, undefined, mode === "background" ? "steer" : undefined, { mode });
+    assert.equal(result.status, "exited", `${mode} must fail before its startup read returns`);
+    return result.session_id;
+  };
+  const has = id => h.rt.views().some(p => p.session_id === id);
+  const service = await failed("printf service-startup-error; exit 3", "service");
+  const background = await failed("exit 4", "background");
+  assert.equal(h.rt.views().filter(p => p.attention === "needs_attention").length, 2);
+  const success = (await spawn(h.rt, "printf one")).session_id;
+  // The first eviction pass removes completed history before detached failures.
+  await spawn(h.rt, "printf two");
+  assert.ok(has(service) && has(background) && !has(success));
+  h.manager.handleInput("r");
+  assert.match(h.text(), /2 need attention/);
+  assert.match(h.text(), /! printf service-startup-error; exit 3 · service · exit 3/);
+  assert.equal(h.rt.output(service, 0, 1024).output, "service-startup-error");
+  // When only failures remain, the oldest one still makes room for new work.
+  await spawn(h.rt, "printf three");
+  const later = await failed("exit 5", "service");
+  assert.equal((await spawn(h.rt, "printf admitted")).output, "admitted");
+  assert.ok(!has(service) && has(background) && has(later));
+});
+
 test("admission fails only when every retained record is running or in use", bounded, async t => {
   const h = setup(t, { active: 3, retained: 3, outputBytes: 1024, killGraceMs: 10 });
   const live = [await spawn(h.rt, "sleep 30", "service"), await spawn(h.rt, "sleep 30", "service")];
