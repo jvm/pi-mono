@@ -2,6 +2,36 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 const { scanPatchPreview } = await import("../src/patch-preview.ts");
+const { default: piCodexTools } = await import("../extensions/index.ts");
+
+// Stands in for Pi's render-context keyHint, which sees the user's keybindings.
+const keyHint = (keybinding, description) => `<${keybinding}> ${description}`;
+
+const longAddPatch = ["*** Begin Patch", "*** Add File: long.txt", ...Array.from({ length: 15 }, (_, i) => `+line ${i}`), "*** End Patch"].join("\n");
+
+test("collapsed glimpse uses the injected keyHint for the expand hint", async () => {
+  const { initTheme } = await import("@earendil-works/pi-coding-agent");
+  const { formatApplyPatchCallText } = await import("../src/patch-preview.ts");
+  initTheme("dark");
+  const theme = globalThis[Symbol.for("@earendil-works/pi-coding-agent:theme")];
+  const out = formatApplyPatchCallText(longAddPatch, theme, { expanded: false, keyHint }).replace(/\x1b\[[0-9;]*m/g, "");
+  assert.match(out, /\(5 more lines, 15 total, <app\.tools\.expand> to expand\)/);
+});
+
+test("apply_patch renderCall passes the render context's keyHint", async () => {
+  const { initTheme } = await import("@earendil-works/pi-coding-agent");
+  initTheme("dark");
+  const theme = globalThis[Symbol.for("@earendil-works/pi-coding-agent:theme")];
+  const tools = new Map();
+  piCodexTools({ on() {}, registerTool: (tool) => tools.set(tool.name, tool), getActiveTools: () => [], getAllTools: () => [], setActiveTools() {} });
+  const calls = [];
+  const component = tools.get("apply_patch").renderCall({ patch: longAddPatch }, theme, {
+    expanded: false, lastComponent: undefined,
+    keyHint: (keybinding, description) => { calls.push(keybinding); return keyHint(keybinding, description); },
+  });
+  assert.deepEqual(calls, ["app.tools.expand"]);
+  assert.match(component.render(200).join("\n").replace(/\x1b\[[0-9;]*m/g, ""), /<app\.tools\.expand> to expand/);
+});
 
 function findFile(preview, path) {
   return preview.files.find((file) => file.path === path);
@@ -186,7 +216,7 @@ test("single-file delete header shows the D status mark", async () => {
   const out = formatApplyPatchCallText(
     ["*** Begin Patch", "*** Delete File: stale.log", "*** End Patch"].join("\n"),
     theme,
-    { expanded: false },
+    { expanded: false, keyHint },
   ).replace(/\x1b\[[0-9;]*m/g, "");
   assert.match(out, /D stale\.log/);
 });
@@ -207,7 +237,7 @@ test("captures Move-to destination and renders the source -> destination transit
   const preview = scanPatchPreview(patch);
   assert.equal(preview.files.length, 1);
   assert.equal(findFile(preview, "src/old.ts").moveTo, "src/new.ts");
-  const out = formatApplyPatchCallText(patch, theme, { expanded: false }).replace(/\x1b\[[0-9;]*m/g, "");
+  const out = formatApplyPatchCallText(patch, theme, { expanded: false, keyHint }).replace(/\x1b\[[0-9;]*m/g, "");
   assert.match(out, /src\/old\.ts -> src\/new\.ts/);
 });
 
@@ -246,8 +276,8 @@ test("collapsed multi-file roster is capped; expansion reveals the rest", async 
   const hunks = Array.from({ length: 25 }, (_, i) => `*** Add File: f${i}.ts\n+x`).join("\n");
   const patch = `*** Begin Patch\n${hunks}\n*** End Patch`;
   const strip = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
-  const collapsed = strip(formatApplyPatchCallText(patch, theme, { expanded: false }));
-  const expanded = strip(formatApplyPatchCallText(patch, theme, { expanded: true }));
+  const collapsed = strip(formatApplyPatchCallText(patch, theme, { expanded: false, keyHint }));
+  const expanded = strip(formatApplyPatchCallText(patch, theme, { expanded: true, keyHint }));
   assert.match(collapsed, /… 15 more files/);
   // The roster (before the blank-line-separated glimpse) is capped at 10.
   const [rosterSection] = collapsed.split("\n\n");
@@ -267,7 +297,7 @@ test("the focused file labels the glimpse even when hidden behind the roster cap
   const theme = globalThis[Symbol.for("@earendil-works/pi-coding-agent:theme")];
   const hunks = Array.from({ length: 25 }, (_, i) => `*** Add File: f${i}.ts\n+x`).join("\n");
   const patch = `*** Begin Patch\n${hunks}\n*** End Patch`;
-  const out = formatApplyPatchCallText(patch, theme, { expanded: false }).replace(/\x1b\[[0-9;]*m/g, "");
+  const out = formatApplyPatchCallText(patch, theme, { expanded: false, keyHint }).replace(/\x1b\[[0-9;]*m/g, "");
   const [, glimpse] = out.split("\n\n");
   // focusFile picks f24 (latest with content), which is NOT in the capped roster (f0..f9).
   assert.ok(glimpse.includes("f24.ts"), "the hidden focused file should label the glimpse");
@@ -280,7 +310,7 @@ test("truncates unusually long file paths", async () => {
   const theme = globalThis[Symbol.for("@earendil-works/pi-coding-agent:theme")];
   const longPath = `${"p".repeat(300)}.ts`;
   const patch = `*** Begin Patch\n*** Add File: ${longPath}\n+x\n*** End Patch`;
-  const out = formatApplyPatchCallText(patch, theme, { expanded: false }).replace(/\x1b\[[0-9;]*m/g, "");
+  const out = formatApplyPatchCallText(patch, theme, { expanded: false, keyHint }).replace(/\x1b\[[0-9;]*m/g, "");
   assert.ok(out.includes("…"), "long path should be truncated");
   assert.ok(!out.includes(longPath), "the full path must not be rendered");
   assert.ok(out.includes(".ts"), "the filename/extension should be preserved");
@@ -292,7 +322,7 @@ test("glimpse lines carry no fabricated line numbers", async () => {
   initTheme("dark");
   const theme = globalThis[Symbol.for("@earendil-works/pi-coding-agent:theme")];
   const patch = ["*** Begin Patch", "*** Update File: a.ts", "@@ ctx", "-old", "+new", "*** End Patch"].join("\n");
-  const out = formatApplyPatchCallText(patch, theme, { expanded: false }).replace(/\x1b\[[0-9;]*m/g, "");
+  const out = formatApplyPatchCallText(patch, theme, { expanded: false, keyHint }).replace(/\x1b\[[0-9;]*m/g, "");
   assert.match(out, /^-old$/m);
   assert.match(out, /^\+new$/m);
   // No synthetic "-1"/"+2" gutter numbers.
@@ -306,7 +336,7 @@ test("caps a single very long glimpse line", async () => {
   const theme = globalThis[Symbol.for("@earendil-works/pi-coding-agent:theme")];
   const long = "x".repeat(2000);
   const patch = `*** Begin Patch\n*** Add File: min.json\n+${long}\n*** End Patch`;
-  const out = formatApplyPatchCallText(patch, theme, { expanded: false }).replace(/\x1b\[[0-9;]*m/g, "");
+  const out = formatApplyPatchCallText(patch, theme, { expanded: false, keyHint }).replace(/\x1b\[[0-9;]*m/g, "");
   const glimpseLine = out.split("\n").find((l) => l.startsWith("+"));
   assert.ok(glimpseLine.length < long.length, "long line should be truncated");
   assert.ok(glimpseLine.endsWith("…"), "truncated line should end with an ellipsis");
@@ -323,7 +353,7 @@ test("removes untrusted terminal controls from preview text and paths", async ()
     `+\x1b[2Jvalue\x00\x1b]8;;https://evil.example\x1b\\`,
     "*** End Patch",
   ].join("\n");
-  const rendered = formatApplyPatchCallText(patch, theme, { expanded: false });
+  const rendered = formatApplyPatchCallText(patch, theme, { expanded: false, keyHint });
   const withoutTrustedStyles = rendered.replace(/\x1b\[[0-9;]*m/g, "");
   assert.doesNotMatch(withoutTrustedStyles, /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/);
   assert.doesNotMatch(withoutTrustedStyles, /\x1b/);

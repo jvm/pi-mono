@@ -6,7 +6,7 @@
 // added/removed tally. It reuses Pi's shared `renderDiff` primitive for +/- coloring, so the
 // preview stays consistent with the built-in `edit` tool's diff preview.
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
-import { keyHint, type Theme } from "@earendil-works/pi-coding-agent";
+import type { KeybindingHints, Theme } from "@earendil-works/pi-coding-agent";
 
 const FILE_ADD = "*** Add File: ";
 const FILE_DELETE = "*** Delete File: ";
@@ -208,7 +208,15 @@ function truncatePath(path: string): string {
 }
 
 /** Format the live apply_patch tool-call text (streaming glimpse + tally). */
-export function formatApplyPatchCallText(rawPatch: string, theme: Theme, options: { expanded: boolean }): string {
+/**
+ * `keyHint` must come from Pi's render context: an imported `keyHint` may resolve to this
+ * package's own copy of pi-coding-agent, which does not see the user's keybindings.
+ */
+export function formatApplyPatchCallText(
+  rawPatch: string,
+  theme: Theme,
+  options: { expanded: boolean; keyHint: KeybindingHints["keyHint"] },
+): string {
   const preview = scanPatchPreview(rawPatch);
   const title = theme.fg("toolTitle", theme.bold("apply_patch"));
   if (preview.files.length === 0) return title;
@@ -242,7 +250,7 @@ export function formatApplyPatchCallText(rawPatch: string, theme: Theme, options
     if (remaining > 0) {
       body += theme.fg(
         "muted",
-        `\n... (${remaining} more lines, ${focus.lines.length} total, ${keyHint("app.tools.expand", "to expand")})`,
+        `\n... (${remaining} more lines, ${focus.lines.length} total, ${options.keyHint("app.tools.expand", "to expand")})`,
       );
     }
     // In multi-file previews the focused file may be hidden behind the capped roster, so label the
