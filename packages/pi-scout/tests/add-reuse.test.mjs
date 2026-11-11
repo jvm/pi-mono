@@ -243,6 +243,45 @@ test("credentials persisted by earlier versions are redacted on load", async () 
   assert.match(stored, /https:\/\/fixture\.invalid\/legacy\.git/);
 });
 
+test("remote-helper and unknown-scheme sources are rejected before Git runs and never persisted", async () => {
+  const { add, calls } = loadScout(stubGit());
+  for (const source of [
+    "https::https://synthetic-user:synthetic-pass@fixture.invalid/team/helper.git",
+    "ext::sh -c touch% synthetic-pwned",
+    "fd::3",
+    "synthetic-helper::fixture.invalid/team/repo",
+    "synthetic-helper://fixture.invalid/team/repo",
+  ]) {
+    await assert.rejects(add({ source }), (error) => {
+      assert.match(error.message, /^Unsupported repository source/, source);
+      assert.doesNotMatch(error.message, /synthetic/, source);
+      return true;
+    });
+  }
+  assert.equal(calls.length, 0);
+  assert.doesNotMatch(await readFile(getScoutStatePath(), "utf8"), /synthetic/);
+
+  // Supported transports still clone.
+  for (const source of ["http://fixture.invalid/team/plain.git", "git://fixture.invalid/team/plain.git", "ssh://git@fixture.invalid/team/plain.git", "git+ssh://git@fixture.invalid/team/plain2.git"]) {
+    assert.equal((await add({ source })).structuredContent.status, "cloned", source);
+  }
+});
+
+test("remote-helper credentials persisted by earlier versions are redacted on load and the record is kept", async () => {
+  const clone = join(getScoutCloneRoot(), "legacy-helper");
+  await mkdir(clone, { recursive: true });
+  const state = await loadState();
+  const now = new Date().toISOString();
+  state.repos.push({ id: "legacy-helper", name: "legacy-helper", source: "https::https://synthetic-helper-user:synthetic-helper-pass@fixture.invalid/legacy.git?token=synthetic-helper-query", path: clone, createdAt: now, lastSeenAt: now });
+  await saveState(state);
+  const { tools } = loadScout();
+  const listed = await tools.get("scout_list").execute("call", {});
+  assert.ok(listed.structuredContent.repos.some(repo => repo.id === "legacy-helper"));
+  const stored = await readFile(getScoutStatePath(), "utf8");
+  assert.doesNotMatch(stored, /synthetic-helper/);
+  assert.match(stored, /"https::https:\/\/fixture\.invalid\/legacy\.git"/);
+});
+
 test("relative ./ and ../ paths are local paths, not GitHub shorthand", async () => {
   const { add, calls } = loadScout(async (_command, args) => {
     if (args.includes("clone")) await mkdir(args.at(-1), { recursive: true });

@@ -127,6 +127,11 @@ already registered. Equivalent spellings match: `owner/repo` and its GitHub
 HTTPS URL, scheme/host case, a trailing `.git` or `/` on remote URLs, URL
 credentials/query, relative and absolute local paths, and `file://` URLs.
 Different transports (HTTPS vs. SSH) and different branches get separate clones.
+Sources must be `http(s)`, `ftp(s)`, `git`, `ssh` or `file` URLs, scp-like
+`host:path`, local paths, or GitHub shorthand. Git remote-helper sources
+(`<helper>::<address>`, such as `ext::` or `fd::`) and other URL schemes are
+rejected because they make Git run a helper program; clone those yourself and
+register the local path.
 Relative local paths resolve against Pi's working directory. GitHub shorthand
 needs an owner that starts with a letter or digit, so `./repo` and `../repo` are
 local paths.

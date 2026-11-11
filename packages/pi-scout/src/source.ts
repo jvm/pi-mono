@@ -16,6 +16,15 @@ const SCHEME_URL = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//;
 const GITHUB_SHORTHAND = /^([A-Za-z0-9][A-Za-z0-9_.-]*)\/([A-Za-z0-9_.-]+)$/;
 const SCP_LIKE = /^(?:([^/@:]+)@)?([^/:]{2,}):(?!\/\/)(.*)$/;
 const SSH_SCHEMES = new Set(["ssh:", "git+ssh:", "ssh+git:"]);
+/**
+ * URL schemes Git handles natively. Any other `<scheme>://` source, like every
+ * `<helper>::<address>` source, makes Git run a `git-remote-<name>` program
+ * chosen by the caller, so both are rejected.
+ */
+const SUPPORTED_SCHEMES = new Set(["http:", "https:", "ftp:", "ftps:", "git:", "file:", ...SSH_SCHEMES]);
+// Git's remote-helper syntax; same character rules as Git's `is_urlschemechar`.
+const REMOTE_HELPER = /^([A-Za-z][A-Za-z0-9+.-]*)::/;
+const UNSUPPORTED_SOURCE = "Unsupported repository source: use an HTTPS, SSH, Git or file URL, `host:path`, a local path, or GitHub `owner/repo`.";
 /** Longest accepted source; bounds all parsing work on caller input. */
 export const MAX_SOURCE_LENGTH = 4096;
 
@@ -32,6 +41,7 @@ export function parseGitHubShorthand(source: string): { owner: string; repo: str
  * persisted form and an equivalence key. Equivalent spellings share a key:
  * `owner/repo`, `https://GitHub.com/owner/repo.git/`, scheme/host case,
  * trailing `.git` or slash on remote URLs, and `file://` vs. local paths.
+ * Remote-helper (`<helper>::<address>`) and unknown-scheme sources are rejected.
  */
 export function resolveSource(raw: string, cwd: string): ResolvedSource {
   if (raw.length > MAX_SOURCE_LENGTH) throw new Error(`Repository source exceeds ${MAX_SOURCE_LENGTH} characters.`);
@@ -48,6 +58,7 @@ export function resolveSource(raw: string, cwd: string): ResolvedSource {
     let url: URL;
     try { url = new URL(source); }
     catch { throw new Error("Repository source is not a valid URL."); }
+    if (!SUPPORTED_SCHEMES.has(url.protocol)) throw new Error(UNSUPPORTED_SOURCE);
     if (url.protocol === "file:") {
       const path = stripTrailingSeparators(fileURLToPath(url));
       return { clone: source, stored: `file://${path}`, key: `path:${path}` };
@@ -56,8 +67,8 @@ export function resolveSource(raw: string, cwd: string): ResolvedSource {
     return { clone: source, stored, key: urlKey(url) };
   }
 
-  // Git's `<transport>::<address>` remote helpers are passed through unchanged.
-  if (/^[A-Za-z][A-Za-z0-9+.-]*::/.test(source)) return { clone: source, stored: source, key: `raw:${source}` };
+  // Git's `<transport>::<address>` remote helpers run arbitrary programs.
+  if (REMOTE_HELPER.test(source)) throw new Error(UNSUPPORTED_SOURCE);
 
   const scp = source.match(SCP_LIKE);
   if (scp && !isAbsolute(source)) {
@@ -70,8 +81,17 @@ export function resolveSource(raw: string, cwd: string): ResolvedSource {
   return { clone: path, stored: path, key: `path:${path}` };
 }
 
-/** Remove credentials from a persisted source written by an earlier version. */
+/**
+ * Remove credentials from a persisted source written by an earlier version,
+ * including the address inside a `<helper>::<address>` source.
+ */
 export function redactStoredSource(source: string): string {
+  const helper = source.match(REMOTE_HELPER);
+  if (helper) return `${helper[0]}${redactStoredUrl(source.slice(helper[0].length))}`;
+  return redactStoredUrl(source);
+}
+
+function redactStoredUrl(source: string): string {
   if (!SCHEME_URL.test(source)) return source;
   try {
     const url = new URL(source);

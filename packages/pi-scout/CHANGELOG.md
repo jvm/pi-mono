@@ -19,6 +19,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - Run SSH in batch mode unless the user configured an SSH command, so Git cannot prompt on Pi's terminal.
 - Reject repository sources longer than 4096 characters, and trim trailing separators and dashes in linear time so long runs of `/` or `-` cannot stall validation.
 - Cap Git output at 1 MiB per call on Pi hosts with `pi.exec` `maxBuffer`, and run Git in the private clone root instead of the project directory.
+- Reject Git remote-helper sources (`<helper>::<address>`, including `ext::` and `fd::`) and unknown URL schemes, which run helper programs and could keep credentials in records; redact credentials inside helper sources stored by earlier versions.
 
 ## [0.3.0] - 2026-10-30
 
