@@ -20,7 +20,7 @@ const run = (command, args, env = {}) => {
 try {
   await cp(source, dir, {
     recursive: true,
-    filter: path => !["node_modules", ".git", ".pi", ".test-dist", "pi-compound-engineering"].includes(basename(path)),
+    filter: path => !["node_modules", ".git", ".pi", ".test-dist"].includes(basename(path)),
   });
   const rootManifest = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
   rootManifest.devDependencies = {
