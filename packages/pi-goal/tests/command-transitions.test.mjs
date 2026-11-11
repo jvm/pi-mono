@@ -129,6 +129,46 @@ test("/goal budgets accept k/m suffixes and separators on create and update", as
   assert.equal((await s.goal()).tokenBudget, 50_000);
 });
 
+async function budgetLimitedSession(t) {
+  const at = new Date(Date.now() - 60_000).toISOString();
+  const usage = { type: "message", id: "a1", timestamp: new Date(Date.now() - 30_000).toISOString(), message: { role: "assistant", usage: { totalTokens: 20 } } };
+  const s = await session([create(at, 10)], [usage]);
+  assert.equal((await s.goal()).status, "budget_limited", "fixture starts over budget");
+  return s;
+}
+
+const continuations = (s) => s.pi.messages.filter(({ message }) => message.customType === "pi-goal-context");
+
+test("raising or clearing the budget of a budget-limited goal resumes it and schedules continuation", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const args of ["budget 50", "budget 1k", "budget clear"]) {
+    const s = await budgetLimitedSession(t);
+    const time = (await s.goal()).timeUsedSeconds;
+    await s.command(args);
+    const goal = await s.goal();
+    assert.equal(goal.status, "active", args);
+    assert.ok(goal.timeUsedSeconds >= time && goal.timeUsedSeconds < time + 5, `${args}: elapsed time is kept`);
+    assert.equal(s.reloaded().status, "active", `${args}: resume is persisted`);
+    assert.match(s.ctx.ui.notifications.at(-1).message, /Goal resumed\./, args);
+    t.mock.timers.tick(1);
+    assert.equal(continuations(s).length, 1, `${args}: one continuation`);
+    assert.equal(continuations(s)[0].options.triggerTurn, true);
+    await s.close();
+  }
+});
+
+test("a budget still at or below usage keeps the goal budget-limited", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const args of ["budget 15", "budget 20"]) {
+    const s = await budgetLimitedSession(t);
+    await s.command(args);
+    assert.equal((await s.goal()).status, "budget_limited", args);
+    t.mock.timers.tick(1);
+    assert.equal(continuations(s).length, 0, args);
+    await s.close();
+  }
+});
+
 test("a legacy active edit entry no longer erases the accrued active segment on reload", () => {
   const at = hourAgo();
   const branch = [create(at), { schemaVersion: 1, kind: "edit", goalId: "g", objective: "next", status: "active", at: new Date().toISOString() }]

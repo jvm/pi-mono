@@ -147,8 +147,20 @@ function setBudget(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime: Comm
     appendGoalMutation(pi, limited);
     next = applyGoalMutation(next, limited)!;
   }
+  // Raising or clearing the budget of a budget-limited goal removes the only
+  // reason it stopped, so resume it as /goal resume would.
+  const resume = next.status === "budget_limited" && (next.tokenBudget == null || next.tokensUsed < next.tokenBudget);
+  if (resume) {
+    const resumedAt = nowIso();
+    const time = realizedTimeUsed(next, Date.parse(resumedAt));
+    const resumed = statusMutation(next, "active", time, resumedAt, transitionMeta("command:/goal budget", next, time, resumedAt));
+    appendGoalMutation(pi, resumed);
+    next = applyGoalMutation(next, resumed)!;
+  }
   runtime.setGoal(next);
-  runtime.afterGoalChanged(ctx, budget.value == null ? "Goal budget cleared." : `Goal budget set to ${budget.value}.`);
+  const event = budget.value == null ? "Goal budget cleared." : `Goal budget set to ${budget.value}.`;
+  runtime.afterGoalChanged(ctx, resume ? `${event} Goal resumed.` : event);
+  if (resume) runtime.scheduleContinuation(ctx, "resumed");
 }
 
 function accountCurrent(pi: ExtensionAPI, ctx: ExtensionCommandContext, goal: GoalState | null): GoalState | null {

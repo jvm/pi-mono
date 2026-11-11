@@ -39,8 +39,8 @@ pi -e ./packages/pi-goal/extensions/index.ts
 - `/goal pause` — pause automatic continuation.
 - `/goal resume` — resume automatic continuation.
 - `/goal clear` — clear the current branch goal.
-- `/goal budget 50000` — set/update token budget.
-- `/goal budget clear` — remove token budget.
+- `/goal budget 50000` — set/update token budget. A `budget_limited` goal resumes when the new budget is above current usage.
+- `/goal budget clear` — remove token budget. A `budget_limited` goal resumes.
 
 Token budgets are positive whole numbers of tokens. They accept `k` and `m`
 suffixes and `,` or `_` separators, for example `50k`, `1.5m`, or `50,000`.
