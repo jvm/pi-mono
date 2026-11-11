@@ -268,13 +268,23 @@ test("queued SDK steer releases a long dependency wait without stopping the proc
   assert.deepEqual(h.errors, []);
 });
 
-test("service mode is immediate, silent on exit, and does not promise readiness", async t => {
+test("service mode is immediate, silent on exit, and does not promise readiness", bounded, async t => {
   const h = await fixture(t, { after: [piProcesses] });
-  const launched = await h.run("bash", { command: "sleep 0.2; printf service-output", mode: "service", title: "Development server" });
+  // A file gate keeps the service running until the launch result is checked.
+  const launched = await h.run("bash", {
+    command: "while ! test -f service-ready; do sleep 0.02; done; printf service-output",
+    mode: "service", title: "Development server",
+  });
   assert.equal(dataOf(launched).status, "running");
   assert.equal(dataOf(launched).completion_delivery, "manual");
   assert.match(textOf(launched), /Check readiness separately/);
-  await delay(350);
+  await writeFile(join(h.ctx.cwd, "service-ready"), "");
+  // Wait for the exit itself, bounded, instead of a fixed sleep.
+  const [exit] = dataOf(await h.run("process_wait", {
+    session_ids: [dataOf(launched).session_id], timeout_ms: 15_000,
+  })).processes;
+  assert.equal(exit.status, "exited");
+  await h.session.waitForIdle();
   assert.equal(notices(h).length, 0);
   const output = dataOf(await h.run("process_output", { session_id: dataOf(launched).session_id }));
   assert.equal(output.output, "service-output");

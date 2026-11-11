@@ -188,7 +188,10 @@ export class ProcessRuntime {
       try { options.started?.(job.id); } catch { /* progress cannot change execution */ }
       const result = await this.read(job, waitMs, maxBytes, signal, options.yieldOnInput);
       if (options.yieldOnInput?.aborted && result.status === "running") result.wait_status = "interrupted_by_input";
-      job.detached = result.status === "running" || options.mode === "background";
+      // The requested mode decides detachment, not whether the startup read
+      // outlasted the command: a service that fails during startup is still
+      // detached work whose failure the human has not seen.
+      job.detached = result.status === "running" || options.mode === "background" || options.mode === "service";
       this.stateChanged();
       this.maybeNotify(job);
       this.evict();
