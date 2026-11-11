@@ -7,11 +7,12 @@ import { ProcessRuntime } from "../src/runtime.ts";
 import { ProcessManager } from "../src/process-manager.ts";
 import { ProcessPanel } from "../src/process-panel.ts";
 import { ProcessDisplay } from "../src/process-widget.ts";
+import { changes, until } from "./process-fixture.mjs";
 
-async function eventually(check) {
-  for (let i = 0; i < 150; i++) { if (check()) return; await delay(20); }
-  assert.ok(check(), "expected process/UI transition");
-}
+// Wait for the runtime lifecycle/output event, not a polling window; the test
+// timeout bounds a missing event.
+const bounded = { timeout: 30_000 };
+const lifecycle = (rt, check) => until(listener => rt.subscribe(listener), check);
 const spawn = (rt, command, mode = "foreground", timeout = 5000, title) =>
   rt.start(command, process.cwd(), false, timeout, false, mode === "foreground" ? timeout + 1000 : 0,
     16_000, undefined, mode === "background" ? "steer" : undefined, { mode, title });
@@ -25,20 +26,21 @@ function setup(t, limits) {
   } }, rt);
   let closed = 0, redraws = 0;
   const removed = [];
+  const redrawn = changes();
   const manager = new ProcessManager(rt, ids => removed.push(...ids), () => closed++,
-    () => redraws++, () => 20);
+    () => { redraws++; redrawn.notify(); }, () => 20);
   t.after(async () => { manager.dispose(); display.dispose(); await rt.close(); });
   return { rt, manager, statuses, removed, closed: () => closed, redraws: () => redraws,
-    text: () => manager.render(200).join("\n") };
+    text: () => manager.render(200).join("\n"), redrawn: check => until(redrawn.subscribe, check) };
 }
 
-test("viewing/acknowledging running output cannot suppress a later failure", async t => {
+test("viewing/acknowledging running output cannot suppress a later failure", bounded, async t => {
   const h = setup(t);
   const job = await spawn(h.rt, "sleep 0.2; printf failure-output; exit 7", "service");
   h.manager.handleInput("\r");
   h.manager.handleInput("a");
   h.manager.handleInput("A");
-  await eventually(() => h.rt.views()[0]?.attention === "needs_attention");
+  await lifecycle(h.rt, () => h.rt.views()[0]?.attention === "needs_attention");
   assert.equal(h.statuses.get("pi-processes-results"), undefined);
   h.manager.handleInput("r");
   assert.match(h.text(), /failure-output/);
@@ -84,11 +86,11 @@ test("intentional stops are distinct from signals/timeouts and never clear an ex
   assert.equal(h.rt.views()[0].status, "running", "cancel must not signal");
   h.manager.handleInput("s");
   h.manager.handleInput("y");
-  await eventually(() => h.rt.views()[0].stopped && h.rt.views()[0].status === "exited");
+  await lifecycle(h.rt, () => h.rt.views()[0].stopped && h.rt.views()[0].status === "exited");
   assert.equal(h.rt.views()[0].attention, "none");
   assert.equal(h.rt.output(stopped.session_id, 0, 1024).stopped, true);
   const timed = await spawn(h.rt, "sleep 30", "service", 100);
-  await eventually(() => h.rt.views().find(p => p.session_id === timed.session_id)?.status === "exited");
+  await lifecycle(h.rt, () => h.rt.views().find(p => p.session_id === timed.session_id)?.status === "exited");
   assert.equal(h.rt.views().find(p => p.session_id === timed.session_id).attention, "needs_attention");
   const signal = await spawn(h.rt, "kill -TERM $$");
   assert.equal(h.rt.views().find(p => p.session_id === signal.session_id).attention, "needs_attention");
@@ -229,12 +231,12 @@ for (const key of ["t", "f"]) {
   });
 }
 
-test("live screen coalesces output updates, honors selection keys, bounds rows and releases timers", async t => {
+test("live screen coalesces output updates, honors selection keys, bounds rows and releases timers", bounded, async t => {
   const h = setup(t);
   const job = await spawn(h.rt, "printf first; sleep 0.2; printf latest", "service");
   h.manager.handleInput("\r");
   h.manager.handleInput("f");
-  await eventually(() => h.text().includes("latest"));
+  await h.redrawn(() => h.text().includes("latest"));
   assert.ok(h.redraws() > 0);
   for (const width of [1, 4, 20, 80]) {
     assert.ok(h.manager.render(width).length <= 20);
@@ -252,14 +254,15 @@ test("live screen coalesces output updates, honors selection keys, bounds rows a
   h.rt.remove(job.session_id); // dispose released the viewer pin
 });
 
-test("an open human viewer never blocks or consumes automatic completion", async t => {
+test("an open human viewer never blocks or consumes automatic completion", bounded, async t => {
   const delivered = [];
-  const rt = new ProcessRuntime(result => delivered.push(result));
+  const completed = changes();
+  const rt = new ProcessRuntime(result => { delivered.push(result); completed.notify(); });
   const manager = new ProcessManager(rt, () => {}, () => {}, () => {}, () => 12);
   t.after(async () => { manager.dispose(); await rt.close(); });
   const job = await spawn(rt, "sleep 0.2; printf delivered-with-viewer-open", "background");
   manager.handleInput("\r");
-  await eventually(() => delivered.length === 1);
+  await until(completed.subscribe, () => delivered.length === 1);
   assert.equal(delivered[0].output, "delivered-with-viewer-open");
   assert.throws(() => rt.remove(job.session_id), /in use/, "the UI still protects retention");
   manager.handleInput("\x1b");

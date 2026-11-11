@@ -5,27 +5,32 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import piProcesses from "../extensions/index.ts";
 import { ProcessRuntime } from "../src/runtime.ts";
-import { fixture, textOf } from "./process-fixture.mjs";
+import { changes, fixture, textOf, until } from "./process-fixture.mjs";
 import { requestBody } from "../../../tests/codex-harness.mjs";
 
 const dataOf = result => result.structuredContent ?? result.details ?? JSON.parse(textOf(result));
 const pushed = body => JSON.stringify(body.input).includes("Background process completed.");
-async function eventually(check) {
-  for (let i = 0; i < 150; i++) {
-    if (check()) return;
-    await delay(20);
-  }
-  assert.ok(check(), "completion did not reach the expected boundary");
+// A missing event fails through the test timeout instead of a polling window.
+const bounded = { timeout: 30_000 };
+
+/** Runtime whose completion callback is an explicit signal for the test. */
+function observedRuntime() {
+  const sent = [];
+  const changed = changes();
+  const rt = new ProcessRuntime((...args) => { sent.push(args); changed.notify(); });
+  return { rt, sent, delivered: count => until(changed.subscribe, () => sent.length === count) };
 }
 
 async function harness(t, options = {}) {
   const sent = [];
   const requests = [];
+  const changed = changes();
   const extension = pi => piProcesses(new Proxy(pi, {
     get(target, key) {
       if (key === "sendMessage") return (message, delivery) => {
         sent.push({ message, delivery });
         target.sendMessage(message, delivery);
+        changed.notify();
       };
       return Reflect.get(target, key);
     },
@@ -34,15 +39,15 @@ async function harness(t, options = {}) {
   const fetch = globalThis.fetch;
   globalThis.fetch = (url, init) => {
     requests.push(requestBody(init));
+    changed.notify();
     return fetch(url, init);
   };
-  return { ...h, sent, requests };
+  return { ...h, sent, requests, until: check => until(changed.subscribe, check) };
 }
 
 for (const tty of [false, true]) {
-  test(`${tty ? "PTY" : "pipe"} completion tail survives earlier polling and reports bounded UTF-8 loss`, async t => {
-    const sent = [];
-    const rt = new ProcessRuntime((...args) => sent.push(args));
+  test(`${tty ? "PTY" : "pipe"} completion tail survives earlier polling and reports bounded UTF-8 loss`, bounded, async t => {
+    const { rt, sent, delivered } = observedRuntime();
     t.after(() => rt.close());
     const job = await rt.start(
       "printf early; sleep 0.3; printf '界界界'; exit 9",
@@ -50,7 +55,7 @@ for (const tty of [false, true]) {
     );
     const early = await rt.poll(job.session_id, 100, 1024);
     assert.equal(job.output + early.output, "early");
-    await eventually(() => sent.length === 1);
+    await delivered(1);
     const [completion, wake, mode] = sent[0];
     assert.equal(mode, "steer");
     assert.equal(wake, false);
@@ -64,9 +69,8 @@ for (const tty of [false, true]) {
   });
 }
 
-test("explicit completion includes previously polled output and is suppressed for foreground/shutdown", async t => {
-  const sent = [];
-  const rt = new ProcessRuntime((...args) => sent.push(args));
+test("explicit completion includes previously polled output and is suppressed for foreground/shutdown", bounded, async t => {
+  const { rt, sent, delivered } = observedRuntime();
   t.after(() => rt.close());
   const foreground = await rt.start("printf foreground", process.cwd(), false, 5000, false, 1000, 1024, undefined, "steer");
   assert.equal(foreground.output, "foreground");
@@ -74,7 +78,7 @@ test("explicit completion includes previously polled output and is suppressed fo
   const job = await rt.start("printf early; sleep 0.2; printf late", process.cwd(), false, 5000, false, 0, 1024, undefined, "followUp");
   const early = await rt.poll(job.session_id, 100, 1024);
   assert.equal(job.output + early.output, "early");
-  await eventually(() => sent.length === 1);
+  await delivered(1);
   assert.equal(sent[0][0].output, "earlylate");
   assert.equal((await rt.poll(job.session_id, 0, 1024)).output, "late");
   await rt.start("sleep 30", process.cwd(), false, 5000, false, 0, 1024, undefined, "steer");
@@ -95,7 +99,7 @@ test("execution mode is validated before startup through direct and codemode cal
   assert.deepEqual(dataOf(await h.run("process_list", {})).processes, []);
 });
 
-test("real Pi codemode completion pushes bounded output through DCG and the provider serializer", async t => {
+test("real Pi codemode completion pushes bounded output through DCG and the provider serializer", bounded, async t => {
   const h = await harness(t);
   const args = {
     command: "while ! test -f finish; do sleep 0.02; done; printf codemode-result",
@@ -108,7 +112,7 @@ test("real Pi codemode completion pushes bounded output through DCG and the prov
   const session_id = textOf(launch).match(/"session_id"\s*:\s*"([^"]+)"/)[1];
   const before = h.requests.length;
   await writeFile(join(h.ctx.cwd, "finish"), "");
-  await eventually(() => h.requests.slice(before).some(pushed));
+  await h.until(() => h.requests.slice(before).some(pushed));
   await h.session.waitForIdle();
   assert.equal(h.sent.length, 1);
   assert.equal(h.sent[0].message.details.processes[0].output, "e-result");
@@ -122,22 +126,22 @@ test("real Pi codemode completion pushes bounded output through DCG and the prov
   assert.deepEqual(h.errors, []);
 });
 
-test("completion capture never exceeds 64,000 bytes, even with a larger runtime budget", async t => {
-  const sent = [];
-  const rt = new ProcessRuntime(data => sent.push(data));
+test("completion capture never exceeds 64,000 bytes, even with a larger runtime budget", bounded, async t => {
+  const { rt, sent, delivered } = observedRuntime();
   t.after(() => rt.close());
   const job = await rt.start("sleep 0.1; head -c 70000 /dev/zero | tr '\\000' x",
     process.cwd(), false, 5000, false, 0, 100_000, undefined, "steer");
-  await eventually(() => sent.length === 1);
-  assert.equal(Buffer.byteLength(sent[0].output), 64_000);
-  assert.equal(sent[0].dropped_bytes, 6000);
+  await delivered(1);
+  const [completion] = sent[0];
+  assert.equal(Buffer.byteLength(completion.output), 64_000);
+  assert.equal(completion.dropped_bytes, 6000);
   const polled = await rt.poll(job.session_id, 0, 100_000);
   assert.equal(Buffer.byteLength(polled.output), 70_000);
   assert.equal(polled.dropped_bytes, 0);
 });
 
 for (const reason of ["kill", "timeout"]) {
-  test(`real Pi ${reason} preserves background delivery ownership`, async t => {
+  test(`real Pi ${reason} preserves background delivery ownership`, bounded, async t => {
     const h = await harness(t);
     const job = dataOf(await h.run("bash", {
       command: "printf stop-result; sleep 30", mode: "background",
@@ -150,8 +154,7 @@ for (const reason of ["kill", "timeout"]) {
       assert.equal(dataOf(await h.run("process_output", { session_id: job.session_id })).status, "exited");
       return;
     }
-    await eventually(() => h.sent.length === 1);
-    await eventually(() => h.requests.some(pushed));
+    await h.until(() => h.sent.length === 1 && h.requests.some(pushed));
     await h.session.waitForIdle();
     const completion = h.sent[0].message.details.processes[0];
     assert.equal(completion.output, "stop-result");

@@ -173,8 +173,14 @@ test("managed bash PTY input still requires per-write RPC approval", async t => 
   assert.equal(denied.isError, true);
   approve = true;
   const accepted = await h.run("write_stdin", { session_id, chars: "approved\n", yield_time_ms: 1000 });
-  assert.match(dataOf(accepted).output, /received:approved/);
-  assert.doesNotMatch(dataOf(accepted).output, /rejected/);
+  assert.equal(accepted.isError, false);
+  // The yield window may end before the shell answers; wait for its exit and
+  // read the retained, non-consuming log instead of one bounded poll.
+  const finished = dataOf(await h.run("process_wait", { session_ids: [session_id] }));
+  assert.equal(finished.processes[0].status, "exited");
+  const output = dataOf(await h.run("process_output", { session_id })).output;
+  assert.match(output, /received:approved/);
+  assert.doesNotMatch(output, /rejected/);
   assert.equal(h.confirmations.length, 2);
   assert.equal(h.checks.length, 1);
 });
