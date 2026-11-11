@@ -45,12 +45,24 @@ const BILLING_PATTERNS = [
   /credits? exhausted/i,
 ];
 
+// Secondary auth evidence for failures that carry no HTTP status, and for
+// providers that report a bad key as HTTP 400 (Google). Covers the wording of
+// OpenAI, Anthropic, Google, Bedrock, Mistral, OpenRouter and generic gateways.
 const AUTH_PATTERNS = [
-  /invalid api key/i,
-  /unauthorized/i,
-  /forbidden/i,
-  /authentication/i,
+  /\b(?:invalid|incorrect|missing|expired|revoked) (?:api[_\s-]?key|x-api-key|access token|auth(?:entication)? token|credentials?)\b/i,
+  /\binvalid[_\s-]api[_\s-]key\b/i,
+  /\bapi key not valid\b/i,
+  /\bAPI_KEY_INVALID\b/,
+  /\bauthentication[_\s-](?:error|failed|required)\b/i,
+  /\b(?:unauthorized|unauthenticated)\b/i,
+  /\bpermission[_\s-]denied\b/i,
+  /\bsecurity token included in the request is invalid\b/i,
+  /\b(?:UnrecognizedClientException|AccessDeniedException)\b/,
+  /\bno auth credentials found\b/i,
 ];
+
+// Some gateways report throttling as HTTP 403; that is a limit, not an auth failure.
+const RATE_LIMIT_TEXT = /\brate[_\s-]?limit|\btoo many requests\b|\bthrottl/i;
 
 export function classifyProviderLimit(input: ProviderLimitInput): ProviderLimitClassification {
   const status = input.status;
@@ -63,11 +75,16 @@ export function classifyProviderLimit(input: ProviderLimitInput): ProviderLimitC
   if (matchesAny(text, USAGE_LIMIT_PATTERNS)) return { kind: "usage_limit", pause: true, reason: "provider usage limit reached", retryAfterSeconds, resetHint };
   if (matchesAny(text, QUOTA_PATTERNS)) return { kind: "quota_exceeded", pause: true, reason: "provider quota exceeded", retryAfterSeconds, resetHint };
   if (matchesAny(text, BILLING_PATTERNS)) return { kind: "billing_required", pause: true, reason: "provider billing or balance limit", retryAfterSeconds, resetHint };
-  if ((status === 401 || status === 403) && matchesAny(text, AUTH_PATTERNS)) return { kind: "auth_required", pause: true, reason: "provider authentication failed", retryAfterSeconds, resetHint };
+  // The HTTP status is the primary auth signal: providers word a bad key differently.
+  if (status === 401) return { kind: "auth_required", pause: true, reason: "provider authentication failed", retryAfterSeconds, resetHint };
+  if (status === 403 && RATE_LIMIT_TEXT.test(text)) return { kind: "rate_limit", pause: true, reason: "provider returned a rate limit error", retryAfterSeconds, resetHint };
+  if (status === 403) return { kind: "auth_required", pause: true, reason: "provider denied access", retryAfterSeconds, resetHint };
   if (status === 402) return { kind: "billing_required", pause: true, reason: "provider payment required", retryAfterSeconds, resetHint };
   if (status === 429) return { kind: "rate_limit", pause: true, reason: "provider returned HTTP 429", retryAfterSeconds, resetHint };
   if (status && status >= 500) return { kind: "provider_error", pause: false, reason: `provider returned HTTP ${status}`, retryAfterSeconds, resetHint };
   if (/\b429\b/.test(text) && /rate limit|too many requests|limit/i.test(text)) return { kind: "rate_limit", pause: true, reason: "provider returned a rate limit error", retryAfterSeconds, resetHint };
+  // Wording is only a fallback when no status says otherwise (or a 400, which Google uses for bad keys).
+  if ((status == null || status === 400) && matchesAny(text, AUTH_PATTERNS)) return { kind: "auth_required", pause: true, reason: "provider authentication failed", retryAfterSeconds, resetHint };
   return { kind: "none", pause: false, retryAfterSeconds, resetHint };
 }
 

@@ -173,6 +173,66 @@ test("authentication failures pause without claiming a usage limit", async () =>
   assert.match(goalNotices(f)[0].message.content, /provider authentication failed on fixture-a\/model-1/);
 });
 
+test("an HTTP 401 or 403 pauses as an authentication failure whatever the provider's wording", async () => {
+  for (const [status, errorMessage] of [
+    [401, '401 {"error":{"message":"Incorrect API key provided: sk-fixt*****. You can find your API key at https://platform.openai.com/account/api-keys.","type":"invalid_request_error","code":"invalid_api_key"}}'],
+    [401, '401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}'],
+    [401, "401: {\"message\":\"No auth credentials found\"}"],
+    [401, "terminated"],
+    [403, '403 {"error":{"code":"unsupported_country_region_territory","message":"Country, region, or territory not supported"}}'],
+    [403, '403 {"error":{"code":403,"message":"Permission denied on resource project fixture.","status":"PERMISSION_DENIED"}}'],
+  ]) {
+    const f = await fixture();
+    await f.failedRun({ status, errorMessage });
+    assert.equal(await statusOf(f), "paused", errorMessage);
+    const { providerLimit } = f.pi.entries.at(-1).data.meta;
+    assert.equal(providerLimit.kind, "auth_required", errorMessage);
+    assert.match(providerLimit.reason, /^provider (?:authentication failed|denied access) on fixture-a\/model-1/);
+    assert.doesNotMatch(goalNotices(f)[0].message.content, /usage\/rate limit/);
+  }
+});
+
+test("the HTTP status of the response is auth evidence when the error text carries none", async () => {
+  const f = await fixture();
+  // Pi reports the HTTP response, then an error whose text has no status prefix.
+  await f.failedRun({ status: 401, errorMessage: "Stream closed before a response was received" });
+  assert.equal(await statusOf(f), "paused");
+  assert.equal(f.pi.entries.at(-1).data.meta.providerLimit.kind, "auth_required");
+});
+
+test("auth wording is a fallback only for failures without a contradicting status", async () => {
+  for (const errorMessage of [
+    "API key not valid. Please pass a valid API key.",
+    '400 {"error":{"code":400,"message":"API key not valid.","status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID"}]}}',
+    "The security token included in the request is invalid.",
+  ]) {
+    const f = await fixture();
+    await f.failedRun({ status: 200, errorMessage });
+    assert.equal(f.pi.entries.at(-1).data.meta?.providerLimit?.kind, "auth_required", errorMessage);
+  }
+  // A server error that mentions authentication is a server error, and a 429 stays a limit.
+  const server = await fixture();
+  await server.failedRun({ status: 500, errorMessage: "500 authentication service unavailable" });
+  assert.equal(await statusOf(server), "active");
+  const limited = await fixture();
+  await limited.failedRun({ status: 429, errorMessage: "429 Unauthorized burst: too many requests" });
+  assert.equal(await statusOf(limited), "usage_limited");
+  const throttled = await fixture();
+  await throttled.failedRun({ status: 403, errorMessage: "403 Forbidden: rate limit exceeded" });
+  assert.equal(await statusOf(throttled), "usage_limited");
+});
+
+test("auth evidence never comes from headers, URLs, or model IDs", async () => {
+  const f = await fixture();
+  await f.failedRun({
+    status: 500,
+    headers: { "www-authenticate": "Bearer error=\"invalid_token\"", "x-auth-unauthorized": "1" },
+    errorMessage: "Request to https://unauthorized.example/invalid-api-key failed, reason: socket hang up",
+    model: "unauthorized-invalid-api-key",
+  });
+  assert.equal(await statusOf(f), "active");
+});
+
 test("cancelled runs do not count as provider failures", async () => {
   const f = await fixture();
   for (let run = 0; run < 3; run++) {
@@ -251,6 +311,20 @@ test("a run that exhausts Pi's retries counts once and is not usage-limited", { 
   await h.session.waitForIdle();
   assert.equal(h.retries, 3);
   assert.equal(runtimeState(h).status, "active", "one failed run is below the pause threshold");
+});
+
+test("a real 401 with OpenAI's wording pauses on the first failed run", { timeout: 10_000 }, async (t) => {
+  const h = await runtime(t, retry);
+  script(t, h, [() => new Response(JSON.stringify({ error: { message: "Incorrect API key provided: sk-fixt*****.", type: "invalid_request_error", code: "invalid_api_key" } }), {
+    status: 401,
+    headers: { "content-type": "application/json" },
+  })]);
+  await h.session.prompt("Use a revoked key.");
+  await h.session.waitForIdle();
+  const state = runtimeState(h);
+  assert.equal(state.status, "paused");
+  const transition = h.sessionManager.getBranch().filter((entry) => entry.type === "custom" && entry.customType === "pi-goal").at(-1);
+  assert.equal(transition.data.meta.providerLimit.kind, "auth_required");
 });
 
 test("real billing and quota errors still mark the goal usage-limited", async () => {
