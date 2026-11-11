@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getAgentDir, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { redactStoredSource } from "./source.js";
 
 export interface ScoutRepo {
   id: string;
@@ -58,26 +59,30 @@ export async function mutateState<T>(
   });
 }
 
-export async function pruneMissingRepos(state: ScoutState): Promise<{ state: ScoutState; removed: ScoutRepo[] }> {
+export async function pruneMissingRepos(state: ScoutState): Promise<{ state: ScoutState; removed: ScoutRepo[]; redacted: number }> {
   const repos: ScoutRepo[] = [];
   const removed: ScoutRepo[] = [];
   const now = new Date().toISOString();
+  let redacted = 0;
 
   for (const repo of state.repos) {
     if (await pathExists(repo.path)) {
-      repos.push({ ...repo, lastSeenAt: now });
+      // Records from earlier versions may hold origin credentials.
+      const source = redactStoredSource(repo.source);
+      if (source !== repo.source) redacted++;
+      repos.push({ ...repo, source, lastSeenAt: now });
     } else {
       removed.push(repo);
     }
   }
 
-  return { state: { repos }, removed };
+  return { state: { repos }, removed, redacted };
 }
 
 export async function loadPrunedState(): Promise<ScoutState> {
   return withFileMutationQueue(STATE_PATH, async () => {
-    const { state, removed } = await pruneMissingRepos(await loadState());
-    if (removed.length > 0) await saveState(state);
+    const { state, removed, redacted } = await pruneMissingRepos(await loadState());
+    if (removed.length > 0 || redacted > 0) await saveState(state);
     return state;
   });
 }
