@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Read and write global skillful settings in Pi's agent directory, honoring `PI_CODING_AGENT_DIR`, instead of always using `~/.pi/agent`.
+
 ## [0.5.1] - 2026-10-30
 
 ### Changed

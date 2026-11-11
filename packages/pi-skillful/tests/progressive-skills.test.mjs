@@ -6,6 +6,8 @@ import test from "node:test";
 
 const home = await mkdtemp(join(tmpdir(), "pi-skillful-progressive-test-"));
 process.env.HOME = home;
+// Resolve the default agent directory under the temporary HOME.
+delete process.env.PI_CODING_AGENT_DIR;
 
 const { default: progressiveSkills } = await import(
   "../.test-dist/src/extensions/progressive-skills.js"

@@ -61,7 +61,7 @@ Configuration is stored under the `skillful` key in Pi settings:
 
 Supported scopes:
 
-- Global: `~/.pi/agent/settings.json`
+- Global: `settings.json` in Pi's agent directory (`~/.pi/agent/settings.json` by default, or `$PI_CODING_AGENT_DIR/settings.json` when set)
 - Project: `.pi/settings.json`
 
 Project visibility and toggle slots inherit global settings until changed in the Project tab. When either is changed, Pi Skillful writes a full project override containing both `hiddenSkills` and `toggleSlots`. If the project state is changed back to match global, those project override keys are removed so the project inherits global again.

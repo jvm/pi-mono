@@ -34,6 +34,6 @@ Four features are wired in `extensions/index.ts`. There is no runtime build step
 
 | Module | Role |
 |---|---|
-| `src/config.ts` | Reads/writes `skillful.hiddenSkills`, `skillful.toggleSlots`, and `skillful.toggleModifier` in `~/.pi/agent/settings.json` and `<cwd>/.pi/settings.json`. Project settings are read only when trusted. Each key is scoped independently: a project value, when defined, replaces the global value; otherwise the global value applies. |
+| `src/config.ts` | Reads/writes `skillful.hiddenSkills`, `skillful.toggleSlots`, and `skillful.toggleModifier` in `<getAgentDir()>/settings.json` and `<cwd>/<CONFIG_DIR_NAME>/settings.json`. Project settings are read only when trusted. Each key is scoped independently: a project value, when defined, replaces the global value; otherwise the global value applies. |
 | `src/skills.ts` | Lists loaded skills from Pi commands (`listLoadedSkills`, `sourceInfoToSkill`), classifies top-level skills (`isTopLevelSkill`), and reads a skill's `SKILL.md` into a `<skill>` block with frontmatter stripped (`readSkillBlock`). |
 | `src/install-telemetry.ts` | Best-effort install telemetry (root policy). |

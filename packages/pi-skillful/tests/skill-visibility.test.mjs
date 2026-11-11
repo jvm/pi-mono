@@ -9,6 +9,8 @@ import { Container, TuiAltScreen, TuiMainScreen, visibleWidth } from "@earendil-
 
 const home = await mkdtemp(join(tmpdir(), "pi-skillful-visibility-test-"));
 process.env.HOME = home;
+// Resolve the default agent directory under the temporary HOME.
+delete process.env.PI_CODING_AGENT_DIR;
 initTheme("dark");
 
 const {
