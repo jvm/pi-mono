@@ -440,9 +440,14 @@ export function registerAutomaticCompaction(pi: ExtensionAPI): void {
     // items carry the authoritative encrypted content; never use item.added.
     const streamed = [...attempt.items].sort(([a], [b]) => a - b);
     const output = streamed.length > 0 ? streamed.map(([, item]) => item) : response.output;
+    // Live GPT-6 responses re-encrypt reasoning items in the terminal output:
+    // same id and summary, different ciphertext than output_item.done. Pi keeps
+    // the done item, so compare everything except that opaque field.
+    const comparable = (items: unknown[]) => hash(sorted(items.map((item) =>
+      record(item) && item.type === "reasoning" ? { ...item, encrypted_content: null } : item)));
     if (streamed.some(([index], position) => index !== position) || !validOutput(output) ||
         (streamed.length > 0 && response.output.length > 0 &&
-          hash(sorted(response.output)) !== hash(sorted(output)))) {
+          comparable(response.output) !== comparable(output))) {
       attempt.invalid = true;
       return;
     }

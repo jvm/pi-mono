@@ -322,6 +322,36 @@ test("compaction off leaves Pi's effort updates and reasoning untouched", async 
   assert.equal(updates(requests[0].input).length, 1);
 });
 
+// Live GPT-6: response.completed re-encrypts reasoning items, so their ciphertext
+// differs from output_item.done. That must not pause compaction.
+test("re-encrypted reasoning in the terminal output keeps the checkpoint and compaction on", async t => {
+  const reasoning = (id, enc) => ({ id, type: "reasoning", content: [], encrypted_content: enc, summary: [] });
+  const done = [checkpoint("cmp_1"), reasoning("rs_1", "done-cipher"), checkpoint("cmp_2"), text("msg_1", "ok")];
+  const terminal = done.map(item => item.type === "reasoning" ? { ...item, encrypted_content: "terminal-cipher" } : item);
+  const requests = mockResponses(t, [response(done, { terminalOutput: terminal }), [text("msg_2", "next")]]);
+  const h = await harness({ thinkingLevel: "max" });
+  t.after(() => h.close());
+  await h.session.prompt("old");
+  await h.session.prompt("next");
+  const entry = h.manager.getBranch().find(e => e.type === "compaction");
+  assert.ok(entry, "checkpoint adopted");
+  assert.equal(requests[1].context_management?.[0]?.type, "compaction", "compaction not paused");
+  assert.deepEqual(requests[1].input.find(item => item.type === "compaction"), checkpoint("cmp_2"));
+  assert.deepEqual(h.errors, []);
+});
+
+test("a terminal output that differs in anything else still pauses compaction", async t => {
+  const done = [checkpoint("cmp_1"), text("msg_1", "ok")];
+  const terminal = [checkpoint("cmp_1"), text("msg_1", "different")];
+  const requests = mockResponses(t, [response(done, { terminalOutput: terminal }), [text("msg_2", "next")]]);
+  const h = await harness();
+  t.after(() => h.close());
+  await h.session.prompt("old");
+  await h.session.prompt("next");
+  assert.equal(h.manager.getBranch().some(e => e.type === "compaction"), false);
+  assert.equal(requests[1].context_management, undefined);
+});
+
 const rejected = () => new Response(JSON.stringify({ error: {
   message: "The 'configuration_update' item type is not supported with compaction.",
   type: "invalid_request_error", param: "input[2].type", code: "unsupported_value" } }),
