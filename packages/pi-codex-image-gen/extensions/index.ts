@@ -12,7 +12,7 @@ import { mkdir, open, writeFile, lstat } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "../src/string-enum.js";
 import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext, type ExtensionToolContext, type AgentToolUpdateCallback, type AgentToolResult, getAgentDir, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { reportInstallTelemetry } from "../src/install-telemetry.js";
