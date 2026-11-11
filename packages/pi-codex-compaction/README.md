@@ -20,12 +20,13 @@ checkpoint replay. Consumed structured intermediates do not enter conversation
 history unless the script prints them. Hidden/model-only tools stay outside
 nested discovery.
 
-Pi 1.4 emits chronological `configuration_update` items for reasoning effort.
-The adapter preserves exact updates with only `type` and `reasoning.effort`
-(`none`, `minimal`, `low`, `medium`, `high`, `xhigh`), including between a
-summary and retained assistant output. Unknown configuration remains
-unsupported and disables automatic adaptation. No host serializer or private
-API is patched.
+Pi emits chronological `configuration_update` items for reasoning effort.
+The adapter preserves exact updates with only `type` and `reasoning.effort`,
+including between a summary and retained assistant output. Any effort value is
+accepted, such as `none`, `xhigh` or `max` (thinking level max on GPT-6), so a
+new effort level does not silently turn automatic compaction off; the server
+validates the value. Other configuration shapes remain unsupported and disable
+automatic adaptation. No host serializer or private API is patched.
 
 **Pi 1.4 compatibility:** inline `additional_tools` are adapted automatically.
 A stable namespace base keeps tools available during compaction; later inline
@@ -167,7 +168,7 @@ Model eligibility is not proof of account availability.
 No default model is changed. See the [provider migration assessment](../pi-openai-reasoning/README.md#provider-migration-assessment)
 for the separate reasoning-update limitation.
 
-- Requests with unmappable inline tools, `configuration_update`, `compaction_trigger`, an existing
+- Requests with unmappable inline tools, non-effort `configuration_update`, `compaction_trigger`, an existing
   `context_management`, stateful continuation, truncation, background processing,
   or enabled multi-agent mode are not opted in.
 - Pi 1.4's inline tools need the automatic namespace base. Inline-only requests

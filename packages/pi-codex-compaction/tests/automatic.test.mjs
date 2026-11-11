@@ -34,7 +34,7 @@ function response(output, { id = "resp_1", status = "completed", malformed = fal
 }
 
 async function harness({ factories = [], enabled = true, settings = {}, sessionManager, modelId = "gpt-6-astra",
-  extensionLast = false } = {}) {
+  extensionLast = false, thinkingLevel = "low" } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "pi-auto-compact-"));
   const credentials = new InMemoryCredentialStore();
   await credentials.modify("openai", async () => ({ type: "api_key", key: "sk-fixture-not-a-real-key" }));
@@ -56,7 +56,7 @@ async function harness({ factories = [], enabled = true, settings = {}, sessionM
   });
   await loader.reload();
   const { session } = await createAgentSession({ cwd: dir, agentDir: dir, model, modelRuntime: runtime,
-    sessionManager: manager, settingsManager, resourceLoader: loader, thinkingLevel: "low" });
+    sessionManager: manager, settingsManager, resourceLoader: loader, thinkingLevel });
   await session.bindExtensions({ mode: "print", onError: (error) => errors.push(error) });
   if (enabled) await session.prompt("/server-compaction on 1000");
   else if (enabled === false) await session.prompt("/server-compaction off");
@@ -217,6 +217,55 @@ test("known reasoning configuration stays chronological across checkpoint replay
   assert.deepEqual(input[index + 1], update);
   assert.equal(input.slice(index + 2).find(item => item.type !== "configuration_update").id, "msg_effort");
   assert.deepEqual(h.errors, []);
+});
+
+// Regression #221: Pi maps thinking level max to effort max on GPT-5.6+/GPT-6 and
+// sends it in Pi's own configuration_update; compaction must stay enabled.
+test("Pi's own max-effort configuration update keeps server compaction and replays in order", async t => {
+  const requests = mockResponses(t, [[checkpoint(), text("msg_max", "kept")], [text("msg_next", "next")]]);
+  const h = await harness({ modelId: "gpt-6-sol", thinkingLevel: "max" });
+  t.after(() => h.close());
+  await h.session.prompt("old");
+  assert.deepEqual(requests[0].input.filter(item => item.type === "configuration_update"),
+    [{ type: "configuration_update", reasoning: { effort: "max" } }], "fixture needs Pi's native update");
+  assert.equal(requests[0].context_management?.[0]?.type, "compaction");
+  await h.session.prompt("next");
+  const input = requests[1].input;
+  const index = input.findIndex(item => item.type === "compaction");
+  assert.ok(index >= 0);
+  assert.equal(requests[1].context_management?.[0]?.type, "compaction");
+  assert.ok(input.slice(index + 1).some(item => item.id === "msg_max"));
+  assert.deepEqual(input.at(-1), { type: "configuration_update", reasoning: { effort: "max" } });
+  assert.deepEqual(h.errors, []);
+});
+
+for (const effort of ["max", "ultra"]) {
+  test(`a ${effort} reasoning update from an earlier transformer keeps server compaction`, async t => {
+    const requests = mockResponses(t, [[text("msg_1", "answer")]]);
+    const h = await harness({ extensionLast: true, factories: [pi => pi.on("before_provider_request", event => {
+      event.payload.input.push({ type: "configuration_update", reasoning: { effort } });
+    })] });
+    t.after(() => h.close());
+    await h.session.prompt("test");
+    assert.equal(requests[0].context_management?.[0]?.type, "compaction");
+    assert.deepEqual(requests[0].input.at(-1), { type: "configuration_update", reasoning: { effort } });
+  });
+}
+
+test("every installed public GPT-5/GPT-6 Responses model is eligible for server compaction", async t => {
+  const h = await harness({ enabled: null });
+  const ids = h.runtime.getModels("openai")
+    .filter(model => model.api === "openai-responses" && /^gpt-[56]/.test(model.id)).map(model => model.id);
+  await h.close();
+  assert.ok(ids.includes("gpt-6-sol") && ids.includes("gpt-5.6-sol"), `unexpected catalog: ${ids}`);
+  for (const modelId of ids) {
+    const requests = mockResponses(t, [[text("msg_1", "answer")]]);
+    const m = await harness({ enabled: null, modelId });
+    try {
+      await m.session.prompt("test");
+      assert.equal(requests[0].context_management?.[0]?.type, "compaction", modelId);
+    } finally { await m.close(); }
+  }
 });
 
 test("inline tool declarations automatically gain a stable namespace base and adopt checkpoints", async (t) => {

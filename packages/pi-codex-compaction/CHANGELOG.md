@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep automatic server compaction on when Pi sends a `max` reasoning-effort update (thinking level `max` on GPT-6 models). Effort updates accept any effort value instead of a fixed list, so future levels do not silently disable compaction ([#221](https://github.com/jvm/pi-mono/issues/221)).
+
 ## [0.2.5] - 2026-10-30
 
 ### Changed

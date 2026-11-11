@@ -175,13 +175,15 @@ function replay(payload: Item, checkpoint: Checkpoint, ctx: ExtensionContext, pr
   ] };
 }
 
-/** Pi 1.4 emits exact reasoning-effort updates at turn boundaries. Keep them
- * chronological; unknown configuration remains unsupported/fail-closed. */
+/** Pi emits exact reasoning-effort updates at turn boundaries. Keep them
+ * chronological; other configuration shapes remain unsupported/fail-closed.
+ * The effort value is the model's own vocabulary (Pi 1.5 adds `max`), so any
+ * bounded token is accepted: an allowlist would silently disable compaction
+ * whenever a model gains a new effort level. The server validates the value. */
 function reasoningUpdate(item: Item): boolean {
   return Object.keys(item).length === 2 && record(item.reasoning) &&
     Object.keys(item.reasoning).length === 1 &&
-    typeof item.reasoning.effort === "string" &&
-    ["none", "minimal", "low", "medium", "high", "xhigh"].includes(item.reasoning.effort);
+    typeof item.reasoning.effort === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(item.reasoning.effort);
 }
 
 function incompatible(payload: Item, supportedInline = false): boolean {
