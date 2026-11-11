@@ -3,7 +3,7 @@ import { basename, dirname, join } from "node:path";
 import { platform, tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { hasSecretUrlParts, parseGitHubShorthand, resolveSource, storedSourceKey, trimLeading, trimTrailing, validateRef } from "./source.js";
+import { fileUrlPath, hasSecretUrlParts, parseGitHubShorthand, resolveSource, storedSourceKey, trimLeading, trimTrailing, validateRef } from "./source.js";
 import { loadPrunedState, mutateState, type ScoutRepo } from "./state.js";
 
 export interface RegisterRepoOptions {
@@ -30,8 +30,12 @@ const GIT_TIMEOUT_MS = 120_000;
 // older hosts ignore the option.
 export const GIT_MAX_BUFFER = 1024 * 1024;
 // Never let configuration enable arbitrary-command transports, and fail
-// instead of prompting on a terminal that Pi's TUI owns.
-const GIT_SAFETY_ARGS = ["-c", "protocol.ext.allow=never", "-c", "credential.interactive=false"];
+// instead of prompting on a terminal that Pi's TUI owns. Git that supports
+// `credential.interactive` stops before prompting. Older Git ignores it and
+// asks `core.askPass`; `true` answers empty, so Git never falls back to the
+// terminal prompt. Credential helpers still run first. A `GIT_ASKPASS`
+// environment variable overrides `core.askPass` and is kept as the user's choice.
+const GIT_SAFETY_ARGS = ["-c", "protocol.ext.allow=never", "-c", "credential.interactive=false", "-c", "core.askPass=true"];
 const BATCH_SSH_ARGS = ["-c", "core.sshCommand=ssh -oBatchMode=yes"];
 
 /** The subset of `pi.exec` options Scout uses; `maxBuffer` exists from Pi 1.5. */
@@ -232,8 +236,9 @@ async function runGit(pi: ExtensionAPI, args: string[], signal: AbortSignal | un
   if (result.code !== 0) throw new Error(`Git ${step} failed (exit code ${result.code}). ${hint}`);
 }
 
+/** Reuse key; JSON keeps source and branch separate even when either contains a delimiter. */
 function repoKey(sourceKey: string, branch: string | undefined): string {
-  return `${sourceKey}#${branch ?? ""}`;
+  return JSON.stringify([sourceKey, branch ?? ""]);
 }
 
 function findByKey(repos: ScoutRepo[], key: string): ScoutRepo | undefined {
@@ -255,8 +260,10 @@ function inferName(source: string): string {
   // URL userinfo/query/fragment may contain credentials. Never use them as a
   // public name or destination basename, including origins without a path.
   if (source.includes("://")) {
-    try { source = new URL(source).pathname; }
-    catch { return "repo"; }
+    try {
+      const url = new URL(source);
+      source = url.protocol === "file:" ? fileUrlPath(source) : url.pathname;
+    } catch { return "repo"; }
   }
   const withoutTrailingSlash = trimTrailing(source, "/\\");
   const last = basename(withoutTrailingSlash).replace(/\.git$/i, "");
