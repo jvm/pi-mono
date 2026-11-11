@@ -169,6 +169,53 @@ test("a budget still at or below usage keeps the goal budget-limited", async (t)
   }
 });
 
+test("/goal pause rejects goals that are not running and leaves their state unchanged", async () => {
+  for (const [state, pattern] of [
+    ["complete", /complete and cannot be paused/],
+    ["paused", /already paused/],
+    ["blocked", /blocked and is not running/],
+    ["usage_limited", /usage limited and is not running/],
+    ["budget_limited", /budget limited and is not running/],
+  ]) {
+    const at = new Date().toISOString();
+    const s = await session([create(at, 10), status(state, 5, at)]);
+    const before = s.pi.entries.length;
+    await s.command("pause");
+    assert.equal((await s.goal()).status, state, state);
+    assert.equal(s.pi.entries.length, before, `${state}: nothing persisted`);
+    assert.match(s.ctx.ui.notifications.at(-1).message, pattern, state);
+    assert.equal(s.ctx.ui.notifications.at(-1).type, "error", state);
+  }
+});
+
+test("/goal resume rejects complete goals and exhausted budgets but resumes stopped goals", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const at = new Date().toISOString();
+  const complete = await session([create(at), status("complete", 5, at)]);
+  await complete.command("resume");
+  assert.equal((await complete.goal()).status, "complete");
+  assert.match(complete.ctx.ui.notifications.at(-1).message, /Goal is complete/);
+
+  const exhausted = await budgetLimitedSession(t);
+  await exhausted.command("resume");
+  assert.equal((await exhausted.goal()).status, "budget_limited");
+  assert.match(exhausted.ctx.ui.notifications.at(-1).message, /budget is exhausted \(20\/10 tokens\)/);
+  // Editing the objective must not reactivate a goal whose budget is still exhausted.
+  await exhausted.command("edit");
+  assert.equal((await exhausted.goal()).status, "budget_limited");
+  t.mock.timers.tick(1);
+  assert.equal(continuations(exhausted).length, 0);
+
+  for (const state of ["paused", "blocked", "usage_limited"]) {
+    const s = await session([create(at), status(state, 5, at)]);
+    await s.command("resume");
+    assert.equal((await s.goal()).status, "active", state);
+    t.mock.timers.tick(1);
+    assert.equal(continuations(s).length, 1, state);
+    await s.close();
+  }
+});
+
 test("a legacy active edit entry no longer erases the accrued active segment on reload", () => {
   const at = hourAgo();
   const branch = [create(at), { schemaVersion: 1, kind: "edit", goalId: "g", objective: "next", status: "active", at: new Date().toISOString() }]
