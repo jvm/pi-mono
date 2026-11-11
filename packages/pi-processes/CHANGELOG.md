@@ -5,6 +5,7 @@
 ### Fixed
 
 - Stop rejecting new managed commands in terminal mode after 32 failures that wait for `/processes` acknowledgment. Failed foreground results, already returned to the model, evict like other completed records; unacknowledged background and service failures evict last, oldest first. The record-cap error now appears only when every record is running or in use.
+- Keep a service that fails before its launch call returns in the last eviction group, like other unacknowledged service and background failures, so the record cap does not remove its error output first.
 - Wait for in-flight process launches when a session shuts down or reloads, so a command started during teardown cannot outlive the runtime or leave a record behind.
 
 ## [0.4.2] - 2026-11-03
