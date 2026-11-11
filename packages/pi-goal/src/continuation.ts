@@ -31,9 +31,10 @@ export class GoalContinuationScheduler {
         if (generation !== this.generation || ctx.signal?.aborted || ctx.hasPendingMessages()) return;
         if (ctx.sessionManager.getSessionId() !== sessionId) return;
         if (!ctx.isIdle()) {
-          // Pi releases the navigation operation only after ALL session_tree
-          // handlers return. A later async handler may still be finishing.
-          // agent_start or any invalidation clears this activation meanwhile.
+          // Pi releases navigation before session_tree, so a later handler
+          // may start another navigation or run. Wait for it: a nested
+          // session_tree, agent_start, or any invalidation clears this
+          // activation, and the leaf check below drops an abandoned branch.
           if (options.afterTree) this.timer = setTimeout(fire, 50);
           return;
         }
