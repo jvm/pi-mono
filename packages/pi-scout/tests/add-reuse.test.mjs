@@ -78,7 +78,7 @@ async function makeOrigin(name) {
   return { bare, work };
 }
 
-const SAFE = ["-c", "protocol.ext.allow=never", "-c", "credential.interactive=false"];
+const SAFE = ["-c", "protocol.ext.allow=never", "-c", "credential.interactive=false", "-c", "core.askPass=true"];
 const BATCH_SSH = ["-c", "core.sshCommand=ssh -oBatchMode=yes"];
 const EXEC_LIMITS = { timeout: 120_000, maxBuffer: 1024 * 1024 };
 
@@ -243,6 +243,146 @@ test("credentials persisted by earlier versions are redacted on load", async () 
   assert.match(stored, /https:\/\/fixture\.invalid\/legacy\.git/);
 });
 
+test("remote-helper and unknown-scheme sources are rejected before Git runs and never persisted", async () => {
+  const { add, calls } = loadScout(stubGit());
+  for (const source of [
+    "https::https://synthetic-user:synthetic-pass@fixture.invalid/team/helper.git",
+    "ext::sh -c touch% synthetic-pwned",
+    "fd::3",
+    "synthetic-helper::fixture.invalid/team/repo",
+    "synthetic-helper://fixture.invalid/team/repo",
+  ]) {
+    await assert.rejects(add({ source }), (error) => {
+      assert.match(error.message, /^Unsupported repository source/, source);
+      assert.doesNotMatch(error.message, /synthetic/, source);
+      return true;
+    });
+  }
+  assert.equal(calls.length, 0);
+  assert.doesNotMatch(await readFile(getScoutStatePath(), "utf8"), /synthetic/);
+
+  // Supported transports still clone.
+  for (const source of ["http://fixture.invalid/team/plain.git", "git://fixture.invalid/team/plain.git", "ssh://git@fixture.invalid/team/plain.git", "git+ssh://git@fixture.invalid/team/plain2.git"]) {
+    assert.equal((await add({ source })).structuredContent.status, "cloned", source);
+  }
+});
+
+test("remote-helper credentials persisted by earlier versions are redacted on load and the record is kept", async () => {
+  const clone = join(getScoutCloneRoot(), "legacy-helper");
+  await mkdir(clone, { recursive: true });
+  const state = await loadState();
+  const now = new Date().toISOString();
+  state.repos.push({ id: "legacy-helper", name: "legacy-helper", source: "https::https://synthetic-helper-user:synthetic-helper-pass@fixture.invalid/legacy.git?token=synthetic-helper-query", path: clone, createdAt: now, lastSeenAt: now });
+  await saveState(state);
+  const { tools } = loadScout();
+  const listed = await tools.get("scout_list").execute("call", {});
+  assert.ok(listed.structuredContent.repos.some(repo => repo.id === "legacy-helper"));
+  const stored = await readFile(getScoutStatePath(), "utf8");
+  assert.doesNotMatch(stored, /synthetic-helper/);
+  assert.match(stored, /"https::https:\/\/fixture\.invalid\/legacy\.git"/);
+});
+
+test("file URLs with escaped or literal # and ? keep their path when stored and reused", async () => {
+  const hashed = await makeOrigin("demo#one");
+  const plain = await makeOrigin("demo");
+  const { add } = loadScout();
+  const encoded = pathToFileURL(hashed.bare).href;
+  assert.match(encoded, /demo%23one\.git$/);
+  const first = await add({ source: encoded });
+  assert.equal(first.structuredContent.status, "cloned");
+  assert.equal(first.structuredContent.repo.name, "demo-one");
+  const stored =(await loadState()).repos.find(repo => repo.id === first.structuredContent.repo.id).source;
+  assert.equal(new URL(stored).hash, "", `stored ${stored} has no fragment`);
+
+  // Git reads `#` in a file URL literally, so every spelling is the same repository.
+  for (const source of [encoded, hashed.bare, `file://${hashed.bare}`]) {
+    assert.equal((await add({ source })).structuredContent.repo.id, first.structuredContent.repo.id, source);
+  }
+  const other = await add({ source: plain.bare });
+  assert.equal(other.structuredContent.status, "cloned", "the prefix path is a different repository");
+  assert.notEqual(other.structuredContent.repo.id, first.structuredContent.repo.id);
+
+  const question = await makeOrigin("demo?two");
+  const q = await add({ source: `file://${question.bare}` });
+  assert.equal(q.structuredContent.status, "cloned");
+  assert.equal((await add({ source: question.bare })).structuredContent.repo.id, q.structuredContent.repo.id);
+});
+
+test("file URLs stored unescaped by earlier builds are re-normalised on load", async () => {
+  const { bare } = await makeOrigin("legacy#hash");
+  const clone = join(getScoutCloneRoot(), "legacy-hash");
+  await mkdir(clone, { recursive: true });
+  const state = await loadState();
+  const now = new Date().toISOString();
+  state.repos.push({ id: "legacy-hash", name: "legacy-hash", source: `file://${bare}`, path: clone, createdAt: now, lastSeenAt: now });
+  await saveState(state);
+  const { add } = loadScout();
+  assert.equal((await add({ source: bare })).structuredContent.repo.id, "legacy-hash");
+  assert.ok((await loadState()).repos.some(repo => repo.id === "legacy-hash" && repo.source === pathToFileURL(bare).href));
+});
+
+const hasScript = process.platform === "linux" && await new Promise(resolve => execFile("script", ["--version"], error => resolve(!error)));
+
+/**
+ * Pi host whose exec runs Git on a pseudo-terminal (util-linux `script`) with
+ * no prompt-disabling environment, so a credential prompt would wait for
+ * input until the host timeout. `dropArgs` emulates a Git that ignores a
+ * `-c` setting.
+ */
+function loadScoutOnTerminal({ dropArgs = [] } = {}) {
+  const env = { ...process.env };
+  for (const name of ["GIT_TERMINAL_PROMPT", "GIT_ASKPASS", "SSH_ASKPASS"]) delete env[name];
+  const quote = value => `'${value.replaceAll("'", `'\\''`)}'`;
+  const outputs = [];
+  const host = loadScout((_command, args, execOptions) => new Promise((resolve) => {
+    const kept = args.filter((arg, index) => !(arg === "-c" && dropArgs.includes(args[index + 1])) && !dropArgs.includes(arg));
+    const command = ["git", ...kept].map(quote).join(" ");
+    execFile("script", ["-qec", command, "/dev/null"], { cwd: execOptions?.cwd, env, timeout: 10_000, maxBuffer: 1 << 20 }, (error, stdout) => {
+      outputs.push(stdout);
+      resolve({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0, stdout, stderr: "", killed: Boolean(error?.killed) });
+    });
+  }));
+  return { ...host, outputs };
+}
+
+(hasScript ? test : test.skip)("HTTP authentication failures never prompt on the terminal", async () => {
+  const { createServer } = await import("node:http");
+  const server = createServer((_request, response) => {
+    response.writeHead(401, { "WWW-Authenticate": "Basic realm=\"scout\"" });
+    response.end();
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    // Current Git honours credential.interactive; older Git ignores it.
+    for (const dropArgs of [[], ["credential.interactive=false"]]) {
+      const { add, outputs } = loadScoutOnTerminal({ dropArgs });
+      const started = performance.now();
+      await assert.rejects(add({ source: `${base}/private.git` }),
+        { message: "Git clone failed (exit code 128). Check the source and Git authentication." }, `dropped: ${dropArgs}`);
+      assert.ok(performance.now() - started < 5_000, "fails without waiting for input");
+      assert.doesNotMatch(outputs.join("\n"), /Username for|Password for/);
+    }
+  } finally {
+    server.close();
+  }
+});
+
+test("a source containing # and a branch containing # never share a reuse key", async () => {
+  const hashed = await makeOrigin("keyed#bar");
+  await mustGit(["push", "--quiet", "origin", "main:baz"], hashed.work);
+  const plain = await makeOrigin("keyed");
+  await mustGit(["push", "--quiet", "origin", "main:bar#baz"], plain.work);
+  // Without `.git`, the path keys are `.../keyed#bar` and `.../keyed`.
+  for (const { bare } of [hashed, plain]) await rename(bare, bare.replace(/\.git$/, ""));
+  const { add } = loadScout();
+  const sourceWithHash = await add({ source: join(sandbox, "keyed#bar"), branch: "baz" });
+  assert.equal(sourceWithHash.structuredContent.status, "cloned");
+  const branchWithHash = await add({ source: join(sandbox, "keyed"), branch: "bar#baz" });
+  assert.equal(branchWithHash.structuredContent.status, "cloned");
+  assert.notEqual(branchWithHash.structuredContent.repo.id, sourceWithHash.structuredContent.repo.id);
+});
+
 test("relative ./ and ../ paths are local paths, not GitHub shorthand", async () => {
   const { add, calls } = loadScout(async (_command, args) => {
     if (args.includes("clone")) await mkdir(args.at(-1), { recursive: true });
@@ -270,14 +410,14 @@ test("Git calls are non-interactive and output-bounded", async () => {
 test("a user-chosen SSH command is kept unchanged", async () => {
   const configured = loadScout(stubGit({ sshCommand: "my-ssh-wrapper" }));
   await configured.add({ source: "git@fixture.invalid:team/configured.git" });
-  assert.deepEqual(configured.calls.at(-1).slice(0, 5), [...SAFE, "clone"]);
+  assert.deepEqual(configured.calls.at(-1).slice(0, SAFE.length + 1), [...SAFE, "clone"]);
 
   process.env.GIT_SSH_COMMAND = "ssh -i synthetic-key";
   try {
     const env = loadScout(stubGit());
     await env.add({ source: "git@fixture.invalid:team/env.git" });
     assert.equal(env.calls.length, 1, "no config read when GIT_SSH_COMMAND decides");
-    assert.deepEqual(env.calls[0].slice(0, 5), [...SAFE, "clone"]);
+    assert.deepEqual(env.calls[0].slice(0, SAFE.length + 1), [...SAFE, "clone"]);
   } finally {
     delete process.env.GIT_SSH_COMMAND;
   }
