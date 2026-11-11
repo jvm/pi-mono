@@ -64,8 +64,11 @@ replace a retained goal before unrelated work.
 Automatic goal continuation is proposed at Pi's `agent_before_settle` boundary,
 after recovery and queued work, rather than starting a new run from a timer.
 Cancelled/error outcomes and failed automatic compaction do not request more
-goal work. Budget and provider-limit notices are context-only and do not request
-a wrap-up turn. These checks control the goal extension's requests, not Pi's own
+goal work. Budget, provider-limit, and provider-error notices are context-only
+and do not request a wrap-up turn. A provider-error notice quotes the last
+provider error message, JSON-encoded and truncated to 200 characters, in visible
+model context. Provider-limit classification reads only the error text and HTTP
+status; it never inspects response headers beyond `retry-after`. These checks control the goal extension's requests, not Pi's own
 recovery, user input, or another trusted extension's continuation.
 
 Explicit activation on creation, resume, startup/reload, and tree navigation
