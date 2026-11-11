@@ -25,7 +25,7 @@ From this repository:
 pi -e ./packages/pi-subs-usage/index.ts
 ```
 
-Development and contract tests target Pi **1.4.0** and Node.js **>=22.19.0** only. The command-safety adapter still accepts stable Pi **1.x** releases without a minor-version allowlist and checks the required private metadata at runtime. Other major versions, prereleases, or incompatible metadata show `[background auth unavailable]` instead of attempting unsafe auth resolution. Other 1.x releases may pass those guards but are not supported test targets: runtime shape checks cannot detect a behavior change that preserves the same metadata shape.
+Development and contract tests target Pi **1.5.2** and Node.js **>=22.19.0** only. The command-safety adapter still accepts stable Pi **1.x** releases without a minor-version allowlist and checks the required private metadata at runtime. Other major versions, prereleases, or incompatible metadata show `[background auth unavailable]` instead of attempting unsafe auth resolution. Other 1.x releases may pass those guards but are not supported test targets: runtime shape checks cannot detect a behavior change that preserves the same metadata shape.
 
 Use Pi's normal `/login` or provider API-key setup, then select a supported model. This package does not add model providers or change inference settings.
 
