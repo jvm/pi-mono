@@ -6,6 +6,8 @@ import test from "node:test";
 
 const home = await mkdtemp(join(tmpdir(), "pi-skillful-config-test-"));
 process.env.HOME = home;
+// Resolve the default agent directory under the temporary HOME.
+delete process.env.PI_CODING_AGENT_DIR;
 
 const {
   readEffectiveSkillfulSettings,
@@ -103,6 +105,27 @@ test("project writes require active trust", async () => {
   );
 
   assert.deepEqual(JSON.parse(await readFile(projectPath, "utf-8")), original);
+});
+
+test("global settings follow PI_CODING_AGENT_DIR for reads and writes", async (t) => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pi-skillful-agent-dir-"));
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  t.after(async () => {
+    delete process.env.PI_CODING_AGENT_DIR;
+    await rm(agentDir, { recursive: true, force: true });
+  });
+  const cwd = await mkdtemp(join(home, "agent-dir-"));
+  await writeJson(globalPath, { skillful: { hiddenSkills: ["home-default"] } });
+  await writeJson(join(agentDir, "settings.json"), { skillful: { hiddenSkills: ["custom-dir"] } });
+
+  let settings = await readEffectiveSkillfulSettings(cwd, false);
+  assert.deepEqual(settings.hiddenSkills, ["custom-dir"]);
+
+  await writeHiddenSkills("global", cwd, ["written"]);
+  assert.deepEqual(JSON.parse(await readFile(join(agentDir, "settings.json"), "utf-8")).skillful.hiddenSkills, ["written"]);
+  assert.deepEqual(JSON.parse(await readFile(globalPath, "utf-8")).skillful.hiddenSkills, ["home-default"]);
+  settings = await readEffectiveSkillfulSettings(cwd, false);
+  assert.deepEqual(settings.hiddenSkills, ["written"]);
 });
 
 test.after(async () => {

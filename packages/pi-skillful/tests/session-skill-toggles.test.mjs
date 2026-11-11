@@ -7,6 +7,8 @@ import { CURSOR_MARKER, visibleWidth } from "@earendil-works/pi-tui";
 
 const home = await mkdtemp(join(tmpdir(), "pi-skillful-toggles-test-"));
 process.env.HOME = home;
+// Resolve the default agent directory under the temporary HOME.
+delete process.env.PI_CODING_AGENT_DIR;
 
 const {
   default: sessionSkillToggles,
