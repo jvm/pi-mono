@@ -335,6 +335,40 @@ test("owned image OAuth uses the Astra default and preserves config and per-call
     result.details.provider === IMAGE_AUTH_PROVIDER && result.details.backendImageModel === "unknown"));
 });
 
+test("default routing model follows the running Pi openai-codex catalog and keeps overrides", async (t) => {
+  const h = await harness(t, () => sseResponse());
+  const catalog = ids => ids.map(id => ({ provider: "openai-codex", id }));
+  const run = async (models, model, params = {}) => {
+    const ctx = context(h.cwd);
+    ctx.modelRegistry.getAll = typeof models === "function" ? models : () => models;
+    if (model) ctx.model = model;
+    const result = await h.run(params, undefined, undefined, ctx);
+    return [JSON.parse(h.calls.at(-1).body).model, result.details.model];
+  };
+  // Astra stays the default while the catalog lists it, whatever the chat model is.
+  assert.deepEqual(await run(catalog(["gpt-6.1-sol", "gpt-6-astra"]), { provider: "openai-codex", id: "gpt-6.1-sol" }),
+    ["gpt-6-astra", "gpt-6-astra"]);
+  // A catalog without Astra prefers the current openai-codex session model.
+  assert.deepEqual(await run(catalog(["gpt-7-luna", "gpt-7-sol"]), { provider: "openai-codex", id: "gpt-7-sol" }),
+    ["gpt-7-sol", "gpt-7-sol"]);
+  // Otherwise the first listed openai-codex model, ignoring other providers and image IDs.
+  assert.deepEqual(await run([
+    { provider: "openai", id: "gpt-7-sol" }, { provider: "openai-codex", id: "gpt-image-3" }, ...catalog(["gpt-7-luna"]),
+  ], { provider: "openai", id: "gpt-7-sol" }), ["gpt-7-luna", "gpt-7-luna"]);
+  // An empty or unreadable registry never fails the call.
+  assert.deepEqual(await run([]), ["gpt-6-astra", "gpt-6-astra"]);
+  assert.deepEqual(await run(() => { throw new Error("registry unavailable"); }), ["gpt-6-astra", "gpt-6-astra"]);
+  // Explicit and trusted-config overrides are sent even when the catalog lacks them.
+  assert.deepEqual(await run(catalog(["gpt-7-luna"]), undefined, { model: "gpt-5.5" }), ["gpt-5.5", "gpt-5.5"]);
+  await mkdir(join(h.cwd, ".pi", "extensions"), { recursive: true });
+  await writeFile(join(h.cwd, ".pi", "extensions", "codex-image-gen.json"), JSON.stringify({ model: "gpt-6-sol" }));
+  const ctx = context(h.cwd);
+  ctx.isProjectTrusted = () => true;
+  ctx.modelRegistry.getAll = () => catalog(["gpt-7-luna"]);
+  await h.run({}, undefined, undefined, ctx);
+  assert.equal(JSON.parse(h.calls.at(-1).body).model, "gpt-6-sol");
+});
+
 test("registered image provider refreshes stored OAuth and generates while chat uses openai", async (t) => {
   const token = jwt();
   const credentials = new InMemoryCredentialStore();

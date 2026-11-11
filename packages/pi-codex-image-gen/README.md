@@ -345,8 +345,10 @@ Project config overrides global config only when project trust is active. If pro
 | --------- | ------ | ---------- | ---------------------------------------- |
 | `save`    | string | `"global"` | Default save mode (see below).           |
 | `saveDir` | string | —          | Directory used when `save=custom`.       |
-| `model`   | string | `"gpt-6-astra"`| Codex routing model, not the backend image model. |
+| `model`   | string | see below  | Codex routing model, not the backend image model. |
 | `transport` | string | `"responses"` | Subscription route: `responses` or opt-in PNG-only `images`. |
+
+When neither the call nor configuration sets `model`, the routing model is `gpt-6-astra` while the running Pi lists it for the `openai-codex` provider. If a newer Pi catalog drops it, the extension uses the current session model when it is an `openai-codex` model, else the first `openai-codex` model Pi lists. If Pi lists no `openai-codex` models, `gpt-6-astra` is sent. Explicit and configured values are always sent unchanged.
 
 ### Environment variables
 
@@ -373,7 +375,7 @@ Both generation entry points accept these parameters.
 | Parameter      | Type   | Required | Description                                                        |
 | -------------- | ------ | -------- | ------------------------------------------------------------------ |
 | `prompt`       | string | ✅        | The image generation prompt.                                       |
-| `model`        | string | —        | Override the Codex model. Defaults to config or `gpt-6-astra`.     |
+| `model`        | string | —        | Override the Codex routing model. Defaults to config, then the catalog-aware default (normally `gpt-6-astra`). |
 | `outputFormat` | string | —        | `png` (default), `jpeg`, or `webp`.                                |
 | `background` | string | — | `transparent`, `opaque`, or `auto`; omission preserves existing Responses behavior. |
 | `transport` | string | — | Override configured subscription transport: `responses` or PNG-only `images`. |
@@ -385,7 +387,7 @@ Both generation entry points accept these parameters.
 ## How it works
 
 1. Resolves package-owned `codex-images` OAuth via Pi, or falls back to available legacy Pi `openai-codex` OAuth.
-2. Sends a request through Responses and its routing model (default `gpt-6-astra`), or the explicitly selected PNG-only Images transport.
+2. Sends a request through Responses and its routing model (default `gpt-6-astra` while Pi's `openai-codex` catalog lists it), or the explicitly selected PNG-only Images transport.
 3. For edits, attaches the selected local or conversation images to the request.
 4. The backend selects an image model to generate or edit the image.
 5. Parses bounded SSE or Images JSON and validates base64 and the actual returned file format.

@@ -44,7 +44,8 @@ account admission, loads reference bytes, reserves artifact storage, then sends 
 Responses request by default. The opt-in `images` transport uses the fixed Codex
 Images generation/edit routes, PNG only, `gpt-image-2`, and automatic size/quality.
 Never fall back between transports or to public API billing after failure.
-The Responses routing default is `gpt-6-astra`, not an image-model
+The Responses routing default is `gpt-6-astra` while Pi's `openai-codex`
+catalog lists it (`resolveDefaultRoutingModel`), not an image-model
 selector. Inline results include an image; artifact results return original
 paths without bytes. Listing performs no generation.
 
