@@ -16,6 +16,8 @@ Object.assign(process.env, {
   GIT_AUTHOR_NAME: "Scout Test", GIT_AUTHOR_EMAIL: "scout@example.invalid",
   GIT_COMMITTER_NAME: "Scout Test", GIT_COMMITTER_EMAIL: "scout@example.invalid",
 });
+delete process.env.GIT_SSH_COMMAND;
+delete process.env.GIT_SSH;
 await writeFile(process.env.GIT_CONFIG_GLOBAL, "[init]\n\tdefaultBranch = main\n[advice]\n\tdetachedHead = false\n");
 
 const { default: scout } = await import("../extensions/index.ts");
@@ -40,18 +42,21 @@ async function mustGit(args, cwd) {
 function loadScout(execImpl) {
   const tools = new Map();
   const calls = [];
+  const options = [];
   let active = [];
   scout({
     on() {}, registerCommand() {}, registerFlag() {}, getFlag: () => undefined,
     registerTool: tool => { tools.set(tool.name, tool); },
     getActiveTools: () => active, setActiveTools: names => { active = names; },
-    exec: async (command, args, options) => {
+    exec: async (command, args, execOptions) => {
+      assert.equal(command, "git");
       calls.push(args);
-      return execImpl ? execImpl(command, args, options) : git(args, options?.cwd ?? sandbox);
+      options.push(execOptions);
+      return execImpl ? execImpl(command, args, execOptions) : git(args, execOptions?.cwd ?? sandbox);
     },
   });
   const add = (params, cwd = sandbox) => tools.get("scout_add").execute("call", params, undefined, undefined, { cwd });
-  return { tools, calls, add };
+  return { tools, calls, options, add };
 }
 
 async function makeOrigin(name) {
@@ -71,6 +76,18 @@ async function makeOrigin(name) {
   await mustGit(["remote", "add", "origin", bare], work);
   await mustGit(["push", "--quiet", "origin", "main", "feature", "v1"], work);
   return { bare, work };
+}
+
+const SAFE = ["-c", "protocol.ext.allow=never", "-c", "credential.interactive=false"];
+const BATCH_SSH = ["-c", "core.sshCommand=ssh -oBatchMode=yes"];
+const EXEC_LIMITS = { timeout: 120_000, maxBuffer: 1024 * 1024 };
+
+function stubGit({ sshCommand = "", clone = { code: 0 } } = {}) {
+  return async (_command, args) => {
+    if (args.includes("config")) return sshCommand ? { code: 0, stdout: `${sshCommand}\n`, stderr: "", killed: false } : { code: 1, stdout: "", stderr: "", killed: false };
+    if (args.includes("clone") && clone.code === 0) await mkdir(args.at(-1), { recursive: true });
+    return { stdout: "", stderr: "", killed: false, ...(args.includes("clone") ? clone : { code: 0 }) };
+  };
 }
 
 async function cloneDirs() {
@@ -149,7 +166,8 @@ test("refresh fetches and fast-forwards an existing clone", async () => {
   assert.equal(refreshed.structuredContent.repo.id, first.structuredContent.repo.id);
   assert.equal(await readFile(join(path, "README.md"), "utf8"), "two\n");
   const fetch = calls.find(args => args.includes("fetch"));
-  assert.deepEqual(fetch, ["-c", "protocol.ext.allow=never", "-c", "credential.interactive=false", "-C", path, "fetch", "--quiet", "--no-tags", "origin"]);
+  assert.deepEqual(fetch, [...SAFE, ...BATCH_SSH, "-C", path, "fetch", "--quiet", "--no-progress", "--no-tags", "origin"]);
+  assert.ok(calls.some(args => args.join(" ") === `-C ${path} config --get core.sshCommand`), "refresh reads the clone's SSH command");
 
   const fresh = await add({ source: join(sandbox, "refresh-work"), refresh: true });
   assert.equal(fresh.structuredContent.status, "cloned", "refresh of an unregistered source clones it");
@@ -235,4 +253,43 @@ test("relative ./ and ../ paths are local paths, not GitHub shorthand", async ()
   assert.equal(calls.at(-1).at(-2), join(cwd, "sibling"));
   await add({ source: "../other" }, cwd);
   assert.equal(calls.at(-1).at(-2), join(sandbox, "other"));
+});
+
+test("Git calls are non-interactive and output-bounded", async () => {
+  const { add, calls, options } = loadScout(stubGit());
+  const { repo } = (await add({ source: "https://fixture.invalid/team/batch.git", branch: "main" })).structuredContent;
+  const root = getScoutCloneRoot();
+  assert.deepEqual(calls, [
+    ["config", "--get", "core.sshCommand"],
+    [...SAFE, ...BATCH_SSH, "clone", "--quiet", "--no-progress", "--branch=main", "--depth", "1", "--", "https://fixture.invalid/team/batch.git", repo.path],
+  ]);
+  // Every call runs in the private clone root, never the project directory.
+  assert.deepEqual(options.map(({ signal: _, ...rest }) => rest), [{ ...EXEC_LIMITS, cwd: root }, { ...EXEC_LIMITS, cwd: root }]);
+});
+
+test("a user-chosen SSH command is kept unchanged", async () => {
+  const configured = loadScout(stubGit({ sshCommand: "my-ssh-wrapper" }));
+  await configured.add({ source: "git@fixture.invalid:team/configured.git" });
+  assert.deepEqual(configured.calls.at(-1).slice(0, 5), [...SAFE, "clone"]);
+
+  process.env.GIT_SSH_COMMAND = "ssh -i synthetic-key";
+  try {
+    const env = loadScout(stubGit());
+    await env.add({ source: "git@fixture.invalid:team/env.git" });
+    assert.equal(env.calls.length, 1, "no config read when GIT_SSH_COMMAND decides");
+    assert.deepEqual(env.calls[0].slice(0, 5), [...SAFE, "clone"]);
+  } finally {
+    delete process.env.GIT_SSH_COMMAND;
+  }
+});
+
+test("truncated output is non-fatal; a stopped command fails without output", async () => {
+  const ok = loadScout(stubGit({ clone: { code: 0, truncated: true } }));
+  assert.equal((await ok.add({ source: "https://fixture.invalid/team/noisy.git" })).structuredContent.status, "cloned");
+
+  const before = await cloneDirs();
+  const stopped = loadScout(stubGit({ clone: { code: 1, truncated: true, killed: true, stderr: "synthetic-noise" } }));
+  await assert.rejects(stopped.add({ source: "https://fixture.invalid/team/flood.git" }),
+    { message: "Git clone stopped: output exceeded 1048576 bytes. Check the source and Git authentication." });
+  assert.deepEqual(await cloneDirs(), before, "partial clone removed");
 });
