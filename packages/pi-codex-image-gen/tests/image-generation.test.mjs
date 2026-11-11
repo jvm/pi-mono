@@ -369,6 +369,19 @@ test("default routing model follows the running Pi openai-codex catalog and keep
   assert.equal(JSON.parse(h.calls.at(-1).body).model, "gpt-6-sol");
 });
 
+test("save=custom rejects a non-string configured saveDir before generation", async (t) => {
+  const h = await harness(t, () => sseResponse());
+  const previous = process.env.PI_CODEX_IMAGE_SAVE_DIR;
+  delete process.env.PI_CODEX_IMAGE_SAVE_DIR;
+  t.after(() => { if (previous !== undefined) process.env.PI_CODEX_IMAGE_SAVE_DIR = previous; });
+  await mkdir(join(h.cwd, ".pi", "extensions"), { recursive: true });
+  await writeFile(join(h.cwd, ".pi", "extensions", "codex-image-gen.json"), JSON.stringify({ save: "custom", saveDir: 42 }));
+  const ctx = context(h.cwd);
+  ctx.isProjectTrusted = () => true;
+  await assert.rejects(h.run({ save: undefined }, undefined, undefined, ctx), /save=custom requires saveDir/);
+  assert.equal(h.calls.length, 0);
+});
+
 test("registered image provider refreshes stored OAuth and generates while chat uses openai", async (t) => {
   const token = jwt();
   const credentials = new InMemoryCredentialStore();

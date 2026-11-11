@@ -9,6 +9,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 ### Fixed
 
 - Keep image generation working when Pi's `openai-codex` catalog no longer lists the `gpt-6-astra` routing default: fall back to the current `openai-codex` session model, then the first listed `openai-codex` model. Explicit and configured routing models are unchanged.
+- Report a clear error instead of a type error when a configuration file sets a non-string `saveDir` for `save=custom`.
 
 ## [0.3.1] - 2026-11-05
 
