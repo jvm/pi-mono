@@ -127,6 +127,11 @@ already registered. Equivalent spellings match: `owner/repo` and its GitHub
 HTTPS URL, scheme/host case, a trailing `.git` or `/` on remote URLs, URL
 credentials/query, relative and absolute local paths, and `file://` URLs.
 Different transports (HTTPS vs. SSH) and different branches get separate clones.
+Sources must be `http(s)`, `ftp(s)`, `git`, `ssh` or `file` URLs, scp-like
+`host:path`, local paths, or GitHub shorthand. Git remote-helper sources
+(`<helper>::<address>`, such as `ext::` or `fd::`) and other URL schemes are
+rejected because they make Git run a helper program; clone those yourself and
+register the local path.
 Relative local paths resolve against Pi's working directory. GitHub shorthand
 needs an owner that starts with a letter or digit, so `./repo` and `../repo` are
 local paths.
@@ -136,7 +141,10 @@ start with `-` or break Git ref-name rules are rejected before Git runs.
 
 `refresh: true` fetches the clone's recorded upstream and fast-forwards it. It
 uses the same 120-second timeout and 1 MiB output cap as cloning. Git never
-prompts: SSH uses batch mode unless you set your own SSH command. If the remote is unreachable,
+prompts: HTTP username/password prompts are disabled through
+`credential.interactive=false` and an empty `core.askPass` answer (credential
+helpers still run), and SSH uses batch mode unless you set your own SSH command.
+If the remote is unreachable,
 authentication fails, local edits conflict, or upstream history was rewritten,
 the call fails and the existing clone stays unchanged. Without `refresh`, reuse
 makes no network request. Only clones in the current private clone directory can

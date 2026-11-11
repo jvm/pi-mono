@@ -7,15 +7,15 @@ import piProcesses from "../extensions/index.ts";
 import { CompletionCoordinator } from "../src/completion.ts";
 import { ProcessRuntime } from "../src/runtime.ts";
 import { fixture as dcgFixture, textOf, deferred } from "../../pi-dcg/tests/session-fixture.mjs";
+import { changes, until } from "./process-fixture.mjs";
 import { requestBody, textResponse } from "../../../tests/codex-harness.mjs";
 
 const dataOf = result => result.structuredContent ?? result.details ?? JSON.parse(textOf(result));
 const fixture = (t, options = {}) => dcgFixture(t, { ...options, omitShell: true });
 const notices = h => h.session.messages.filter(m => m.customType === "pi-processes-completed");
-async function eventually(check) {
-  for (let n = 0; n < 150; n++) { if (check()) return; await delay(20); }
-  assert.ok(check(), "expected lifecycle transition did not occur");
-}
+// Wait for the status/session event, not a polling window; `until` rejects a
+// missing event before this test timeout.
+const bounded = { timeout: 30_000 };
 function response(calls, n) {
   const output = calls.map((c, i) => ({
     type: "function_call", id: `fc_${n}_${i}`, call_id: `call_${n}_${i}`,
@@ -47,21 +47,23 @@ async function scripted(t, steps, extra = {}) {
 const command = (command, mode = "background", extra = {}) => [{ name: "bash", args: { command, mode, ...extra } }];
 const lastJob = h => dataOf(h.session.messages.findLast(m => m.role === "toolResult" && m.toolName === "bash")).session_id;
 
-test("TUI monitors survive shell exit until automatic results reach model context", async t => {
+test("TUI monitors survive shell exit until automatic results reach model context", bounded, async t => {
   let status;
+  const statusChanged = changes();
+  const statusIs = expected => until(statusChanged.subscribe, () => status === expected);
   const h = await scripted(t, [[
     ...command("while ! test -f first; do sleep 0.02; done; printf first-result"),
     ...command("while ! test -f second; do sleep 0.02; done; printf second-result; exit 7"),
     ...command("while ! test -f release; do sleep 0.02; done", "foreground"),
   ]], { uiMode: "tui", uiContext: {
-    setStatus(key, value) { if (key === "pi-processes-results") status = value; },
+    setStatus(key, value) { if (key === "pi-processes-results") { status = value; statusChanged.notify(); } },
   } });
   const run = h.session.prompt("Run two validations and independent work.");
-  await eventually(() => status === "2 shells · 2 monitors · /processes");
+  await statusIs("2 shells · 2 monitors · /processes");
   await writeFile(join(h.ctx.cwd, "first"), "");
-  await eventually(() => status === "1 shell · 2 monitors · /processes");
+  await statusIs("1 shell · 2 monitors · /processes");
   await writeFile(join(h.ctx.cwd, "second"), "");
-  await eventually(() => status === "2 monitors · /processes");
+  await statusIs("2 monitors · /processes");
   assert.equal(notices(h).length, 0, "results wait for the safe continuation");
   await writeFile(join(h.ctx.cwd, "release"), "");
   await run;
@@ -73,7 +75,7 @@ test("TUI monitors survive shell exit until automatic results reach model contex
   assert.deepEqual(h.errors, []);
 });
 
-test("background idle resumes once with bounded sanitized output, never a visible bookkeeping message", async t => {
+test("background idle resumes once with bounded sanitized output, never a visible bookkeeping message", bounded, async t => {
   const statuses = [];
   const h = await scripted(t, [command("sleep 0.25; printf '\\033[31mfinal-result\\033[0m\\007'; exit 7")],
     { uiMode: "tui", uiContext: {
@@ -82,7 +84,7 @@ test("background idle resumes once with bounded sanitized output, never a visibl
   await h.session.prompt("Run validation.");
   const launched = dataOf(h.session.messages.find(m => m.role === "toolResult" && m.toolName === "bash"));
   assert.equal(launched.completion_delivery, "automatic");
-  await eventually(() => notices(h).length === 1);
+  await until(listener => h.session.subscribe(listener), () => notices(h).length === 1);
   await h.session.waitForIdle();
   assert.equal(h.requests.length, 3, "launch, normal continuation, one completion continuation");
   const message = notices(h)[0];

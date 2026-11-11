@@ -213,13 +213,15 @@ test("aborting during retry backoff prevents another request", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = originalFetch; });
   let calls = 0;
+  const controller = new AbortController();
   globalThis.fetch = async () => {
     calls += 1;
+    // Abort after the first attempt is answered, not after a fixed delay that
+    // can elapse before the request starts; the 10 s backoff spans the gap.
+    if (calls === 1) setImmediate(() => controller.abort());
     return new Response("overloaded", { status: 503, headers: { "retry-after": "10" } });
   };
-  const controller = new AbortController();
   const execution = createTool().execute("call", { prompt: "test", save: "none" }, controller.signal, undefined, context(cwd));
-  setTimeout(() => controller.abort(), 20);
   await assert.rejects(execution, /aborted/);
   assert.equal(calls, 1);
 });
