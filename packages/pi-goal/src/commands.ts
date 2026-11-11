@@ -5,7 +5,7 @@ import { accountUsageFromBranch } from "./accounting.js";
 import { appendGoalMutation, applyGoalMutation, createGoalMutation, replaceGoalMutation, statusMutation } from "./state.js";
 import { PI_GOAL_VERSION, transitionMeta, withPiGoalVersion } from "./metadata.js";
 import { formatElapsed, goalToSummary, goalUsageSummary, nowIso, realizedTimeUsed } from "./utils.js";
-import { validateObjective, validateTokenBudget } from "./validation.js";
+import { parseTokenBudget, validateObjective, validateTokenBudget } from "./validation.js";
 
 export interface CommandRuntime {
   getGoal(): GoalState | null;
@@ -19,15 +19,35 @@ export function parseGoalCommand(args: string): ParsedGoalCommand {
   if (!trimmed || trimmed === "status") return { action: "status" };
   if (["edit", "pause", "resume", "clear"].includes(trimmed)) return { action: trimmed as ParsedGoalCommand["action"] };
   if (trimmed === "budget clear") return { action: "clearBudget" };
+  if (trimmed === "budget") return invalid(BUDGET_USAGE);
   const budget = trimmed.match(/^budget\s+(\S+)$/);
-  if (budget) return { action: "setBudget", tokenBudget: Number(budget[1]) };
-  const withBudget = trimmed.match(/^--budget\s+(\S+)\s+([\s\S]+)$/);
-  if (withBudget) return { action: "createOrReplace", tokenBudget: Number(withBudget[1]), objective: withBudget[2] };
+  if (budget) {
+    const parsed = parseTokenBudget(budget[1]);
+    return parsed.ok ? { action: "setBudget", tokenBudget: parsed.value } : invalid(`${parsed.error} ${BUDGET_USAGE}`);
+  }
+  // A leading option is never an objective: a flag without an objective, an
+  // unknown option, or a malformed budget must not silently create a goal.
+  if (trimmed.startsWith("--")) {
+    const withBudget = trimmed.match(/^--budget(?:=|\s+)(\S+)(?:\s+([\s\S]*))?$/);
+    if (!withBudget) return invalid(/^--budget\b/.test(trimmed) ? CREATE_USAGE : `Unknown option ${JSON.stringify(trimmed.split(/\s/, 1)[0])}. ${CREATE_USAGE}`);
+    const parsed = parseTokenBudget(withBudget[1]);
+    if (!parsed.ok) return invalid(`${parsed.error} ${CREATE_USAGE}`);
+    if (!withBudget[2]?.trim()) return invalid(`Missing objective. ${CREATE_USAGE}`);
+    return { action: "createOrReplace", tokenBudget: parsed.value, objective: withBudget[2] };
+  }
   return { action: "createOrReplace", objective: trimmed };
+}
+
+const CREATE_USAGE = "Usage: /goal --budget <tokens> <objective> (tokens such as 50000, 50k, or 1.5m).";
+const BUDGET_USAGE = "Usage: /goal budget <tokens> or /goal budget clear.";
+
+function invalid(error: string): ParsedGoalCommand {
+  return { action: "invalid", error };
 }
 
 export async function handleGoalCommand(pi: ExtensionAPI, args: string, ctx: ExtensionCommandContext, runtime: CommandRuntime): Promise<void> {
   const parsed = parseGoalCommand(args);
+  if (parsed.action === "invalid") return ctx.ui.notify(parsed.error ?? "Invalid /goal command.", "error");
   if (parsed.action === "status") return showStatus(pi, ctx, runtime.getGoal());
   if (parsed.action === "createOrReplace") return createOrReplace(pi, ctx, runtime, parsed.objective, parsed.tokenBudget);
   if (parsed.action === "edit") return editGoal(pi, ctx, runtime);

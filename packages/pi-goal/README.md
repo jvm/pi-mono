@@ -42,6 +42,12 @@ pi -e ./packages/pi-goal/extensions/index.ts
 - `/goal budget 50000` — set/update token budget.
 - `/goal budget clear` — remove token budget.
 
+Token budgets are positive whole numbers of tokens. They accept `k` and `m`
+suffixes and `,` or `_` separators, for example `50k`, `1.5m`, or `50,000`.
+`--budget=50k` also works. A budget without an objective, an unknown `--`
+option, or a zero, negative, or non-numeric budget shows a usage error and does
+not create or change a goal.
+
 Replacing a non-complete goal asks for confirmation when UI is available.
 
 ## Model tools

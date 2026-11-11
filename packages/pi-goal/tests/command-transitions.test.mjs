@@ -88,6 +88,47 @@ test("/goal edit preserves elapsed time in every source status and after reload"
   }
 });
 
+test("/goal rejects option-only and malformed budget input without creating a goal", async () => {
+  for (const [args, pattern] of [
+    ["--budget 50000", /Missing objective.*--budget <tokens> <objective>/],
+    ["--budget", /Usage: \/goal --budget <tokens> <objective>/],
+    ["--budget=50k", /Missing objective/],
+    ["--budget 0 ship it", /positive whole number/],
+    ["--budget -5 ship it", /positive whole number/],
+    ["--budget lots ship it", /positive whole number/],
+    ["--budget 1.2345k ship it", /positive whole number/],
+    ["--budgte 5 ship it", /Unknown option "--budgte"/],
+    ["--help", /Unknown option "--help"/],
+  ]) {
+    const s = await session([]);
+    await s.command(args);
+    assert.equal(await s.goal(), null, args);
+    assert.equal(s.pi.entries.length, 0, args);
+    assert.match(s.ctx.ui.notifications.at(-1).message, pattern, args);
+    assert.equal(s.ctx.ui.notifications.at(-1).type, "error", args);
+  }
+});
+
+test("/goal budgets accept k/m suffixes and separators on create and update", async () => {
+  for (const [args, expected] of [["--budget 50k ship it", 50_000], ["--budget=1.5m ship it", 1_500_000], ["--budget 50,000 ship it", 50_000], ["--budget 2K ship it", 2_000]]) {
+    const s = await session([]);
+    await s.command(args);
+    const goal = await s.goal();
+    assert.equal(goal.tokenBudget, expected, args);
+    assert.equal(goal.objective, "ship it", args);
+  }
+  const s = await session([create(new Date().toISOString(), 10)]);
+  await s.command("budget 50k");
+  assert.equal((await s.goal()).tokenBudget, 50_000);
+  for (const [args, pattern] of [["budget", /Usage: \/goal budget <tokens>/], ["budget -1", /positive whole number/], ["budget 0", /positive whole number/], ["budget ten", /positive whole number/]]) {
+    const before = s.pi.entries.length;
+    await s.command(args);
+    assert.equal(s.pi.entries.length, before, args);
+    assert.match(s.ctx.ui.notifications.at(-1).message, pattern, args);
+  }
+  assert.equal((await s.goal()).tokenBudget, 50_000);
+});
+
 test("a legacy active edit entry no longer erases the accrued active segment on reload", () => {
   const at = hourAgo();
   const branch = [create(at), { schemaVersion: 1, kind: "edit", goalId: "g", objective: "next", status: "active", at: new Date().toISOString() }]
