@@ -71,29 +71,51 @@ export function classifyProviderLimit(input: ProviderLimitInput): ProviderLimitC
   // A successful response, or one without a status or error text, is never limit evidence.
   if (!text.trim() && (status == null || status < 400)) return { kind: "none", pause: false, retryAfterSeconds };
   const resetHint = extractResetHint(text);
+  const result = (kind: ProviderLimitKind, pause: boolean, reason?: string): ProviderLimitClassification => ({ kind, pause, reason, retryAfterSeconds, resetHint });
+  // A known failure status decides; wording only refines it. A 2xx status
+  // (e.g. a stream that failed after 200 OK) says nothing about the failure.
+  const failureStatus = status != null && status >= 400 ? status : undefined;
+  const limit = limitFromText(text);
 
-  if (matchesAny(text, USAGE_LIMIT_PATTERNS)) return { kind: "usage_limit", pause: true, reason: "provider usage limit reached", retryAfterSeconds, resetHint };
-  if (matchesAny(text, QUOTA_PATTERNS)) return { kind: "quota_exceeded", pause: true, reason: "provider quota exceeded", retryAfterSeconds, resetHint };
-  if (matchesAny(text, BILLING_PATTERNS)) return { kind: "billing_required", pause: true, reason: "provider billing or balance limit", retryAfterSeconds, resetHint };
-  // The HTTP status is the primary auth signal: providers word a bad key differently.
-  if (status === 401) return { kind: "auth_required", pause: true, reason: "provider authentication failed", retryAfterSeconds, resetHint };
-  if (status === 403 && RATE_LIMIT_TEXT.test(text)) return { kind: "rate_limit", pause: true, reason: "provider returned a rate limit error", retryAfterSeconds, resetHint };
-  if (status === 403) return { kind: "auth_required", pause: true, reason: "provider denied access", retryAfterSeconds, resetHint };
-  if (status === 402) return { kind: "billing_required", pause: true, reason: "provider payment required", retryAfterSeconds, resetHint };
-  if (status === 429) return { kind: "rate_limit", pause: true, reason: "provider returned HTTP 429", retryAfterSeconds, resetHint };
-  if (status && status >= 500) return { kind: "provider_error", pause: false, reason: `provider returned HTTP ${status}`, retryAfterSeconds, resetHint };
-  if (/\b429\b/.test(text) && /rate limit|too many requests|limit/i.test(text)) return { kind: "rate_limit", pause: true, reason: "provider returned a rate limit error", retryAfterSeconds, resetHint };
-  // Wording is only a fallback when no status says otherwise (or a 400, which Google uses for bad keys).
-  if ((status == null || status === 400) && matchesAny(text, AUTH_PATTERNS)) return { kind: "auth_required", pause: true, reason: "provider authentication failed", retryAfterSeconds, resetHint };
-  return { kind: "none", pause: false, retryAfterSeconds, resetHint };
+  if (failureStatus === 401) return result("auth_required", true, "provider authentication failed");
+  if (failureStatus === 402) return limit ? result(limit.kind, true, limit.reason) : result("billing_required", true, "provider payment required");
+  if (failureStatus === 429) return limit ? result(limit.kind, true, limit.reason) : result("rate_limit", true, "provider returned HTTP 429");
+  // Some gateways report throttling or billing as HTTP 403; that is a limit, not an auth failure.
+  if (failureStatus === 403) {
+    if (limit) return result(limit.kind, true, limit.reason);
+    if (RATE_LIMIT_TEXT.test(text)) return result("rate_limit", true, "provider returned a rate limit error");
+    return result("auth_required", true, "provider denied access");
+  }
+  if (failureStatus != null && failureStatus >= 500) return result("provider_error", false, `provider returned HTTP ${failureStatus}`);
+  // Any other failure status (404, 408, 422, ...) is a generic error whatever its wording.
+  // Wording decides only without a status, or for a 400 (Anthropic balance, Google bad key).
+  if (failureStatus != null && failureStatus !== 400) return result("none", false);
+  if (limit) return result(limit.kind, true, limit.reason);
+  if (/\b429\b/.test(text) && /rate limit|too many requests|limit/i.test(text)) return result("rate_limit", true, "provider returned a rate limit error");
+  if (matchesAny(text, AUTH_PATTERNS)) return result("auth_required", true, "provider authentication failed");
+  return result("none", false);
 }
 
-export function classifyAssistantError(message: any): ProviderLimitClassification {
+function limitFromText(text: string): { kind: ProviderLimitKind; reason: string } | undefined {
+  if (matchesAny(text, USAGE_LIMIT_PATTERNS)) return { kind: "usage_limit", reason: "provider usage limit reached" };
+  if (matchesAny(text, QUOTA_PATTERNS)) return { kind: "quota_exceeded", reason: "provider quota exceeded" };
+  if (matchesAny(text, BILLING_PATTERNS)) return { kind: "billing_required", reason: "provider billing or balance limit" };
+  return undefined;
+}
+
+/**
+ * Classifies a failed assistant attempt. `response` is the HTTP response of the
+ * same attempt, when Pi reported one; its failure status outranks a status
+ * prefix in the error text.
+ */
+export function classifyAssistantError(message: any, response?: Pick<ProviderLimitInput, "status" | "headers">): ProviderLimitClassification {
   if (!message || message.role !== "assistant") return { kind: "none", pause: false };
   const raw = typeof message.errorMessage === "string" ? message.errorMessage : "";
   if (!raw && message.stopReason !== "error") return { kind: "none", pause: false };
+  const responseStatus = response?.status != null && response.status >= 400 ? response.status : undefined;
   return classifyProviderLimit({
-    status: extractStatus(raw),
+    status: responseStatus ?? extractStatus(raw),
+    headers: response?.headers,
     errorMessage: raw || String(message.stopReason ?? ""),
     provider: message.provider,
     model: message.model,

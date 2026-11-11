@@ -10,7 +10,7 @@ import type { GoalState } from "../src/types.js";
 import { GOAL_EVENT_TYPE } from "../src/types.js";
 import { PI_GOAL_VERSION, transitionMeta } from "../src/metadata.js";
 import { nowIso, realizedTimeUsed, truncateOneLine } from "../src/utils.js";
-import { classifyAssistantError, classifyProviderLimit } from "../src/provider-limits.js";
+import { classifyAssistantError } from "../src/provider-limits.js";
 import type { ProviderLimitClassification, ProviderLimitKind } from "../src/provider-limits.js";
 import { clearGoalUi, updateGoalUi } from "../src/ui.js";
 
@@ -37,7 +37,7 @@ export default function piGoal(pi: ExtensionAPI) {
   let goal: GoalState | null = null;
   // Evidence from the current run's newest failed attempt and HTTP response.
   let lastAttemptError: AttemptError | undefined;
-  let responseLimitEvidence: ProviderLimitClassification | undefined;
+  let lastResponse: { status?: number; headers?: Record<string, string | string[] | undefined> } | undefined;
   // Consecutive failed runs for one provider/model; a success or switch resets it.
   let errorStreak: { scope?: string; count: number } = { count: 0 };
   let automaticCompactionFailed = false;
@@ -74,7 +74,7 @@ export default function piGoal(pi: ExtensionAPI) {
 
   function clearProviderErrorState(): void {
     lastAttemptError = undefined;
-    responseLimitEvidence = undefined;
+    lastResponse = undefined;
     errorStreak = { count: 0 };
   }
 
@@ -285,7 +285,7 @@ export default function piGoal(pi: ExtensionAPI) {
     scheduler.clear();
     // Each attempt, including Pi's retries, reports its own response and result.
     lastAttemptError = undefined;
-    responseLimitEvidence = undefined;
+    lastResponse = undefined;
   });
 
   pi.on("agent_settled", () => {
@@ -300,11 +300,14 @@ export default function piGoal(pi: ExtensionAPI) {
     if (message.stopReason === "error" || message.errorMessage) {
       // Pi emits message_end for every failed attempt and decides about its
       // auto-retry only afterwards. Record the evidence; act at settlement.
-      const classification = classifyAssistantError(message);
+      // Classify the attempt's response status and error text together: a known
+      // status outranks the wording. The response belongs to this attempt only.
+      const classification = classifyAssistantError(message, lastResponse);
+      lastResponse = undefined;
       lastAttemptError = {
         scope: `${message.provider ?? "unknown"}/${message.model ?? "unknown"}`,
         errorMessage: truncateOneLine(String(message.errorMessage || "unknown error"), 200),
-        classification: classification.pause ? classification : responseLimitEvidence ?? classification,
+        classification,
       };
       return;
     }
@@ -328,7 +331,7 @@ export default function piGoal(pi: ExtensionAPI) {
     const retryDelayMs = event.outcome === "error" ? settleFailedRun(ctx) : undefined;
     if (event.outcome === "completed") clearProviderErrorState();
     lastAttemptError = undefined;
-    responseLimitEvidence = undefined;
+    lastResponse = undefined;
     if (automaticCompactionFailed) return;
     const result = scheduler.beforeSettle(event, ctx);
     // A failed run cannot continue inside settlement. Retry it after a delay,
@@ -347,10 +350,9 @@ export default function piGoal(pi: ExtensionAPI) {
   });
 
   pi.on("after_provider_response", async (event) => {
-    // Pi retries HTTP 429 itself. Keep the newest response's evidence until
-    // the attempt's message_end and the run's settlement show whether it failed.
-    const classification = classifyProviderLimit({ status: event.status, headers: event.headers });
-    responseLimitEvidence = classification.pause ? classification : undefined;
+    // Pi retries HTTP 429 itself. Keep the newest response until the attempt's
+    // message_end classifies it with the error text; settlement acts on it.
+    lastResponse = { status: event.status, headers: event.headers };
   });
 
   pi.on("context", async (event) => {

@@ -222,6 +222,37 @@ test("auth wording is a fallback only for failures without a contradicting statu
   assert.equal(await statusOf(throttled), "usage_limited");
 });
 
+test("a known HTTP status decides the classification over the error wording", async () => {
+  // The response status and the attempt's error text are one piece of evidence.
+  for (const [status, errorMessage, expected, kind] of [
+    [500, "authentication failed: upstream service unavailable", "active"],
+    [503, "Unauthorized gateway: invalid credentials upstream", "active"],
+    [502, "usage limit reached on upstream pool", "active"],
+    [500, "500 quota exceeded in internal cache", "active"],
+    [404, "billing_error: model not found", "active"],
+    [401, "insufficient_quota", "paused", "auth_required"],
+    [403, "rate limit exceeded", "usage_limited", "rate_limit"],
+    [403, "Too many requests, slow down", "usage_limited", "rate_limit"],
+    [429, "authentication failed", "usage_limited", "rate_limit"],
+  ]) {
+    const f = await fixture();
+    await f.failedRun({ status, errorMessage });
+    assert.equal(await statusOf(f), expected, `${status} ${errorMessage}`);
+    if (kind) assert.equal(f.pi.entries.at(-1).data.meta.providerLimit.kind, kind, `${status} ${errorMessage}`);
+    else assert.match(f.ctx.ui.notifications.at(-1).message, /^Goal run failed on fixture-a\/model-1/, `${status} ${errorMessage}`);
+  }
+});
+
+test("a response status is evidence only for the attempt that received it", async () => {
+  const f = await fixture();
+  await f.emit("after_provider_response", { status: 401, headers: {} });
+  await f.emit("message_end", { message: { role: "assistant", provider: "fixture-a", model: "model-1", stopReason: "error", errorMessage: "terminated" } });
+  // Pi's retry fails in transport before any response arrives.
+  await f.emit("message_end", { message: { role: "assistant", provider: "fixture-a", model: "model-1", stopReason: "error", errorMessage: "fetch failed" } });
+  await f.settle("error");
+  assert.equal(await statusOf(f), "active");
+});
+
 test("auth evidence never comes from headers, URLs, or model IDs", async () => {
   const f = await fixture();
   await f.failedRun({
@@ -381,6 +412,22 @@ test("a real 401 with OpenAI's wording pauses on the first failed run", { timeou
   assert.equal(state.status, "paused");
   const transition = h.sessionManager.getBranch().filter((entry) => entry.type === "custom" && entry.customType === "pi-goal").at(-1);
   assert.equal(transition.data.meta.providerLimit.kind, "auth_required");
+});
+
+test("a real HTTP 500 that mentions authentication is a server error, not an auth failure", { timeout: 10_000 }, async (t) => {
+  const h = await runtime(t, noRetry);
+  const requests = script(t, h, [
+    () => new Response(JSON.stringify({ error: { message: "authentication failed: upstream service unavailable", type: "server_error" } }), {
+      status: 500,
+      headers: { "content-type": "application/json" },
+    }),
+    () => textResponse("Recovered."),
+  ]);
+  await h.session.prompt("Hit a flaky upstream.");
+  await h.session.waitForIdle();
+  assert.equal(runtimeState(h).status, "active", "a server error takes the delayed retry");
+  await fireRetry(t, h, 30_000);
+  assert.ok(requests.length >= 2, "the goal continued without user input");
 });
 
 test("with Pi's retries disabled, one transient failure continues the goal after a delay", { timeout: 10_000 }, async (t) => {
