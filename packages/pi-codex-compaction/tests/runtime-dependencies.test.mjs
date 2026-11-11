@@ -129,9 +129,9 @@ for (const mode of ["print", "json", "rpc"]) {
     const runtime = await ModelRuntime.create({ credentials, modelsPath: null,
       modelsStorePath: join(temp, `models-${mode}.json`), refreshOnCreate: false });
     const catalogModel = runtime.getModel("openai", "gpt-6-astra");
-    // Bundled static catalogs can advertise effort transitions that the public
-    // compaction route rejects. This contract exercises the compatible route;
-    // separate request-policy tests prove configuration_update is left alone.
+    // This packed-load contract keeps Pi's effort updates out of the fixture;
+    // separate request-policy tests cover hoisting them out of compacted
+    // requests, which the public API requires.
     const model = { ...catalogModel, compat: { ...catalogModel.compat, supportsMidConvoEffort: false } };
     const settingsManager = SettingsManager.inMemory({
       compaction: { enabled: false }, retry: { enabled: false },

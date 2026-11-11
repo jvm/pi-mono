@@ -344,8 +344,37 @@ continuations. The packed-load suite can also target the installed bundled host
 through `PI_COMPACTION_HOST_ENTRY`, with only declared runtime dependencies and
 no physical Pi peers in the candidate directory. It exercises print, JSON and
 RPC modes. Static-catalog effort updates are disabled only in that compatible
-fixture; separate tests ensure requests containing `configuration_update` are
-not opted into automatic compaction.
+fixture; separate tests ensure requests containing non-effort
+`configuration_update` items are not opted into automatic compaction. Effort-only
+updates are removed from compacted requests and the latest effort is sent as
+`reasoning.effort`; see the live measurement below.
+
+### Live: effort updates with automatic compaction (Pi 1.5.2, 2026-11-11)
+
+Public Responses API with an API key, Pi 1.5.2 in RPC mode, no stored login,
+`--server-compaction-threshold 1000`, the package plus a shape-only probe.
+
+- Before the fix, every request with `context_management` and a
+  `configuration_update` item failed with HTTP 400 `unsupported_value` ("The
+  'configuration_update' item type is not supported with compaction"). Pi sends
+  such an item on the first gpt-6-astra request at the default level.
+- After the fix, gpt-6-astra (medium, medium, low, high, max, recall) and
+  gpt-6-luna (medium, low, high, max, off, medium, recall) returned HTTP 200 on
+  all 13 turns. Every request carried `context_management` and no update item;
+  every response had 2-10 compaction items; the response's `reasoning.effort`
+  matched the chosen level each turn (`none` for off). Recall of a code from
+  turn 1 after five or six compactions was correct on both models.
+- Live GPT-6 responses re-encrypt reasoning items in `response.completed`;
+  before that comparison was relaxed, compaction paused after the first response
+  with a reasoning item.
+- Prompt cache: requests with the same effort as the previous request reused the
+  cached prefix (luna 3,920/4,049, astra 3,341/4,422 input tokens); requests
+  with a new effort read 0 cached tokens. Totals: luna 25.3% cached on, 60.9%
+  off; astra 22.8% on, 76.3% off (off does not compact, so inputs differ).
+- Forced retry: an extra extension added an update after this one on gpt-6-luna.
+  The first request got the 400, the extension paused compaction, notified once,
+  and the turn was retried without `context_management` (HTTP 200, correct
+  answer).
 
 Codex source `970111f` informed the design, not the transport: its standard
 Responses path supplies request-level tools, while Responses Lite uses inline

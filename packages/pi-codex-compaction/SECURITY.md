@@ -1,9 +1,13 @@
 # Security Policy
 
-Reasoning-effort configuration updates from Pi 1.4 are accepted only in their
-exact bounded shape (`type`, `reasoning: {effort}` with a known string enum).
-They stay chronological across replay and do not weaken assistant-output hash
-verification. Unknown configuration fields remain fail-closed.
+Reasoning-effort configuration updates from Pi are accepted only in their
+exact bounded shape (`type`, `reasoning: {effort}` with a bounded lowercase
+token). On requests that carry `context_management` they are removed and the
+latest effort is sent as `reasoning.effort`; elsewhere they stay chronological
+across replay. Neither path weakens assistant-output hash verification. Unknown
+configuration fields remain fail-closed. If the API rejects compaction together
+with such an update (HTTP 400), the extension asks Pi for one more request for
+the same turn, without `context_management`; no other failure is retried.
 
 ## Supported versions
 

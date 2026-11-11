@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Enable reasoning updates on Codex `gpt-6.1-sol` and `gpt-6.1-terra`, which the upstream Codex catalog marks with `supports_reasoning_effort_updates`. They are not yet verified against the live backend ([#219](https://github.com/jvm/pi-mono/issues/219)).
+- Opt a Codex model in or out with `compat.supportsMidConvoEffort` in `models.json`, for example for `gpt-6-luna`, which the upstream catalog does not mark.
+
+### Changed
+
+- Document that thinking `off` (effort `none`) stays Pi's ordinary request effort, without an update.
+
 ## [0.2.1] - 2026-10-30
 
 ### Changed

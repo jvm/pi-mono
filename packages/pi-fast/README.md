@@ -37,6 +37,7 @@ Fast requests are enabled for these models on `openai` (`openai-responses`)
 and legacy `openai-codex`:
 
 - `gpt-6.1-sol`
+- `gpt-6.1-terra`
 - `gpt-6-astra`
 - `gpt-6-sol`
 - `gpt-6-luna`
@@ -49,7 +50,10 @@ and legacy `openai-codex`:
 The support list follows the upstream Codex catalog and OpenAI's API Fast documentation. It may need an update when model support changes. Other models are left untouched. Account, region, and plan restrictions still apply.
 
 Checked against the [OpenAI Codex model catalog](https://github.com/openai/codex/blob/ca466061d64f0b44f416135c7fd06aa7af850bbc/codex-rs/models-manager/models.json).
-GPT-6.1 Sol and all three GPT-6 models advertise `priority` (Fast) processing.
+GPT-6.1 Sol, GPT-6.1 Terra and all three GPT-6 models advertise `priority` (Fast) processing.
+GPT-6.1 Terra was checked against the Codex catalog at
+[`32234dd`](https://github.com/openai/codex/blob/32234ddac478f362ef12f3bf3c26d1861ea54b4a/codex-rs/models-manager/models.json)
+and the API Fast documentation.
 The upstream Codex client defaults Sol and Luna to that tier; `pi-fast`
 still requires the session toggle or global opt-in.
 Use `/login openai` and select **Sign in with ChatGPT** on Pi 1.5.2.
@@ -71,8 +75,8 @@ remains `https://chatgpt.com/backend-api/codex/responses`.
 | Legacy `openai-codex` | Existing Codex OAuth; same allowlist | `priority`; subscription usage |
 | Other providers/APIs or non-allowlisted models | Any | Payload unchanged; footer shows the crossed-out bolt |
 
-GPT-6.1 Sol is already allowlisted here. That does not enable it in
-`pi-openai-reasoning`, whose private protocol remains verified only for Astra.
+This allowlist covers Fast only. `pi-openai-reasoning` keeps its own model
+list for reasoning updates.
 
 OpenAI's [API Fast documentation](https://developers.openai.com/api/docs/guides/fast-mode)
 uses `fast` as the current spelling and accepts `priority` as an equivalent alias.

@@ -20,14 +20,27 @@ export interface ReasoningState {
   last: Boundary;
 }
 
+/**
+ * Codex models whose upstream catalog sets `supports_reasoning_effort_updates`
+ * (openai/codex 32234ddac478f362ef12f3bf3c26d1861ea54b4a, models-manager/models.json).
+ * The upstream client sends `configuration_update` only for these models.
+ * Astra is also verified by this package's live smoke test.
+ */
+export const REASONING_UPDATE_MODELS: ReadonlySet<string> = new Set(["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra"]);
+
 export function supportsReasoningUpdates(model: Model<any> | undefined): boolean {
   if (!model || model.provider !== "openai-codex" || model.api !== "openai-codex-responses" ||
-    model.id !== "gpt-6-astra" || !model.reasoning) return false;
+    !model.reasoning) return false;
   try {
     const url = new URL(model.baseUrl);
-    return url.origin === "https://chatgpt.com" && !url.username && !url.password && !url.search && !url.hash &&
-      ["/backend-api", "/backend-api/codex", "/backend-api/codex/responses"].includes(url.pathname.replace(/\/+$/, ""));
+    if (url.origin !== "https://chatgpt.com" || url.username || url.password || url.search || url.hash ||
+      !["/backend-api", "/backend-api/codex", "/backend-api/codex/responses"]
+        .includes(url.pathname.replace(/\/+$/, ""))) return false;
   } catch { return false; }
+  // Pi's Codex transport ignores this documented compat flag, so it serves as
+  // the user's explicit models.json override: true opts in, false opts out.
+  const override = (model.compat as { supportsMidConvoEffort?: unknown } | undefined)?.supportsMidConvoEffort;
+  return typeof override === "boolean" ? override : REASONING_UPDATE_MODELS.has(model.id);
 }
 
 export function rewriteReasoning(
@@ -171,6 +184,9 @@ function isCheckpoint(item: unknown): boolean {
     item.content.some((part) => isRecord(part) && typeof part.text === "string" &&
       part.text.startsWith("The conversation history before this point was compacted into the following summary:")));
 }
+// `none` (thinking off) stays a request-level effort, as in Pi's own public
+// mid-conversation transport; the upstream catalog lists no `none` level for
+// update-capable models. Unknown future values are left to Pi unchanged.
 function isEffort(value: unknown): value is Effort {
   return value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max";
 }

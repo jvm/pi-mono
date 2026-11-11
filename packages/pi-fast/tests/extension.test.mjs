@@ -74,7 +74,7 @@ test("recognizes only allowlisted models on supported OpenAI provider/API pairs"
   assert.equal(supportsFastMode({ provider: "openai", api: "openai-responses", id: "gpt-5.4" }), true);
   assert.equal(supportsFastMode({ provider: "openai", api: "openai-completions", id: "gpt-5.4" }), false);
   for (const id of [
-    "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.4", "gpt-5.5",
+    "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.4", "gpt-5.5",
     "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra",
   ]) {
     assert.equal(supportsFastMode({ provider: "openai", api: "openai-responses", id }), true);
@@ -82,6 +82,33 @@ test("recognizes only allowlisted models on supported OpenAI provider/API pairs"
   }
   assert.equal(supportsFastMode(undefined), false);
   assert.equal(supportsFastMode({ provider: "openai", api: "openai-responses", id: "gpt-6-unknown" }), false);
+});
+
+// Models in the installed Pi catalog that do not advertise Fast (upstream Codex
+// catalog service_tiers, OpenAI Fast documentation). A new catalog model must be
+// classified here or in OPENAI_FAST_MODELS when the development Pi is upgraded.
+const KNOWN_NON_FAST = new Set([
+  "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro", "gpt-5.5-pro", "gpt-5.6-cyber",
+  "gpt-daybreak-blue-latest", "gpt-daybreak-red-latest",
+]);
+
+test("every current-generation OpenAI catalog model is classified for Fast support", async () => {
+  const runtime = await ModelRuntime.create({
+    credentials: new InMemoryCredentialStore(), modelsPath: null,
+    modelsStorePath: join(agentDir, "catalog-models-store.json"),
+  });
+  // GPT-5.4 and later; older generations predate Fast and stay unclassified.
+  const current = /^gpt-(5\.([4-9]|\d{2,})|([6-9]|\d{2,})([.-]|$)|daybreak-)/;
+  const models = ["openai", "openai-codex"].flatMap((provider) => runtime.getModels(provider))
+    .filter((model) => (model.provider === "openai-codex" || model.api === "openai-responses") &&
+      current.test(model.id));
+  assert.ok(models.some((model) => model.id === "gpt-6.1-sol"), "catalog fixture missing");
+  const unclassified = models.filter((model) => !supportsFastMode(model) && !KNOWN_NON_FAST.has(model.id))
+    .map((model) => `${model.provider}/${model.id}`);
+  assert.deepEqual(unclassified, [], "classify new catalog models in OPENAI_FAST_MODELS or KNOWN_NON_FAST");
+  for (const model of models.filter((model) => KNOWN_NON_FAST.has(model.id))) {
+    assert.equal(supportsFastMode(model), false, model.id);
+  }
 });
 
 test("footer state never retains theme ANSI across a palette switch", async () => {
@@ -286,7 +313,7 @@ test("does not enable Fast for unsupported models", async () => {
   assert.equal(await pi.handlers.get("before_provider_request")[0]({ payload: {} }, context), undefined);
 });
 
-for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
+for (const id of ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
   test(`${id} sends the Fast tier through the real Pi provider pipeline`, async (t) => {
     const requests = [];
     t.mock.method(globalThis, "fetch", async (_url, init) => {
@@ -349,7 +376,7 @@ for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
   });
 }
 
-for (const id of ["gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.4"]) {
+for (const id of ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.4"]) {
   test(`${id} sends Fast through OpenAI Responses with OAuth and API-key auth`, async (t) => {
     const requests = [];
     t.mock.method(globalThis, "fetch", async (_url, init) => {
