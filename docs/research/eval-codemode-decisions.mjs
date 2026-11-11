@@ -23,7 +23,7 @@ if (requestedHost) {
   };
   try {
     await cp(repo, dir, { recursive: true, filter: path =>
-      !["node_modules", ".git", ".pi", ".test-dist", "pi-compound-engineering"].includes(basename(path)) });
+      !["node_modules", ".git", ".pi", ".test-dist"].includes(basename(path)) });
     const manifestPath = join(dir, "package.json");
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
     manifest.devDependencies = Object.fromEntries(["pi-ai", "pi-coding-agent", "pi-tui"].map(n => [`@earendil-works/${n}`, requestedHost]));
