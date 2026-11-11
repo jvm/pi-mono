@@ -29,10 +29,15 @@ eof_line: "*** End of File" LF
 
 %import common.LF`;
 
+/** Origin of one chunk line, in patch order: ` ` context, `-` removed, `+` added. */
+export type UpdateChunkLineKind = "context" | "removed" | "added";
+
 export interface UpdateChunk {
   context?: string;
   oldLines: string[];
   newLines: string[];
+  // One entry per patch line; context lines appear in both oldLines and newLines.
+  lineKinds: UpdateChunkLineKind[];
   endOfFile: boolean;
 }
 
@@ -132,6 +137,7 @@ export function parseApplyPatch(input: string): ApplyPatchHunk[] {
             ...(context === undefined ? {} : { context }),
             oldLines: [],
             newLines: [],
+            lineKinds: [],
             endOfFile: false,
           };
           chunks.push(current);
@@ -144,18 +150,22 @@ export function parseApplyPatch(input: string): ApplyPatchHunk[] {
           continue;
         }
 
-        current ??= { oldLines: [], newLines: [], endOfFile: false };
+        current ??= { oldLines: [], newLines: [], lineKinds: [], endOfFile: false };
         if (raw === "") {
           current.oldLines.push("");
           current.newLines.push("");
+          current.lineKinds.push("context");
         } else if (raw.startsWith(" ")) {
           const text = raw.slice(1);
           current.oldLines.push(text);
           current.newLines.push(text);
+          current.lineKinds.push("context");
         } else if (raw.startsWith("+")) {
           current.newLines.push(raw.slice(1));
+          current.lineKinds.push("added");
         } else if (raw.startsWith("-")) {
           current.oldLines.push(raw.slice(1));
+          current.lineKinds.push("removed");
         } else {
           throw new Error(
             `Unexpected line at patch line ${index + 1}. Every update line must start with ' ', '+' or '-'.`,
@@ -464,16 +474,20 @@ interface OutputLine {
   inherit?: LineEnding;
 }
 
-// Bound the per-chunk ending alignment; larger change groups fall back to
-// treating their unmatched middle as replaced lines.
-const MAX_ENDING_ALIGNMENT_CELLS = 4_000_000;
+interface Replacement {
+  start: number;
+  length: number;
+  lines: string[];
+  // Patch-order origin of each line; context and removed lines consume `length` original lines.
+  kinds: UpdateChunkLineKind[];
+}
 
 /**
  * Apply update chunks with Codex line matching while keeping line endings local.
  *
  * Line-ending rule:
  * - A line the patch does not change (outside every chunk, or a chunk context
- *   line equal to its replacement) keeps its original LF or CRLF.
+ *   line) keeps its original LF or CRLF byte-for-byte.
  * - Added lines that replace removed lines take the ending of the first removed
  *   line of that change group; pure insertions take the ending of the line
  *   before them, else the line after them. A final line without a terminator
@@ -502,7 +516,7 @@ function applyUpdateContent(original: string, chunks: UpdateChunk[], displayPath
     offset = lineFeed + 1;
   }
 
-  const replacements: Array<{ start: number; length: number; pattern: string[]; lines: string[] }> = [];
+  const replacements: Replacement[] = [];
   let lineIndex = 0;
   for (const chunk of chunks) {
     if (chunk.context !== undefined) {
@@ -512,22 +526,25 @@ function applyUpdateContent(original: string, chunks: UpdateChunk[], displayPath
     }
 
     if (chunk.oldLines.length === 0) {
-      replacements.push({ start: lines.length, length: 0, pattern: [], lines: [...chunk.newLines] });
+      replacements.push({ start: lines.length, length: 0, lines: [...chunk.newLines], kinds: [...chunk.lineKinds] });
       continue;
     }
 
     let pattern = chunk.oldLines;
     let replacementLines = chunk.newLines;
+    let kinds = chunk.lineKinds;
     let found = seekSequence(lines, pattern, lineIndex, chunk.endOfFile);
     if (found === undefined && pattern.at(-1) === "") {
       pattern = pattern.slice(0, -1);
-      if (replacementLines.at(-1) === "") replacementLines = replacementLines.slice(0, -1);
+      const dropNew = replacementLines.at(-1) === "";
+      if (dropNew) replacementLines = replacementLines.slice(0, -1);
+      kinds = withoutTrailingLines(kinds, dropNew);
       found = seekSequence(lines, pattern, lineIndex, chunk.endOfFile);
     }
     if (found === undefined) {
       throw new Error(`Failed to find expected lines in ${displayPath}:\n${chunk.oldLines.join("\n")}`);
     }
-    replacements.push({ start: found, length: pattern.length, pattern, lines: [...replacementLines] });
+    replacements.push({ start: found, length: pattern.length, lines: [...replacementLines], kinds });
     lineIndex = found + pattern.length;
   }
 
@@ -551,7 +568,7 @@ function applyUpdateContent(original: string, chunks: UpdateChunk[], displayPath
   let position = 0;
   for (const replacement of replacements) {
     for (; position < replacement.start; position++) output.push({ text: lines[position], ending: endings[position] });
-    output.push(...alignReplacement(replacement, endings, effectiveEnding));
+    output.push(...replacementOutput(replacement, endings, effectiveEnding));
     position = replacement.start + replacement.length;
   }
   for (; position < lines.length; position++) output.push({ text: lines[position], ending: endings[position] });
@@ -583,68 +600,54 @@ function applyUpdateContent(original: string, chunks: UpdateChunk[], displayPath
 }
 
 /**
- * Map a replacement's new lines onto the original lines it matched. New lines
- * equal to a pattern line (chunk context) keep that original line's ending.
+ * Drop the last old line (and, when `dropNew`, the last new line) from a
+ * chunk's line kinds, mirroring the trailing-blank-line matching fallback.
  */
-function alignReplacement(
-  replacement: { start: number; length: number; pattern: string[]; lines: string[] },
+function withoutTrailingLines(kinds: UpdateChunkLineKind[], dropNew: boolean): UpdateChunkLineKind[] {
+  const membership = kinds.map((kind) => ({ old: kind !== "added", new: kind !== "removed" }));
+  const dropLast = (side: "old" | "new") => {
+    for (let index = membership.length - 1; index >= 0; index--) {
+      if (membership[index][side]) {
+        membership[index][side] = false;
+        return;
+      }
+    }
+  };
+  dropLast("old");
+  if (dropNew) dropLast("new");
+  return membership.flatMap((line): UpdateChunkLineKind[] =>
+    line.old && line.new ? ["context"] : line.old ? ["removed"] : line.new ? ["added"] : []);
+}
+
+/**
+ * Walk a replacement in patch order. Context lines keep the ending of the
+ * original line they matched; added lines inherit from the first removed line
+ * of their change group (the run of lines between two context lines).
+ */
+function replacementOutput(
+  replacement: Replacement,
   endings: LineEnding[],
   effectiveEnding: (index: number) => LineEnding,
 ): OutputLine[] {
-  const { start, pattern, lines: added } = replacement;
-  const pairs: Array<[number, number]> = [];
-  let prefix = 0;
-  while (prefix < pattern.length && prefix < added.length && pattern[prefix] === added[prefix]) {
-    pairs.push([prefix, prefix]);
-    prefix++;
-  }
-  let suffix = 0;
-  while (
-    suffix < pattern.length - prefix
-    && suffix < added.length - prefix
-    && pattern[pattern.length - 1 - suffix] === added[added.length - 1 - suffix]
-  ) suffix++;
-
-  const oldMiddle = pattern.length - prefix - suffix;
-  const newMiddle = added.length - prefix - suffix;
-  if (oldMiddle > 0 && newMiddle > 0 && oldMiddle * newMiddle <= MAX_ENDING_ALIGNMENT_CELLS) {
-    // Longest common subsequence over the middle so interior context lines stay matched.
-    const width = newMiddle + 1;
-    const table = new Uint32Array((oldMiddle + 1) * width);
-    for (let i = oldMiddle - 1; i >= 0; i--) {
-      for (let j = newMiddle - 1; j >= 0; j--) {
-        table[i * width + j] = pattern[prefix + i] === added[prefix + j]
-          ? table[(i + 1) * width + j + 1] + 1
-          : Math.max(table[(i + 1) * width + j], table[i * width + j + 1]);
-      }
-    }
-    for (let i = 0, j = 0; i < oldMiddle && j < newMiddle;) {
-      if (pattern[prefix + i] === added[prefix + j]) {
-        pairs.push([prefix + i, prefix + j]);
-        i++;
-        j++;
-      } else if (table[(i + 1) * width + j] >= table[i * width + j + 1]) i++;
-      else j++;
-    }
-  }
-  for (let offset = suffix; offset > 0; offset--) pairs.push([pattern.length - offset, added.length - offset]);
-
+  const { start, lines: added, kinds } = replacement;
   const output: OutputLine[] = [];
   let oldIndex = 0;
   let newIndex = 0;
-  const flushGroup = (oldEnd: number, newEnd: number) => {
-    // The first removed line of a change group sets the ending for its added lines.
-    const inherit = oldIndex < oldEnd ? effectiveEnding(start + oldIndex) : undefined;
-    for (; newIndex < newEnd; newIndex++) output.push({ text: added[newIndex], ending: undefined, inherit });
-    oldIndex = oldEnd;
-  };
-  for (const [oldMatch, newMatch] of pairs) {
-    flushGroup(oldMatch, newMatch);
-    output.push({ text: added[newMatch], ending: endings[start + oldMatch] });
-    oldIndex++;
-    newIndex++;
+  for (let index = 0; index < kinds.length;) {
+    if (kinds[index] === "context") {
+      output.push({ text: added[newIndex++], ending: endings[start + oldIndex++] });
+      index++;
+      continue;
+    }
+    let groupEnd = index;
+    while (groupEnd < kinds.length && kinds[groupEnd] !== "context") groupEnd++;
+    const removed = kinds.slice(index, groupEnd).filter((kind) => kind === "removed").length;
+    const inherit = removed > 0 ? effectiveEnding(start + oldIndex) : undefined;
+    for (; index < groupEnd; index++) {
+      if (kinds[index] === "added") output.push({ text: added[newIndex++], ending: undefined, inherit });
+    }
+    oldIndex += removed;
   }
-  flushGroup(pattern.length, added.length);
   return output;
 }
 

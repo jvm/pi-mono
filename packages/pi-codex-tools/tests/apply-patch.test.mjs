@@ -31,7 +31,7 @@ test("parses Codex add, delete, update, and move hunks", () => {
         kind: "update",
         path: "old.txt",
         moveTo: "new.txt",
-        chunks: [{ oldLines: ["old"], newLines: ["new"], endOfFile: false }],
+        chunks: [{ oldLines: ["old"], newLines: ["new"], lineKinds: ["removed", "added"], endOfFile: false }],
       },
     ],
   );
@@ -627,4 +627,78 @@ applyTest("preserves mixed endings across move, add, and delete operations", () 
 *** Delete File: gone.txt`,
     { "dst.txt": "﻿x\r\nY\nz\r\n", "new.txt": "fresh\n" },
     ["src.txt", "gone.txt"],
+  ));
+
+applyTest("keeps the ending of a context line that duplicates the removed line before it", () =>
+  lineEndingCase(
+    { "f.txt": "x\r\nx\n", "g.txt": "x\nx" },
+    `*** Update File: f.txt
+@@
+-x
+ x
+*** Update File: g.txt
+@@
+-x
+ x`,
+    { "f.txt": "x\n", "g.txt": "x" },
+  ));
+
+applyTest("keeps the ending of a context line that duplicates the removed line after it", () =>
+  lineEndingCase(
+    { "f.txt": "x\nx\r\n", "g.txt": "a\nx\r\nx" },
+    `*** Update File: f.txt
+@@
+ x
+-x
+*** Update File: g.txt
+@@
+ a
+ x
+-x`,
+    { "f.txt": "x\n", "g.txt": "a\nx\r\n" },
+  ));
+
+applyTest("gives a line added between duplicate context lines the ending of the line before it", () =>
+  lineEndingCase(
+    { "f.txt": "x\r\nx\n", "g.txt": "x\nx\r\ny\n" },
+    `*** Update File: f.txt
+@@
+ x
++x
+ x
+*** Update File: g.txt
+@@
++x
+ x
+ x`,
+    { "f.txt": "x\r\nx\r\nx\n", "g.txt": "x\nx\nx\r\ny\n" },
+  ));
+
+applyTest("gives a duplicate line that replaces a removed line that line's ending", () =>
+  lineEndingCase(
+    { "f.txt": "x\nx\r\nx\n" },
+    `*** Update File: f.txt
+@@
+ x
+-x
++x
+ x`,
+    { "f.txt": "x\nx\r\nx\n" },
+  ));
+
+applyTest("keeps context endings in change groups of any size", () => {
+  const count = 2_100;
+  const original = Array.from({ length: count }, (_, index) => `line${index}${index % 2 ? "\r\n" : "\n"}`).join("");
+  const body = Array.from({ length: count }, (_, index) =>
+    index % 2 ? ` line${index}` : `-line${index}\n+LINE${index}`).join("\n");
+  const expected = Array.from({ length: count }, (_, index) =>
+    index % 2 ? `line${index}\r\n` : `LINE${index}\n`).join("");
+  return lineEndingCase({ "f.txt": original }, `*** Update File: f.txt\n@@\n${body}`, { "f.txt": expected });
+});
+
+applyTest("keeps endings when a chunk matches only without its trailing blank line", () =>
+  lineEndingCase(
+    { "f.txt": "a\r\n", "g.txt": "a\r\n" },
+    "*** Update File: f.txt\n@@\n-a\n+A\n \n*** Update File: g.txt\n@@\n-a\n+A\n \n+B",
+    { "f.txt": "A\r\n", "g.txt": "A\r\n\r\nB\r\n" },
   ));
