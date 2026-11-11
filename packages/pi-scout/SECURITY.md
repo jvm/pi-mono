@@ -44,9 +44,15 @@ and tag names are validated against Git ref-name rules, must not start with `-`,
 and are passed as `--branch=<name>`. Refresh passes no caller input to Git; it
 uses the refspec Git recorded at clone time and runs only in a real directory
 inside the private clone root that the current user owns. Every network Git call
-sets `protocol.ext.allow=never` and `credential.interactive=false`, so
-configuration cannot enable command transports and Git fails instead of
-prompting on the terminal. SSH runs with `ssh -oBatchMode=yes` (through
+sets `protocol.ext.allow=never`, so configuration cannot enable command
+transports. It also sets `credential.interactive=false` and `core.askPass=true`,
+so Git fails instead of prompting for a username or password on the terminal:
+Git that implements `credential.interactive` stops before prompting, and older
+Git gets an empty answer from `true` instead of reading the terminal. Both work
+through `-c`, because `pi.exec` cannot set `GIT_TERMINAL_PROMPT=0`. Credential
+helpers still run first. A user-set `GIT_ASKPASS` takes precedence over
+`core.askPass` and may still prompt on Git versions without
+`credential.interactive`. SSH runs with `ssh -oBatchMode=yes` (through
 `-c core.sshCommand`, because `pi.exec` cannot set environment variables), so
 passphrase, password and unknown-host prompts fail. A user-set
 `GIT_SSH_COMMAND`, `GIT_SSH` or `core.sshCommand` is kept unchanged and may
@@ -55,10 +61,23 @@ Git output is discarded and capped at 1 MiB per call on Pi hosts that support
 `maxBuffer`; a command stopped at the cap fails. Clone/fetch failures and
 timeouts do not echo stderr or remote response bodies.
 
+Sources are limited to Git's native transports: `http(s)`, `ftp(s)`, `git`,
+SSH and `file` URLs, scp-like `host:path`, local paths and GitHub shorthand.
+Remote-helper sources (`<helper>::<address>`) and URLs with any other scheme are
+rejected before Git runs. Git would run a `git-remote-<helper>` program named by
+the source, and the source comes from model tool calls; `ext::` and `fd::` can
+run commands or use inherited file descriptors. `protocol.ext.allow=never` stays
+set as a second barrier. No allowlist is kept: `http::`/`https::` add nothing
+over plain URLs, and other helpers can be used by cloning manually and
+registering the local path. This also keeps helper addresses, which Scout does
+not parse, out of records and the clone configuration.
+
 URL passwords, non-SSH usernames, query strings and fragments are removed from
 Scout's persisted records, the `/scout` listing, and the clone's `origin` URL in
 `.git/config`, which the agent can read. Records written by earlier versions are
-redacted when loaded; their existing clone configuration is not rewritten. A
+redacted when loaded, including the URL inside a remote-helper source; such
+records stay listed but are never reused or refreshed. Their existing clone
+configuration is not rewritten. A
 refresh of a credential-stripped clone uses Git's credential helpers. This does
 not remove caller-supplied origins from Pi's tool-call transcript. Prefer Git's
 credential mechanisms to embedding credentials in URLs.

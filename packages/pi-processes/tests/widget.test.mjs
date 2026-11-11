@@ -8,16 +8,12 @@ import piProcesses from "../extensions/index.ts";
 import { ProcessRuntime } from "../src/runtime.ts";
 import { ProcessWidget, WIDGET_KEY } from "../src/process-widget.ts";
 import { commandPreview } from "../src/display-text.ts";
-import { fixture, textOf } from "./process-fixture.mjs";
+import { changes as changeSignal, fixture, textOf, until } from "./process-fixture.mjs";
 
 const dataOf = result => result.structuredContent ?? result.details ?? JSON.parse(textOf(result));
-async function eventually(check) {
-  for (let i = 0; i < 100; i++) {
-    if (check()) return;
-    await delay(20);
-  }
-  assert.ok(check(), "state did not settle");
-}
+// Wait for the redraw/lifecycle event, not a polling window; `until` rejects a
+// missing event before this test timeout.
+const bounded = { timeout: 30_000 };
 function terminal() {
   return {
     columns: 100, rows: 30, kittyProtocolActive: false, output: "",
@@ -29,7 +25,7 @@ function terminal() {
 }
 
 for (const [mode, Engine] of [["regular", TuiMainScreen], ["fullscreen", TuiAltScreen]]) {
-  test(`real Pi ${mode} widget shows only background work, updates idle, and clears on exit/reload`, async t => {
+  test(`real Pi ${mode} widget shows only background work, updates idle, and clears on exit/reload`, bounded, async t => {
     const term = terminal();
     const tui = new Engine(term);
     const widgets = new Map();
@@ -37,8 +33,9 @@ for (const [mode, Engine] of [["regular", TuiMainScreen], ["fullscreen", TuiAltS
     widgets.set("neighbor", neighbor);
     tui.addChild(neighbor);
     let redraws = 0;
+    const redrawn = changeSignal();
     const requestRender = tui.requestRender.bind(tui);
-    tui.requestRender = () => { redraws++; requestRender(); };
+    tui.requestRender = (...args) => { redraws++; requestRender(...args); redrawn.notify(); };
     const updates = [];
     const h = await fixture(t, {
       uiMode: "tui", after: [piProcesses], uiContext: {
@@ -87,7 +84,8 @@ for (const [mode, Engine] of [["regular", TuiMainScreen], ["fullscreen", TuiAltS
         }
       }
       const before = redraws;
-      await delay(1100);
+      // The idle clock's own tick is the signal; no model call or poll drives it.
+      await until(redrawn.subscribe, () => redraws > before && /[1-9]\d*s/.test(lines()));
       assert.ok(redraws > before, "elapsed time refreshes while Pi is idle");
       assert.match(lines(), /[1-9]\d*s/);
       const polled = dataOf(await h.run("write_stdin", { session_id: second.session_id, yield_time_ms: 0 }));
@@ -103,7 +101,7 @@ for (const [mode, Engine] of [["regular", TuiMainScreen], ["fullscreen", TuiAltS
 
       await h.run("bash", { command: "sleep 0.3", mode: "service" });
       assert.ok(widgets.has(WIDGET_KEY));
-      await eventually(() => !widgets.has(WIDGET_KEY)); // no polling or extra model turn
+      await until(redrawn.subscribe, () => !widgets.has(WIDGET_KEY)); // no polling or extra model turn
       await h.run("bash", { command: "sleep 30", mode: "service" });
       await h.session.reload();
       assert.ok(!widgets.has(WIDGET_KEY));
@@ -117,7 +115,7 @@ for (const [mode, Engine] of [["regular", TuiMainScreen], ["fullscreen", TuiAltS
   });
 }
 
-test("PTY background remains visible after rejecting input; approval still controls every write", async t => {
+test("PTY background remains visible after rejecting input; approval still controls every write", bounded, async t => {
   let widget;
   let approve = false;
   const h = await fixture(t, { uiMode: "tui", after: [piProcesses], confirm: async () => approve, uiContext: {
@@ -133,8 +131,13 @@ test("PTY background remains visible after rejecting input; approval still contr
   assert.equal((await h.run("write_stdin", { session_id: job.session_id, chars: "rejected\n" })).isError, true);
   assert.match(widget.render(100).join("\n"), /PTY/);
   approve = true;
-  const done = dataOf(await h.run("write_stdin", { session_id: job.session_id, chars: "approved\n", yield_time_ms: 1000 }));
-  assert.match(done.output, /received:approved/);
+  const accepted = await h.run("write_stdin", { session_id: job.session_id, chars: "approved\n", yield_time_ms: 1000 });
+  assert.equal(accepted.isError, false);
+  // The yield window may end before the shell answers; wait for exit and read
+  // the retained, non-consuming log instead of one bounded poll.
+  const [exit] = dataOf(await h.run("process_wait", { session_ids: [job.session_id], timeout_ms: 15_000 })).processes;
+  assert.equal(exit.status, "exited");
+  assert.match(dataOf(await h.run("process_output", { session_id: job.session_id })).output, /received:approved/);
   assert.ok(!widget);
   assert.equal(h.confirmations.length, 2);
 });
@@ -152,7 +155,7 @@ for (const uiMode of ["print", "json", "rpc"]) {
   });
 }
 
-test("runtime background snapshots are metadata-only, detached-only, and exit-driven", async t => {
+test("runtime background snapshots are metadata-only, detached-only, and exit-driven", bounded, async t => {
   const cwd = process.cwd();
   let changes = 0;
   const rt = new ProcessRuntime(undefined, undefined, () => changes++);
@@ -165,11 +168,11 @@ test("runtime background snapshots are metadata-only, detached-only, and exit-dr
   assert.equal(rt.background().length, 1);
   assert.deepEqual(Object.keys(rt.background()[0]).sort(), ["command_preview", "session_id", "started_at", "tty"]);
   const before = changes;
-  await eventually(() => !rt.background().length);
+  await until(listener => rt.subscribe(listener), () => !rt.background().length);
   assert.ok(changes > before);
   assert.equal(job.output + (await rt.poll(job.session_id, 0, 1024)).output, "retained");
   await rt.start("sleep 30", cwd, false, 100, false, 0, 1024);
-  await eventually(() => !rt.background().length);
+  await until(listener => rt.subscribe(listener), () => !rt.background().length);
   const abort = new AbortController();
   const initial = rt.start("sleep 30", cwd, false, 5000, false, 5000, 1024, abort.signal);
   abort.abort();
