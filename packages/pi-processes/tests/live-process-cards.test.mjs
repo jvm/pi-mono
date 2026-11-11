@@ -2,22 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
 import { initTheme, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
 import { TuiMainScreen, TuiAltScreen, visibleWidth } from "@earendil-works/pi-tui";
 import piProcesses from "../extensions/index.ts";
 import { LiveProcessCards } from "../src/live-process-cards.ts";
-import { fixture, textOf } from "./process-fixture.mjs";
+import { changes, fixture, textOf, until } from "./process-fixture.mjs";
 
 const dataOf = r => r.structuredContent ?? r.details ?? JSON.parse(textOf(r));
-async function eventually(check) {
-  for (let i = 0; i < 150; i++) {
-    if (check()) return;
-    await delay(20);
-  }
-  assert.ok(check(), "expected lifecycle-driven card update");
-}
+// Waits use lifecycle events, not a polling window; `until` rejects a missing
+// event, with the rendered card, before this test timeout.
+const bounded = { timeout: 30_000 };
 function terminal() {
   return {
     columns: 100, rows: 30, kittyProtocolActive: false, output: "",
@@ -34,8 +29,10 @@ async function cardFixture(t, Engine, args) {
   const term = terminal();
   const tui = new Engine(term);
   let redraws = 0;
+  // Redraw requests and session events are the signals the card and completion depend on.
+  const changed = changes();
   const requestRender = tui.requestRender.bind(tui);
-  tui.requestRender = () => { redraws++; requestRender(); };
+  tui.requestRender = (...args) => { redraws++; requestRender(...args); changed.notify(); };
   const launched = await h.run("bash", args);
   const original = structuredClone(launched);
   const card = new ToolExecutionComponent("bash", "launch-card", args, {},
@@ -44,13 +41,16 @@ async function cardFixture(t, Engine, args) {
   tui.addChild(card);
   tui.start();
   t.after(() => tui.stop());
+  t.after(h.session.subscribe(() => changed.notify()));
   return { ...h, term, tui, card, launched, original, redraws: () => redraws,
-    lines: () => stripVTControlCharacters(card.render(100).join("\n")) };
+    until: check => until(changed.subscribe, check, { describe: lines }),
+    lines };
+  function lines() { return stripVTControlCharacters(card.render(100).join("\n")); }
 }
 
 for (const Engine of [TuiMainScreen, TuiAltScreen]) {
   for (const code of [0, 7]) {
-    test(`${Engine.name} launch card updates in place on exit ${code} without polling or changing model output`, async t => {
+    test(`${Engine.name} launch card updates in place on exit ${code} without polling or changing model output`, bounded, async t => {
       const h = await cardFixture(t, Engine, {
         command: `while ! test -f finish; do sleep 0.02; done; printf late-output; exit ${code}`,
         mode: "background",
@@ -59,10 +59,10 @@ for (const Engine of [TuiMainScreen, TuiAltScreen]) {
       const before = h.redraws();
       await writeFile(join(h.ctx.cwd, "finish"), "");
       const expected = code === 0 ? /done ·/ : /exit 7 ·/;
-      await eventually(() => expected.test(h.lines()));
+      await h.until(() => expected.test(h.lines()));
       assert.ok(h.redraws() > before, "runtime exit must request a redraw of the tool row");
       assert.doesNotMatch(h.lines(), /running|late-output/, "update the heading, not the original output preview");
-      await eventually(() => h.session.messages.some(m => m.customType === "pi-processes-completed"));
+      await h.until(() => h.session.messages.some(m => m.customType === "pi-processes-completed"));
       await h.session.waitForIdle();
       const completed = h.session.messages.find(m => m.customType === "pi-processes-completed");
       assert.equal(completed.details.processes[0].exit_code, code);
@@ -91,14 +91,13 @@ for (const [outcome, args, expected] of [
   ["signal", { command: "while ! test -f finish; do sleep 0.02; done; kill -TERM $$", mode: "service" }, /failed · SIGTERM/],
   ["reload", { command: "sleep 30", mode: "service" }, /failed · SIG(?:TERM|KILL)/],
 ]) {
-  test(`launch card tracks ${outcome} and preserves its final heading on later redraws`, async t => {
+  test(`launch card tracks ${outcome} and preserves its final heading on later redraws`, bounded, async t => {
     const h = await cardFixture(t, TuiMainScreen, args);
     assert.match(h.lines(), /running/);
     if (outcome === "stop") await h.run("process_kill", { session_id: dataOf(h.launched).session_id });
     if (outcome === "signal") await writeFile(join(h.ctx.cwd, "finish"), "");
     if (outcome === "reload") await h.session.reload();
-    try { await eventually(() => expected.test(h.lines())); }
-    catch (error) { assert.fail(`${error.message}\n${h.lines()}`); }
+    await h.until(() => expected.test(h.lines()));
     h.card.invalidate();
     assert.match(h.lines(), expected);
     assert.deepEqual(h.launched, h.original);
