@@ -494,3 +494,137 @@ applyTest("serializes concurrent patches through different aliases", async () =>
     await rm(cwd, { recursive: true, force: true });
   }
 });
+
+const lineEndingCase = async (files, body, expected, missing = []) => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-eol-"));
+  try {
+    for (const [name, content] of Object.entries(files)) await writeFile(join(cwd, name), content);
+    await applyPatch(patch(body), { cwd });
+    for (const [name, content] of Object.entries(expected)) {
+      assert.equal(await readFile(join(cwd, name), "utf8"), content, name);
+    }
+    for (const name of missing) await assert.rejects(lstat(join(cwd, name)), { code: "ENOENT" });
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+};
+
+applyTest("keeps LF endings in a pure LF file", () =>
+  lineEndingCase(
+    { "f.txt": "a\nb\nc\n" },
+    `*** Update File: f.txt
+@@
+ a
+-b
++B
++B2
+ c`,
+    { "f.txt": "a\nB\nB2\nc\n" },
+  ));
+
+applyTest("keeps CRLF endings in a pure CRLF file, including appended lines", () =>
+  lineEndingCase(
+    { "f.txt": "a\r\nb\r\nc\r\n" },
+    `*** Update File: f.txt
+@@
+-a
++A
+@@
+ c
++d`,
+    { "f.txt": "A\r\nb\r\nc\r\nd\r\n" },
+  ));
+
+applyTest("keeps untouched endings byte-for-byte in a mixed-ending file", () =>
+  lineEndingCase(
+    { "f.txt": "lf1\ncrlf1\r\nlf2\ncrlf2\r\nlf3\nlone\rcr\n" },
+    `*** Update File: f.txt
+@@
+ crlf1
+-lf2
++changed
++inserted
+ crlf2`,
+    { "f.txt": "lf1\ncrlf1\r\nchanged\ninserted\ncrlf2\r\nlf3\nlone\rcr\n" },
+  ));
+
+applyTest("gives replaced lines the first removed line's ending and keeps interior context", () =>
+  lineEndingCase(
+    { "f.txt": "one\ntwo\r\nkeep\nthree\r\nfour\n" },
+    `*** Update File: f.txt
+@@
+ one
+-two
++TWO
+ keep
+-three
++THREE
+ four`,
+    { "f.txt": "one\nTWO\r\nkeep\nTHREE\r\nfour\n" },
+  ));
+
+applyTest("gives pure insertions the ending of the line before them", () =>
+  lineEndingCase(
+    { "f.txt": "head\r\nmid\ntail\r\n" },
+    `*** Update File: f.txt
+@@
+ head
++after-head
+ mid
++after-mid
+ tail`,
+    { "f.txt": "head\r\nafter-head\r\nmid\nafter-mid\ntail\r\n" },
+  ));
+
+applyTest("gives insertions at the start of a file the ending of the following line", () =>
+  lineEndingCase(
+    { "f.txt": "first\r\nsecond\n" },
+    `*** Update File: f.txt
+@@
++zero
+ first`,
+    { "f.txt": "zero\r\nfirst\r\nsecond\n" },
+  ));
+
+applyTest("keeps a missing trailing newline when the last line is untouched", () =>
+  lineEndingCase(
+    { "f.txt": "a\r\nb\nlast", "g.txt": "only" },
+    `*** Update File: f.txt
+@@
+-a
++A
+ b
+*** Update File: g.txt
+@@
+-only
++changed`,
+    { "f.txt": "A\r\nb\nlast", "g.txt": "changed\n" },
+  ));
+
+applyTest("terminates a final line without newline when lines are appended after it", () =>
+  lineEndingCase(
+    { "f.txt": "a\r\nb" },
+    `*** Update File: f.txt
+@@
+ b
++c
+*** End of File`,
+    { "f.txt": "a\r\nb\r\nc\r\n" },
+  ));
+
+applyTest("preserves mixed endings across move, add, and delete operations", () =>
+  lineEndingCase(
+    { "src.txt": "﻿x\r\ny\nz\r\n", "gone.txt": "bye\r\n" },
+    `*** Update File: src.txt
+*** Move to: dst.txt
+@@
+ x
+-y
++Y
+ z
+*** Add File: new.txt
++fresh
+*** Delete File: gone.txt`,
+    { "dst.txt": "﻿x\r\nY\nz\r\n", "new.txt": "fresh\n" },
+    ["src.txt", "gone.txt"],
+  ));

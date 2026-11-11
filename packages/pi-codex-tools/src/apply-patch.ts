@@ -454,14 +454,55 @@ async function writeTargetFile(absolute: string, content: string, signal?: Abort
   throwIfAborted(signal);
 }
 
+type LineEnding = "\r\n" | "\n" | "";
+
+interface OutputLine {
+  text: string;
+  // Original ending to keep byte-for-byte, or undefined for a line the patch added.
+  ending: LineEnding | undefined;
+  // Ending for an added line, chosen from the change group it belongs to.
+  inherit?: LineEnding;
+}
+
+// Bound the per-chunk ending alignment; larger change groups fall back to
+// treating their unmatched middle as replaced lines.
+const MAX_ENDING_ALIGNMENT_CELLS = 4_000_000;
+
+/**
+ * Apply update chunks with Codex line matching while keeping line endings local.
+ *
+ * Line-ending rule:
+ * - A line the patch does not change (outside every chunk, or a chunk context
+ *   line equal to its replacement) keeps its original LF or CRLF.
+ * - Added lines that replace removed lines take the ending of the first removed
+ *   line of that change group; pure insertions take the ending of the line
+ *   before them, else the line after them. A final line without a terminator
+ *   counts as having the ending of the nearest terminated line before it.
+ *   A file with no line breaks uses LF.
+ * - A file without a trailing newline keeps that property while its last line
+ *   is untouched. When the patch replaces the last line or appends after it, the
+ *   result ends with a newline, matching Codex.
+ * Only LF and CRLF count as line breaks; a lone CR stays part of its line.
+ */
 function applyUpdateContent(original: string, chunks: UpdateChunk[], displayPath: string): string {
   const bom = original.startsWith("\uFEFF") ? "\uFEFF" : "";
   const body = bom ? original.slice(1) : original;
-  const lineEnding = body.includes("\r\n") ? "\r\n" : "\n";
-  const lines = body.replace(/\r\n/g, "\n").split("\n");
-  if (lines.at(-1) === "") lines.pop();
+  const lines: string[] = [];
+  const endings: LineEnding[] = [];
+  for (let offset = 0; offset < body.length;) {
+    const lineFeed = body.indexOf("\n", offset);
+    if (lineFeed === -1) {
+      lines.push(body.slice(offset));
+      endings.push("");
+      break;
+    }
+    const crlf = lineFeed > offset && body[lineFeed - 1] === "\r";
+    lines.push(body.slice(offset, crlf ? lineFeed - 1 : lineFeed));
+    endings.push(crlf ? "\r\n" : "\n");
+    offset = lineFeed + 1;
+  }
 
-  const replacements: Array<{ start: number; length: number; lines: string[] }> = [];
+  const replacements: Array<{ start: number; length: number; pattern: string[]; lines: string[] }> = [];
   let lineIndex = 0;
   for (const chunk of chunks) {
     if (chunk.context !== undefined) {
@@ -471,7 +512,7 @@ function applyUpdateContent(original: string, chunks: UpdateChunk[], displayPath
     }
 
     if (chunk.oldLines.length === 0) {
-      replacements.push({ start: lines.length, length: 0, lines: [...chunk.newLines] });
+      replacements.push({ start: lines.length, length: 0, pattern: [], lines: [...chunk.newLines] });
       continue;
     }
 
@@ -486,7 +527,7 @@ function applyUpdateContent(original: string, chunks: UpdateChunk[], displayPath
     if (found === undefined) {
       throw new Error(`Failed to find expected lines in ${displayPath}:\n${chunk.oldLines.join("\n")}`);
     }
-    replacements.push({ start: found, length: pattern.length, lines: [...replacementLines] });
+    replacements.push({ start: found, length: pattern.length, pattern, lines: [...replacementLines] });
     lineIndex = found + pattern.length;
   }
 
@@ -499,12 +540,112 @@ function applyUpdateContent(original: string, chunks: UpdateChunk[], displayPath
     }
   }
 
-  const updated = [...lines];
-  for (const replacement of [...replacements].reverse()) {
-    updated.splice(replacement.start, replacement.length, ...replacement.lines);
+  const effectiveEnding = (index: number): LineEnding => {
+    for (let candidate = index; candidate >= 0; candidate--) {
+      if (endings[candidate]) return endings[candidate];
+    }
+    return "\n";
+  };
+
+  const output: OutputLine[] = [];
+  let position = 0;
+  for (const replacement of replacements) {
+    for (; position < replacement.start; position++) output.push({ text: lines[position], ending: endings[position] });
+    output.push(...alignReplacement(replacement, endings, effectiveEnding));
+    position = replacement.start + replacement.length;
   }
-  if (updated.at(-1) !== "") updated.push("");
-  return bom + updated.join(lineEnding);
+  for (; position < lines.length; position++) output.push({ text: lines[position], ending: endings[position] });
+
+  // Pure insertions inherit from the line before them, else the line after them.
+  const settledEnding = (line: OutputLine): LineEnding | undefined =>
+    line.ending === undefined ? line.inherit : line.ending || effectiveEnding(endings.length - 1);
+  let previousEnding: LineEnding | undefined;
+  for (const line of output) {
+    if (line.ending === undefined && line.inherit === undefined && previousEnding !== undefined) line.inherit = previousEnding;
+    previousEnding = settledEnding(line) ?? previousEnding;
+  }
+  let nextEnding: LineEnding = "\n";
+  for (let index = output.length - 1; index >= 0; index--) {
+    const line = output[index];
+    if (line.ending === undefined && line.inherit === undefined) line.inherit = nextEnding;
+    nextEnding = settledEnding(line) ?? nextEnding;
+  }
+
+  let result = bom;
+  output.forEach((line, index) => {
+    const isLast = index === output.length - 1;
+    const ending = line.ending === undefined
+      ? line.inherit!
+      : line.ending === "" && !isLast ? effectiveEnding(endings.length - 1) : line.ending;
+    result += line.text + ending;
+  });
+  return result;
+}
+
+/**
+ * Map a replacement's new lines onto the original lines it matched. New lines
+ * equal to a pattern line (chunk context) keep that original line's ending.
+ */
+function alignReplacement(
+  replacement: { start: number; length: number; pattern: string[]; lines: string[] },
+  endings: LineEnding[],
+  effectiveEnding: (index: number) => LineEnding,
+): OutputLine[] {
+  const { start, pattern, lines: added } = replacement;
+  const pairs: Array<[number, number]> = [];
+  let prefix = 0;
+  while (prefix < pattern.length && prefix < added.length && pattern[prefix] === added[prefix]) {
+    pairs.push([prefix, prefix]);
+    prefix++;
+  }
+  let suffix = 0;
+  while (
+    suffix < pattern.length - prefix
+    && suffix < added.length - prefix
+    && pattern[pattern.length - 1 - suffix] === added[added.length - 1 - suffix]
+  ) suffix++;
+
+  const oldMiddle = pattern.length - prefix - suffix;
+  const newMiddle = added.length - prefix - suffix;
+  if (oldMiddle > 0 && newMiddle > 0 && oldMiddle * newMiddle <= MAX_ENDING_ALIGNMENT_CELLS) {
+    // Longest common subsequence over the middle so interior context lines stay matched.
+    const width = newMiddle + 1;
+    const table = new Uint32Array((oldMiddle + 1) * width);
+    for (let i = oldMiddle - 1; i >= 0; i--) {
+      for (let j = newMiddle - 1; j >= 0; j--) {
+        table[i * width + j] = pattern[prefix + i] === added[prefix + j]
+          ? table[(i + 1) * width + j + 1] + 1
+          : Math.max(table[(i + 1) * width + j], table[i * width + j + 1]);
+      }
+    }
+    for (let i = 0, j = 0; i < oldMiddle && j < newMiddle;) {
+      if (pattern[prefix + i] === added[prefix + j]) {
+        pairs.push([prefix + i, prefix + j]);
+        i++;
+        j++;
+      } else if (table[(i + 1) * width + j] >= table[i * width + j + 1]) i++;
+      else j++;
+    }
+  }
+  for (let offset = suffix; offset > 0; offset--) pairs.push([pattern.length - offset, added.length - offset]);
+
+  const output: OutputLine[] = [];
+  let oldIndex = 0;
+  let newIndex = 0;
+  const flushGroup = (oldEnd: number, newEnd: number) => {
+    // The first removed line of a change group sets the ending for its added lines.
+    const inherit = oldIndex < oldEnd ? effectiveEnding(start + oldIndex) : undefined;
+    for (; newIndex < newEnd; newIndex++) output.push({ text: added[newIndex], ending: undefined, inherit });
+    oldIndex = oldEnd;
+  };
+  for (const [oldMatch, newMatch] of pairs) {
+    flushGroup(oldMatch, newMatch);
+    output.push({ text: added[newMatch], ending: endings[start + oldMatch] });
+    oldIndex++;
+    newIndex++;
+  }
+  flushGroup(pattern.length, added.length);
+  return output;
 }
 
 function seekSequence(lines: string[], pattern: string[], start: number, endOfFile: boolean): number | undefined {
