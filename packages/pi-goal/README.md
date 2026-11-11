@@ -172,7 +172,7 @@ fonts may display boxes. Goal storage, accounting, and continuation are unchange
 Provider failure handling waits until Pi's own auto-retry has finished, so a failed attempt that Pi retries successfully never stops the goal. When a run still ends in error:
 
 - An HTTP 429 response, or error text that indicates a subscription, quota, billing, or balance limit, marks the goal `usage_limited`. Response headers, URLs, and provider/model names are not evidence.
-- An authentication failure pauses the goal (`paused`) with that reason.
+- An authentication or permission failure pauses the goal (`paused`) with that reason on the first failed run. HTTP 401, and HTTP 403 without rate-limit wording, are authentication failures whatever the provider's wording. Error text such as "Incorrect API key provided" or "API key not valid" counts only when the failure carries no other status.
 - Other errors, such as timeouts or dropped streams, pause the goal (`paused`) after three consecutive failed runs on the same provider/model. A successful response or a provider/model switch restarts the count. The notice states the last error and does not claim a usage limit.
 
 This prevents automatic continuation from retrying indefinitely after provider limits such as 5-hour subscription caps. When the budget is exhausted or a provider limit is detected, a visible `pi-goal-event` notice is saved to model context without requesting a wrap-up turn. The model can act on that notice during a request independently started by Pi, the user, or another extension; the notice itself does not spend more tokens.
