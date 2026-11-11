@@ -2,9 +2,9 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import type { GoalMutation, GoalState, GoalStatus, ParsedGoalCommand } from "./types.js";
 import { GOAL_EVENT_TYPE, GOAL_SCHEMA_VERSION, GOAL_SUMMARY_TYPE } from "./types.js";
 import { accountUsageFromBranch, isBudgetExceeded } from "./accounting.js";
-import { appendGoalMutation, applyGoalMutation, createGoalMutation, replaceGoalMutation, statusMutation } from "./state.js";
+import { appendGoalMutation, applyGoalMutation, createGoalMutation, goalTransitionRejection, replaceGoalMutation, statusMutation } from "./state.js";
 import { PI_GOAL_VERSION, transitionMeta, withPiGoalVersion } from "./metadata.js";
-import { formatElapsed, goalStatusLabel, goalToSummary, goalUsageSummary, nowIso, realizedTimeUsed } from "./utils.js";
+import { formatElapsed, goalToSummary, goalUsageSummary, nowIso, realizedTimeUsed } from "./utils.js";
 import { parseTokenBudget, validateObjective, validateTokenBudget } from "./validation.js";
 
 export interface CommandRuntime {
@@ -116,7 +116,7 @@ async function editGoal(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime:
 function setGoalStatus(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime: CommandRuntime, status: "paused" | "active"): void {
   const current = accountCurrent(pi, ctx, runtime.getGoal());
   if (!current) return ctx.ui.notify("No goal set.", "error");
-  const rejected = status === "paused" ? pauseRejection(current) : resumeRejection(current);
+  const rejected = goalTransitionRejection(current, status);
   if (rejected) return ctx.ui.notify(rejected, "error");
   const transitionedAt = nowIso();
   const time = realizedTimeUsed(current, Date.parse(transitionedAt));
@@ -126,23 +126,6 @@ function setGoalStatus(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime: 
   runtime.setGoal(applyGoalMutation(current, mutation));
   runtime.afterGoalChanged(ctx, status === "active" ? "Goal resumed." : "Goal paused.");
   if (status === "active") runtime.scheduleContinuation(ctx, "resumed");
-}
-
-/** Only a running goal can be paused; other states already stopped for a recorded reason. */
-function pauseRejection(goal: GoalState): string | undefined {
-  if (goal.status === "active") return undefined;
-  if (goal.status === "paused") return "Goal is already paused. Use /goal resume to continue.";
-  if (goal.status === "complete") return "Goal is complete and cannot be paused. Use /goal edit to reactivate it or /goal <objective> to start a new goal.";
-  return `Goal is ${goalStatusLabel(goal.status)} and is not running, so it cannot be paused. Use /goal status for details.`;
-}
-
-/** Resume restarts stopped work, but not a finished goal or one whose budget is still exhausted. */
-function resumeRejection(goal: GoalState): string | undefined {
-  if (goal.status === "complete") return "Goal is complete. Use /goal edit to change the objective and reactivate it, or /goal <objective> to start a new goal.";
-  if (goal.status === "budget_limited" && goal.tokenBudget != null && goal.tokensUsed >= goal.tokenBudget) {
-    return `Goal token budget is exhausted (${goal.tokensUsed}/${goal.tokenBudget} tokens). Raise it with /goal budget <tokens> or remove it with /goal budget clear.`;
-  }
-  return undefined;
 }
 
 function clearGoal(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime: CommandRuntime): void {

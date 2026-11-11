@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BranchEntry, GoalMutation, GoalMutationMeta, GoalState, GoalStatus } from "./types.js";
 import { GOAL_ENTRY_TYPE, GOAL_SCHEMA_VERSION } from "./types.js";
 import { withPiGoalVersion } from "./metadata.js";
-import { newGoalId, nowIso, secondsBetween } from "./utils.js";
+import { goalStatusLabel, newGoalId, nowIso, secondsBetween } from "./utils.js";
 
 export function appendGoalMutation(pi: ExtensionAPI, mutation: GoalMutation): void {
   pi.appendEntry(GOAL_ENTRY_TYPE, mutation);
@@ -124,6 +124,42 @@ function optionalNonNegativeInteger(value: unknown): boolean {
 function optionalPositiveInteger(value: unknown): boolean {
   return value === undefined
     || (typeof value === "number" && Number.isFinite(value) && Number.isInteger(value) && value > 0);
+}
+
+/** Status changes that a user command or model tool may request. */
+export type RequestedGoalTransition = "paused" | "active" | "complete" | "blocked";
+
+/**
+ * Shared transition table for `/goal pause|resume` and `update_goal`. System
+ * transitions (budget, provider limits, shutdown) are not requested here.
+ *
+ * | target            | allowed sources                                                 |
+ * |-------------------|-----------------------------------------------------------------|
+ * | paused            | active                                                          |
+ * | active (resume)   | active, paused, blocked, usage_limited, budget_limited if under budget |
+ * | complete, blocked | active, paused, usage_limited, budget_limited                   |
+ *
+ * Returns a user/model-readable reason when the transition is invalid.
+ */
+export function goalTransitionRejection(goal: GoalState, target: RequestedGoalTransition): string | undefined {
+  const status = goal.status;
+  const label = goalStatusLabel(status);
+  if (target === "paused") {
+    if (status === "active") return undefined;
+    if (status === "paused") return "Goal is already paused. Use /goal resume to continue.";
+    if (status === "complete") return "Goal is complete and cannot be paused. Use /goal edit to reactivate it or /goal <objective> to start a new goal.";
+    return `Goal is ${label} and is not running, so it cannot be paused. Use /goal status for details.`;
+  }
+  if (target === "active") {
+    if (status === "complete") return "Goal is complete. Use /goal edit to change the objective and reactivate it, or /goal <objective> to start a new goal.";
+    if (status === "budget_limited" && goal.tokenBudget != null && goal.tokensUsed >= goal.tokenBudget) {
+      return `Goal token budget is exhausted (${goal.tokensUsed}/${goal.tokenBudget} tokens). Raise it with /goal budget <tokens> or remove it with /goal budget clear.`;
+    }
+    return undefined;
+  }
+  // A stopped goal (paused or limited) can still be finalized; a finalized one cannot change.
+  if (status !== "complete" && status !== "blocked") return undefined;
+  return `Goal is already ${status}; update_goal cannot change a finalized goal to ${target}. The goal state is unchanged. Do not call update_goal again; stop goal work and report the current state to the user.`;
 }
 
 export function statusMutation(goal: GoalState, status: GoalStatus, timeUsedSeconds: number, activeStartedAt?: string, meta?: GoalMutationMeta): GoalMutation {
