@@ -11,7 +11,6 @@ Each package installs independently. Pick the capability you need, then follow i
 | Need | Package | What it adds |
 | --- | --- | --- |
 | Keep Pi working toward a durable objective | [pi-goal](./packages/pi-goal) | Long-running, branch-aware goals with automatic continuation, budgets, and progress tracking. |
-| Use a complete engineering workflow | [pi-compound-engineering](./packages/pi-compound-engineering) | Compound Engineering skills for brainstorming, planning, execution, review, and learning. |
 | Help agents understand a repository | [pi-agentsmd](./packages/pi-agentsmd) | One-command generation of project-aware `AGENTS.md` guidance. |
 | Control how skills are invoked and discovered | [pi-skillful](./packages/pi-skillful) | Inline invocation, prompt visibility controls, and session skill toggles. |
 | Learn from reference implementations | [pi-scout](./packages/pi-scout) | Reusable local reference repositories for agent exploration. |
@@ -40,6 +39,11 @@ Each package installs independently. Pick the capability you need, then follow i
 | Stop destructive shell commands | [pi-dcg](./packages/pi-dcg) | Destructive Command Guard checks before agent or user shell commands execute. |
 | Run commands without polling loops | [pi-processes](./packages/pi-processes) | Extend `bash` with background execution, task-scoped results, a live process manager, explicit attention/cleanup controls, and approved PTY input. |
 | Keep a Mac awake while Pi works | [pi-insomnia](./packages/pi-insomnia) | Automatic macOS idle-sleep prevention for active agent runs. |
+
+## Retired packages
+
+- `pi-compound-engineering` is no longer maintained. Its last published version, 3.19.2, remains on npm and is deprecated.
+  The source is available at the git tag [`archive/pi-compound-engineering`](https://github.com/jvm/pi-mono/tree/archive/pi-compound-engineering).
 
 ## Development
 

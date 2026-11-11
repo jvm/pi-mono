@@ -190,14 +190,3 @@ Root is private. Publish workspaces independently. Release tags use `<package-na
 ## Security
 
 Never commit keys, tokens, auth headers, provider secrets, local Pi settings, sessions, or machine config. Do not run destructive commands on user data without explicit approval. Run `npm run validate` for security-sensitive changes.
-
-<!-- BEGIN COMPOUND PI TOOL MAP -->
-## Compound Engineering tools
-
-Full CE functionality needs `pi-subagents`; interactive workflows benefit from `pi-ask-user`.
-
-```bash
-pi install npm:pi-subagents
-pi install npm:pi-ask-user
-```
-<!-- END COMPOUND PI TOOL MAP -->
