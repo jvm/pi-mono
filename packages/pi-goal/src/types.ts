@@ -98,9 +98,11 @@ export interface GoalSummary {
 export type GoalContextReason = "continue" | "created" | "resumed" | "objective_updated" | "budget_limited";
 
 export interface ParsedGoalCommand {
-  action: "status" | "edit" | "pause" | "resume" | "clear" | "setBudget" | "clearBudget" | "createOrReplace";
+  action: "status" | "edit" | "pause" | "resume" | "clear" | "setBudget" | "clearBudget" | "createOrReplace" | "invalid";
   objective?: string;
   tokenBudget?: number;
+  /** Set for `invalid`: a user-facing usage error. */
+  error?: string;
 }
 
 export type BranchEntry = Record<string, any>;

@@ -9,6 +9,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 ### Fixed
 
 - Preserve elapsed goal time across `/goal edit`. Editing an active goal no longer resets its time to zero, and sessions that contain such edits reconstruct the correct time on reload.
+- Reject `/goal --budget 50000` without an objective, unknown `--` options, and `/goal budget` without a value with a usage error instead of creating a goal whose objective is the flag text. Accept `k`/`m` suffixes and `,`/`_` separators in token budgets (`50k`, `1.5m`, `50,000`) and `--budget=<tokens>`; reject zero, negative, fractional, and non-numeric budgets with a clear message.
 
 ## [0.3.1] - 2026-10-30
 
