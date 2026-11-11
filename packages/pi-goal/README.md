@@ -54,7 +54,7 @@ Replacing a non-complete goal asks for confirmation when UI is available.
 
 - `get_goal` returns current goal state and remaining budget.
 - `create_goal` creates a goal only when explicitly requested and fails if one already exists.
-- `update_goal` lets the model mark a goal `complete` or `blocked` only. It should mark complete only after requirement-by-requirement verification, and blocked only after the same blocker repeats for at least three goal turns.
+- `update_goal` lets the model mark a goal `complete` or `blocked` only. It should mark complete only after requirement-by-requirement verification, and blocked only after the same blocker repeats for at least three goal turns. It can finalize an active, paused, usage-limited, or budget-limited goal; it rejects any change to a goal that is already `complete` or `blocked`.
 
 `update_goal` is model-only: it remains available directly to the model with
 codemode disabled, `on`, or `only`, but cannot be called from codemode scripts or

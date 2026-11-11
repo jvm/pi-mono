@@ -216,6 +216,44 @@ test("/goal resume rejects complete goals and exhausted budgets but resumes stop
   }
 });
 
+test("update_goal finalizes active, paused, and limited goals", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const source of ["active", "paused", "usage_limited", "budget_limited"]) {
+    for (const target of ["complete", "blocked"]) {
+      const at = new Date().toISOString();
+      const s = await session(source === "active" ? [create(at, 1000)] : [create(at, 1000), status(source, 5, at)]);
+      const result = await s.pi.tools.get("update_goal").execute(`${source}-${target}`, { status: target }, undefined, undefined, s.ctx);
+      assert.equal(result.details.goal.status, target, `${source} -> ${target}`);
+      assert.equal(s.reloaded().status, target, `${source} -> ${target} persisted`);
+      t.mock.timers.tick(1);
+      assert.equal(continuations(s).length, 0, `${source} -> ${target}: no continuation`);
+      await s.close();
+    }
+  }
+});
+
+test("update_goal rejects changes to a finalized goal and leaves it unchanged", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const source of ["complete", "blocked"]) {
+    for (const target of ["complete", "blocked"]) {
+      const at = new Date().toISOString();
+      const s = await session([create(at), status(source, 5, at)]);
+      const before = s.pi.entries.length;
+      const messages = s.pi.messages.length;
+      await assert.rejects(
+        () => s.pi.tools.get("update_goal").execute(`${source}-${target}`, { status: target }, undefined, undefined, s.ctx),
+        new RegExp(`Goal is already ${source}; update_goal cannot change a finalized goal to ${target}\\. The goal state is unchanged\\. Do not call update_goal again`),
+      );
+      assert.equal(s.pi.entries.length, before, `${source} -> ${target}: nothing persisted`);
+      assert.equal(s.pi.messages.length, messages, `${source} -> ${target}: no goal event`);
+      assert.equal((await s.goal()).status, source);
+      t.mock.timers.tick(1);
+      assert.equal(continuations(s).length, 0, `${source} -> ${target}: no continuation`);
+      await s.close();
+    }
+  }
+});
+
 test("a legacy active edit entry no longer erases the accrued active segment on reload", () => {
   const at = hourAgo();
   const branch = [create(at), { schemaVersion: 1, kind: "edit", goalId: "g", objective: "next", status: "active", at: new Date().toISOString() }]
