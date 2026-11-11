@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { BranchEntry, GoalMutation, GoalMutationMeta, GoalState, GoalStatus } from "./types.js";
 import { GOAL_ENTRY_TYPE, GOAL_SCHEMA_VERSION } from "./types.js";
 import { withPiGoalVersion } from "./metadata.js";
-import { goalStatusLabel, newGoalId, nowIso, secondsBetween } from "./utils.js";
+import { goalStatusLabel, newGoalId, nowIso, realizedTimeUsed, secondsBetween } from "./utils.js";
 
 export function appendGoalMutation(pi: ExtensionAPI, mutation: GoalMutation): void {
   pi.appendEntry(GOAL_ENTRY_TYPE, mutation);
@@ -16,8 +16,17 @@ export function replaceGoalMutation(objective: string, tokenBudget?: number, met
   return { schemaVersion: GOAL_SCHEMA_VERSION, kind: "replace", goalId: newGoalId(), objective, tokenBudget, at: nowIso(), meta: withPiGoalVersion(meta) };
 }
 
+// Clock skew between a status entry's saved time and its timestamp.
+const LEGACY_TIME_TOLERANCE_SECONDS = 2;
+
 export function reconstructGoalState(branchEntries: BranchEntry[], diagnostics: string[] = []): GoalState | null {
   let goal: GoalState | null = null;
+  // Up to 0.3.1, an edit of an active goal restarted its active segment, so
+  // the time since that segment's start was lost, also from every status entry
+  // saved afterwards. Track that loss and add it back to status entries that
+  // are short by exactly that amount; an entry from fixed code clears it.
+  let legacySegmentStart: string | undefined;
+  let legacyLostSeconds = 0;
   for (const entry of branchEntries) {
     if (entry?.type !== "custom" || entry.customType !== GOAL_ENTRY_TYPE) continue;
     const mutation = entry.data as Partial<GoalMutation> | undefined;
@@ -25,7 +34,27 @@ export function reconstructGoalState(branchEntries: BranchEntry[], diagnostics: 
       diagnostics.push(`Ignoring malformed pi-goal entry ${entry.id ?? "<unknown>"}.`);
       continue;
     }
-    goal = applyGoalMutation(goal, mutation, diagnostics);
+    let applied: GoalMutation = mutation;
+    if (mutation.kind === "create" || mutation.kind === "replace" || mutation.kind === "clear") {
+      legacySegmentStart = undefined;
+      legacyLostSeconds = 0;
+    } else if (goal && mutation.goalId === goal.goalId) {
+      if (mutation.kind === "edit" && goal.status === "active" && goal.activeStartedAt && (mutation.status ?? goal.status) === "active") {
+        legacyLostSeconds += secondsBetween(legacySegmentStart ?? goal.activeStartedAt, Date.parse(mutation.at));
+        legacySegmentStart = mutation.at;
+      } else if (mutation.kind === "status") {
+        legacySegmentStart = undefined;
+        if (mutation.timeUsedSeconds != null && legacyLostSeconds > LEGACY_TIME_TOLERANCE_SECONDS) {
+          const expected = realizedTimeUsed(goal, Date.parse(mutation.at));
+          if (mutation.timeUsedSeconds + legacyLostSeconds <= expected + LEGACY_TIME_TOLERANCE_SECONDS) {
+            applied = { ...mutation, timeUsedSeconds: mutation.timeUsedSeconds + legacyLostSeconds };
+          } else {
+            legacyLostSeconds = 0;
+          }
+        }
+      }
+    }
+    goal = applyGoalMutation(goal, applied, diagnostics);
   }
   return goal;
 }

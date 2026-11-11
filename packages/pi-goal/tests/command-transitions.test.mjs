@@ -254,6 +254,39 @@ test("update_goal rejects changes to a finalized goal and leaves it unchanged", 
   }
 });
 
+test("a legacy active edit keeps its lost time through later saved status changes", async () => {
+  // Written by the old /goal edit: create at T, active edit at T+1h that
+  // restarted the segment, then shutdown at T+1h10m saving only 600s.
+  const t0 = Date.now() - 4 * 3_600_000;
+  const iso = (seconds) => new Date(t0 + seconds * 1000).toISOString();
+  const legacyEdit = { schemaVersion: 1, kind: "edit", goalId: "g", objective: "next", status: "active", at: iso(3600) };
+  const shutdown = status("active", 600, iso(4200));
+  const resumed = { ...status("active", 600, iso(5000)), activeStartedAt: iso(5000) };
+  const paused = status("paused", 900, iso(5300));
+  for (const [label, mutations, expected] of [
+    ["shutdown", [create(iso(0)), legacyEdit, shutdown], 4200],
+    ["shutdown, resume, pause", [create(iso(0)), legacyEdit, shutdown, resumed, paused], 4500],
+  ]) {
+    assert.equal(reconstructGoalState(mutations.map((data, index) => ({ type: "custom", customType: "pi-goal", id: `m${index}`, data }))).timeUsedSeconds, expected, label);
+  }
+  // Through the extension: reload the old session, then pause and reload again.
+  const s = await session([create(iso(0)), legacyEdit, shutdown, resumed, paused]);
+  assert.equal((await s.goal()).timeUsedSeconds, 4500);
+  await s.command("resume");
+  await s.command("pause");
+  const time = (await s.goal()).timeUsedSeconds;
+  assert.ok(time >= 4500 && time < 4560, `${time}`);
+  assert.equal(s.reloaded().timeUsedSeconds, time, "entries written by the fixed code are not repaired twice");
+});
+
+test("an active edit written by the fixed code is not counted twice on reload", async () => {
+  const s = await session([create(hourAgo())]);
+  await s.command("edit");
+  await s.close();
+  const time = s.reloaded().timeUsedSeconds;
+  assert.ok(time >= 3600 && time < 3660, `${time}`);
+});
+
 test("a legacy active edit entry no longer erases the accrued active segment on reload", () => {
   const at = hourAgo();
   const branch = [create(at), { schemaVersion: 1, kind: "edit", goalId: "g", objective: "next", status: "active", at: new Date().toISOString() }]
