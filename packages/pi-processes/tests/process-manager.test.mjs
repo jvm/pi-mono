@@ -147,14 +147,48 @@ test("cleanup skips external readers, preserves quota, and never stops a launch"
   assert.equal(h.rt.views().length, 0);
 });
 
-test("unacknowledged failures are not silently evicted to admit new work", async t => {
-  const h = setup(t, { active: 2, retained: 1, outputBytes: 1024, killGraceMs: 10 });
-  const failure = await spawn(h.rt, "exit 1");
-  await assert.rejects(spawn(h.rt, "printf rejected"), /acknowledge or remove/);
-  assert.equal(h.rt.views()[0].session_id, failure.session_id);
-  h.rt.acknowledge(failure.session_id);
-  await spawn(h.rt, "printf admitted");
-  assert.equal(h.rt.views().length, 1);
+test("unacknowledged background failures are evicted last and never block admission", async t => {
+  const h = setup(t, { active: 4, retained: 3, outputBytes: 1024, killGraceMs: 10 });
+  const ids = async (command, mode) => (await spawn(h.rt, command, mode)).session_id;
+  const failure = await ids("exit 1", "background");
+  await eventually(() => h.rt.views()[0]?.attention === "needs_attention");
+  const success = await ids("printf ok", "foreground");
+  const foregroundFailure = await ids("exit 2", "foreground");
+  const has = id => h.rt.views().some(p => p.session_id === id);
+  // Completed records without pending background attention go first, oldest first.
+  await spawn(h.rt, "printf one");
+  assert.ok(has(failure) && !has(success) && has(foregroundFailure));
+  // A failed foreground result already reached the model in its tool call.
+  await spawn(h.rt, "printf two");
+  assert.ok(has(failure) && !has(foregroundFailure));
+  h.manager.handleInput("r");
+  assert.match(h.text(), /1 need attention/);
+  assert.match(h.text(), /! exit 1/);
+  // With only background failures left, the oldest one makes room.
+  const later = [];
+  for (let i = 0; i < 3; i++) later.push(await ids(`exit ${10 + i}`, "background"));
+  await eventually(() => h.rt.views().every(p => p.status === "exited"));
+  const last = await ids("exit 20", "background");
+  await eventually(() => h.rt.views().filter(p => p.attention === "needs_attention").length === 3);
+  assert.ok(!has(failure) && !has(later[0]) && has(later[1]) && has(later[2]) && has(last));
+  h.manager.handleInput("r");
+  assert.match(h.text(), /3 need attention/);
+  assert.match(h.text(), /! exit 20/);
+});
+
+test("admission fails only when every retained record is running or in use", async t => {
+  const h = setup(t, { active: 3, retained: 3, outputBytes: 1024, killGraceMs: 10 });
+  const live = [await spawn(h.rt, "sleep 30", "service"), await spawn(h.rt, "sleep 30", "service")];
+  const failure = await spawn(h.rt, "exit 1", "background");
+  await eventually(() => h.rt.views().some(p => p.attention === "needs_attention"));
+  const release = h.rt.hold([failure.session_id]);
+  await assert.rejects(spawn(h.rt, "printf rejected"),
+    /At most 3 process records can be retained, and every record is running or in use by a reader/);
+  assert.equal(h.rt.views().length, 3);
+  release();
+  assert.equal((await spawn(h.rt, "printf admitted")).output, "admitted");
+  assert.ok(!h.rt.views().some(p => p.session_id === failure.session_id));
+  for (const job of live) await h.rt.kill(job.session_id);
 });
 
 for (const tty of [false, true]) {

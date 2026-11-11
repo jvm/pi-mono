@@ -116,7 +116,7 @@ export class ProcessRuntime {
     }
     this.evict(1);
     if (this.jobs.size + this.launching >= this.limits.retained) {
-      throw new Error(`At most ${this.limits.retained} process records can be retained; acknowledge or remove completed records, or release active readers`);
+      throw new Error(`At most ${this.limits.retained} process records can be retained, and every record is running or in use by a reader; stop a process or wait for readers to finish`);
     }
     this.launching++;
     const job: Job = {
@@ -461,14 +461,26 @@ export class ProcessRuntime {
     return job.stopping;
   }
 
+  /**
+   * Oldest-first eviction of completed, unused records. Detached failures that
+   * still need human attention go last, but never block admission: only the
+   * terminal user can acknowledge them, and the model may be running unattended.
+   * Foreground failures already returned their result in the tool call.
+   */
   private evict(space = 0): void {
-    for (const [id, job] of this.jobs) {
-      if (this.jobs.size + this.launching <= this.limits.retained - space) break;
-      if (job.exited && job.attention !== "needs_attention" && !job.activeReads && !job.pins && !job.queued && !job.stopping) {
+    let evicted = false;
+    for (const protectFailures of [true, false]) {
+      for (const [id, job] of this.jobs) {
+        if (this.jobs.size + this.launching <= this.limits.retained - space) break;
+        if (!job.exited || job.activeReads || job.pins || job.queued || job.stopping) continue;
+        if (protectFailures && job.attention === "needs_attention" && job.detached) continue;
         job.transport?.dispose();
         this.jobs.delete(id);
         this.logs.remove(id);
+        evicted = true;
       }
     }
+    // Observers such as the open manager must not keep showing evicted records.
+    if (evicted) this.stateChanged();
   }
 }
