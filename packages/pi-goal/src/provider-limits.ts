@@ -153,11 +153,15 @@ const isAsciiDigit = (code: number) => code >= 48 && code <= 57;
 const isWordChar = (code: number) => isAsciiLetter(code) || isAsciiDigit(code) || code === 95;
 // RFC 3986 scheme characters after the first letter: letters, digits, "+", ".", "-".
 const isSchemeChar = (code: number) => isAsciiLetter(code) || isAsciiDigit(code) || code === 43 || code === 46 || code === 45;
-const isWhitespace = (char: string) => char.trim() === "";
+// A URL ends at whitespace or at a delimiter of the JSON, HTML, or prose around
+// it, so stripping it never removes a neighbouring field such as `"code":"..."`.
+// A backslash ends it too: in a JSON-escaped payload it starts `\"`.
+const URL_DELIMITERS = new Set(['"', "'", "<", ">", ",", "}", "]", "\\"]);
+const endsUrl = (char: string) => URL_DELIMITERS.has(char) || char.trim() === "";
 
 /**
- * Replaces each URL (`scheme://non-space`) with a space in linear time. Same
- * result as `/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi`, which backtracks quadratically
+ * Replaces each URL (`scheme://...`) with a space in linear time. Like
+ * `/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>,}\]\\]+/gi`, which backtracks quadratically
  * on long runs of scheme characters without "://".
  */
 function stripUrls(text: string): string {
@@ -179,7 +183,7 @@ function stripUrls(text: string): string {
       }
     }
     let end = separator + 3;
-    while (end < text.length && !isWhitespace(text[end])) end++;
+    while (end < text.length && !endsUrl(text[end])) end++;
     if (start < 0 || end === separator + 3) continue;
     out += text.slice(copied, start) + " ";
     copied = end;

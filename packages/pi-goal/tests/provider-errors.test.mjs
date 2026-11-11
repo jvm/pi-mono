@@ -505,3 +505,31 @@ test("adversarial provider error text classifies in bounded time with the correc
   assert.ok(performance.now() - started < 1_000);
   assert.equal((await f.goal()).status, "usage_limited");
 });
+
+test("a URL strips only itself, never neighbouring fields of compact JSON", async () => {
+  const { classifyAssistantError } = await import("../src/provider-limits.ts");
+  const cases = [
+    // URL field before and after a limit code.
+    { errorMessage: '400 {"help":"https://example.com","code":"insufficient_quota"}', kind: "quota_exceeded" },
+    { errorMessage: '400 {"code":"insufficient_quota","help":"https://example.com"}', kind: "quota_exceeded" },
+    { errorMessage: "400 {'help':'https://example.com','code':'insufficient_quota'}", kind: "quota_exceeded" },
+    { errorMessage: '400 {"links":["https://example.com/docs"],"code":"insufficient_quota"}', kind: "quota_exceeded" },
+    // URL at the end of the text.
+    { errorMessage: "400 Quota exceeded for this project, see https://example.com/quota", kind: "quota_exceeded" },
+    { errorMessage: "400 Request failed, see https://billing.example/billing-hard-limit", kind: "none" },
+    // A URL that contains "billing" next to an unrelated field is still not evidence.
+    { errorMessage: '400 {"doc":"https://billing.example/billing_hard_limit","code":"bad_request"}', kind: "none" },
+    { errorMessage: '400 <a href="https://billing.example/payment-required">docs</a> bad request', kind: "none" },
+    // A JSON payload nested as a string value.
+    { errorMessage: '400 {"error":{"message":"{\\"help\\":\\"https://example.com\\",\\"code\\":\\"insufficient_quota\\"}"}}', kind: "quota_exceeded" },
+    { errorMessage: '400 {"error":{"message":"{\\"doc\\":\\"https://billing.example/billing_hard_limit\\",\\"code\\":\\"x\\"}"}}', kind: "none" },
+  ];
+  for (const { errorMessage, kind } of cases) {
+    assert.equal(classifyAssistantError({ role: "assistant", stopReason: "error", errorMessage }).kind, kind, errorMessage);
+  }
+
+  // The same compact JSON through the extension's failure handling.
+  const f = await fixture();
+  await f.failedRun({ status: 400, errorMessage: '400 {"help":"https://example.com","code":"insufficient_quota"}' });
+  assert.equal((await f.goal()).status, "usage_limited");
+});
