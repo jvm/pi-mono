@@ -16,8 +16,14 @@ import { clearGoalUi, updateGoalUi } from "../src/ui.js";
 
 /** Only these classifications are evidence that a provider limit stopped the goal. */
 const USAGE_LIMIT_KINDS: ReadonlySet<ProviderLimitKind> = new Set(["rate_limit", "usage_limit", "quota_exceeded", "billing_required"]);
-/** Failed runs, each after Pi's own retries, before a goal without limit evidence pauses. */
+/**
+ * Consecutive failed runs on one provider/model before a goal without limit
+ * evidence pauses. Each run already includes Pi's own retries, if enabled.
+ * Between failed runs the goal continues automatically after these delays, so
+ * an active goal never waits silently for user input after a failure.
+ */
 const PROVIDER_ERROR_PAUSE_THRESHOLD = 3;
+const FAILED_RUN_RETRY_DELAYS_MS = [30_000, 120_000] as const;
 
 interface AttemptError {
   scope: string;
@@ -153,7 +159,8 @@ export default function piGoal(pi: ExtensionAPI) {
     );
   }
 
-  function settleFailedRun(ctx: ExtensionContext): void {
+  /** Returns the delay of the automatic retry to schedule, if any. */
+  function settleFailedRun(ctx: ExtensionContext): number | undefined {
     const failure = lastAttemptError;
     if (!failure || !goal || goal.status !== "active") return;
     const { classification, scope } = failure;
@@ -170,10 +177,14 @@ export default function piGoal(pi: ExtensionAPI) {
     }
     if (errorStreak.scope !== scope) errorStreak = { scope, count: 0 };
     errorStreak.count++;
-    if (errorStreak.count < PROVIDER_ERROR_PAUSE_THRESHOLD) return;
+    if (errorStreak.count < PROVIDER_ERROR_PAUSE_THRESHOLD) {
+      const delayMs = FAILED_RUN_RETRY_DELAYS_MS[errorStreak.count - 1];
+      ctx.ui.notify(`Goal run failed on ${scope} (${lastError}). Continuing automatically in ${Math.round(delayMs / 1000)}s (failed run ${errorStreak.count} of ${PROVIDER_ERROR_PAUSE_THRESHOLD}).`, "warning");
+      return delayMs;
+    }
     const count = errorStreak.count;
     errorStreak = { count: 0 };
-    pauseForProviderError(ctx, "provider_error", `${count} consecutive runs failed on ${scope} after Pi's retries (${lastError})`);
+    pauseForProviderError(ctx, "provider_error", `${count} consecutive runs failed on ${scope} (${lastError})`);
   }
 
   function accountAndEnforceBudget(ctx: ExtensionContext): void {
@@ -314,11 +325,16 @@ export default function piGoal(pi: ExtensionAPI) {
     accountAndEnforceBudget(ctx);
     // Settlement runs only after Pi's own retry loop has given up, so a pause
     // here never races a retry that could still succeed.
-    if (event.outcome === "error") settleFailedRun(ctx);
-    else if (event.outcome === "completed") clearProviderErrorState();
+    const retryDelayMs = event.outcome === "error" ? settleFailedRun(ctx) : undefined;
+    if (event.outcome === "completed") clearProviderErrorState();
     lastAttemptError = undefined;
     responseLimitEvidence = undefined;
-    if (!automaticCompactionFailed) return scheduler.beforeSettle(event, ctx);
+    if (automaticCompactionFailed) return;
+    const result = scheduler.beforeSettle(event, ctx);
+    // A failed run cannot continue inside settlement. Retry it after a delay,
+    // once Pi is idle; a new run, pause, or session change cancels the retry.
+    if (retryDelayMs != null) scheduler.schedule(ctx, "continue", { delayMs: retryDelayMs });
+    return result;
   });
 
   pi.on("cache_warming_decision", async (_event, ctx) => {
