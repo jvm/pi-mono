@@ -159,7 +159,7 @@ not establish server access.
 
 ### Direct and codemode tools
 
-Use Pi 1.4.0 and Node.js >=22.19.0.
+Use Pi 1.5.2 and Node.js >=22.19.0.
 
 | Tool | Reachability | Delivery |
 | --- | --- | --- |
@@ -312,7 +312,7 @@ The extension owns an image-capable ChatGPT OAuth flow, registered as **Codex Im
 
 Complete the browser login with your ChatGPT account. You can also run `/login` and select **Codex Images (ChatGPT subscription)**. The browser redirects to `http://localhost:1455/auth/callback`. If the callback cannot reach Pi, paste the **full redirect URL** into Pi's login prompt, not into chat. Login expires after ten minutes.
 
-Use Pi 1.4.0. Pi stores the `codex-images` credential in its agent auth store (normally `~/.pi/agent/auth.json`). `/logout codex-images` removes that credential without changing your chat login. No credential files are created by the extension itself.
+Use Pi 1.5.2. Pi stores the `codex-images` credential in its agent auth store (normally `~/.pi/agent/auth.json`). `/logout codex-images` removes that credential without changing your chat login. No credential files are created by the extension itself.
 
 The package implements the Codex-compatible OAuth protocol itself. It neither imports Pi's `openai-codex` OAuth helpers nor requires the Codex app or its credential store. It still depends on OpenAI continuing to accept that public OAuth client and private image endpoint; this is not a new OAuth application registered with OpenAI.
 

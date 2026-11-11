@@ -9,7 +9,7 @@ request effort and needlessly invalidating its cached prefix.
 
 ## Installation
 
-Requires Pi 0.85.1 or later and an existing Pi `openai-codex` OAuth login.
+Requires Pi 1.5.2 and an existing Pi `openai-codex` OAuth login.
 
 ```bash
 pi install npm:pi-openai-reasoning
@@ -33,7 +33,7 @@ There is no public OpenAI API support in this first version and no API-key fallb
 | `openai` / `openai-responses` | ChatGPT sign-in or API key; any model | Unchanged Pi thinking controls; no updates from this extension |
 | Other providers, GPT-6.1 Sol, Pro or multi-agent requests | Any | Unchanged; no inferred protocol support |
 
-Pi labels `openai-codex` **OpenAI Codex (legacy)**. Signing in with ChatGPT on
+Pi labels `openai-codex` **OpenAI Codex**. Signing in with ChatGPT on
 `openai` does not enable this extension. Pi's per-thinking-level sampling settings
 change ordinary request parameters; they do not implement the pinned request
 effort and history-positioned `configuration_update` protocol.
@@ -45,7 +45,7 @@ conversation references and requests already containing configuration updates ar
 left unchanged. This package does not add async tools or mid-turn steering.
 
 Virtual-model selections are ineligible even when they dispatch to legacy
-Astra. On Pi 1.4.0, request hooks still see the virtual selection; this extension
+Astra. On Pi 1.5.2, request hooks still see the virtual selection; this extension
 does not infer physical protocol support from a display name, payload, or prior
 response. Pi uses the router's ordinary physical thinking level without this
 extension's cache-preserving updates.

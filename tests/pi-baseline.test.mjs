@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const root = new URL("../", import.meta.url);
-const version = "1.4.0";
+const version = "1.5.2";
 const peers = [
   "@earendil-works/pi-coding-agent",
   "@earendil-works/pi-ai",
@@ -35,12 +35,12 @@ test("all workspaces and installed Pi peers use the single current baseline", as
 });
 
 test("isolated host runner rejects old and floating targets before installation", () => {
-  for (const unsupported of ["1.1.0", "1.2.0", "latest"]) {
+  for (const unsupported of ["1.1.0", "1.4.0", "latest"]) {
     const result = spawnSync(process.execPath, [
       fileURLToPath(new URL("scripts/test-pi-compat.mjs", root)), unsupported,
     ], { encoding: "utf8", timeout: 10_000 });
     assert.ifError(result.error);
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /Expected Pi 1\.4\.0/);
+    assert.match(result.stderr, /Expected Pi 1\.5\.2/);
   }
 });

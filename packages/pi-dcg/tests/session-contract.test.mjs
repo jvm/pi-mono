@@ -364,7 +364,7 @@ test("reload cancels idle user confirmations and creates a fresh confirmation qu
   assert.equal(h.executed.length, 1);
 });
 
-test("Pi 1.4.0 limitation: replacing input before DCG detaches it from execution args", async t => {
+test("Pi 1.5.2 limitation: replacing input before DCG detaches it from execution args", async t => {
   // Characterization, not a passing security guarantee. Remove this limitation
   // only with an upstream fix and a regression that enforces argument identity.
   const h = await fixture(t, {

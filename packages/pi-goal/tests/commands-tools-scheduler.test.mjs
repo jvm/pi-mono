@@ -49,6 +49,17 @@ function makeCommandRuntime(initial = null) {
   };
 }
 
+test("update_goal sends plain string-enum JSON schemas to the model", () => {
+  const pi = makePi();
+  registerGoalTools(pi, makeCommandRuntime());
+  const schema = JSON.parse(JSON.stringify(pi.tools.get("update_goal").parameters));
+  assert.deepEqual(schema.properties.status, { type: "string", enum: ["complete", "blocked"], description: "Terminal model-controlled goal status." });
+  assert.deepEqual(schema.properties.verification.properties.worktree_status, { type: "string", enum: ["clean", "dirty", "unknown"] });
+  assert.deepEqual(schema.required, ["status"]);
+  assert.equal(Check(pi.tools.get("update_goal").parameters, { status: "complete", verification: { worktree_status: "clean" } }), true);
+  assert.equal(Check(pi.tools.get("update_goal").parameters, { status: "paused" }), false);
+});
+
 test("goal tools declare and return nullable/optional summaries without private accounting state", async () => {
   const pi = makePi();
   const runtime = makeCommandRuntime();

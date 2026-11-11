@@ -5,7 +5,7 @@ Give grammar-capable OpenAI/Codex models the Codex `apply_patch` tool in Pi with
 ## What it adds
 
 - **Raw `apply_patch`** — sends Codex's Lark grammar as an OpenAI custom tool, so patches are not JSON-wrapped.
-- **Model-only exposure** — `apply_patch` is available directly to the model, never through codemode or other nested tool calls. Requires Pi 0.99.1 or newer.
+- **Model-only exposure** — `apply_patch` is available directly to the model, never through codemode or other nested tool calls. Requires Pi 1.5.2.
 - **Capability-based activation** — requires `openai-codex-responses` or `openai-responses` plus `model.compat.supportsOpenAIGrammarTools === true`; model names alone are never enough.
 - **Pi-style filesystem access** — accepts relative or absolute paths and follows symlinked files and directories, including macOS `/tmp`. Uses Node filesystem APIs without a native binding or platform gate.
 - **Validated patches** — limits patches to 1 MiB and target-file reads to 64 MiB, preflights all hunks, and serializes writes with Pi's mutation queue.
@@ -42,13 +42,13 @@ These choices are based on the Codex tool specifications in `codex-rs/core/src/t
 
 ## Compatibility notes
 
-The Pi 1.4.0 metadata contract groups `apply_patch` under `codex_files`, without
+The Pi 1.5.2 metadata contract groups `apply_patch` under `codex_files`, without
 renaming it or changing exposure. Its advisory hints are mutating, destructive,
 non-idempotent, and local-only. There is no public output schema: it intentionally
 remains model-only, not discoverable/callable from scripts. Metadata does not
 replace approvals or change native file-tool implementations.
 
-While this package's `apply_patch` is active on Pi 1.4.0, its public
+While this package's `apply_patch` is active on Pi 1.5.2, its public
 `prepareLoadout` hook hides selected native `edit` and `write` declarations from
 model requests. The tools keep their original implementations and `direct`
 exposure, and remain in `pi.getActiveTools()`. Activate `codemode` to call them
@@ -70,11 +70,11 @@ or hidden by this package. If another extension replaces `apply_patch`, this
 package's loadout hook does not apply to that replacement.
 
 Older Pi runtimes are not development or contract-test targets. Retained
-legacy fallback code is not a support guarantee; use Pi 1.4.0.
+legacy fallback code is not a support guarantee; use Pi 1.5.2.
 
 ### GPT-6 Astra
 
-A Pi 1.4.0 virtual-model selection does not advertise the physical request's
+A Pi 1.5.2 virtual-model selection does not advertise the physical request's
 grammar capability to this extension. `apply_patch` stays unavailable even when
 the router chooses Astra; selected native `edit` and `write` declarations remain
 available, subject to other loadout hooks. The extension does not infer support
@@ -113,7 +113,7 @@ Like native Pi tools, normal path-based I/O does not protect against another pro
 These behaviors intentionally match Codex `apply_patch`.
 
 The provider contract is runtime-specific. Model-only exposure, the loadout hook,
-metadata, and development/integration tests target Pi 1.4.0.
+metadata, and development/integration tests target Pi 1.5.2.
 
 For a manual smoke test:
 

@@ -4,7 +4,7 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
-const version = "1.4.0";
+const version = "1.5.2";
 if (process.argv.length > 3 || (process.argv[2] && process.argv[2] !== version)) {
   throw new Error(`Expected Pi ${version}; older hosts and floating versions are not test targets.`);
 }

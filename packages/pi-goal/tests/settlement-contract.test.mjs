@@ -269,7 +269,8 @@ for (const mode of ["tui", "print", "json", "rpc"]) {
   });
 }
 
-test("navigation waits for later handlers and discards the abandoned branch's activation", { timeout: 10_000 }, async (t) => {
+test("navigation activation starts once Pi installs the selected branch, even while later handlers run", { timeout: 10_000 }, async (t) => {
+  // Pi 1.5.2 releases navigation before session_tree; handlers may prompt.
   const entered = Promise.withResolvers();
   const release = Promise.withResolvers();
   const hold = (pi) => pi.on("session_tree", async () => {
@@ -283,14 +284,55 @@ test("navigation waits for later handlers and discards the abandoned branch's ac
   const navigation = h.session.navigateTree(activeLeaf, { summarize: false });
   await entered.promise;
   t.mock.timers.tick(1);
+  release.resolve();
+  await navigation;
+  await assertSettled(t, h, requests, 1);
+  assert.equal(contexts(h).length, 1);
+});
+
+test("a later handler's navigation discards the abandoned branch's activation", { timeout: 10_000 }, async (t) => {
+  const entered = Promise.withResolvers();
+  const summarizing = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  let h;
+  let pausedLeaf;
+  let redirected = false;
+  const redirect = (pi) => {
+    pi.on("session_tree", async () => {
+      if (redirected) return;
+      redirected = true;
+      entered.resolve();
+      // Abandon the selected branch before goal activation can fire.
+      await h.session.navigateTree(pausedLeaf, { summarize: false });
+    });
+    pi.on("session_before_tree", async (event) => {
+      if (event.preparation.targetId !== pausedLeaf) return;
+      summarizing.resolve();
+      await release.promise;
+    });
+  };
+  h = await harness(t, { budget: 11, after: [redirect] });
+  const activeLeaf = h.sessionManager.getBranch().find((entry) => entry.customType === "pi-goal").id;
+  await h.session.prompt("/goal pause");
+  pausedLeaf = h.sessionManager.getBranch().findLast((entry) => entry.customType === "pi-goal").id;
+  const requests = responses(t, h, [() => textResponse()]);
+  const navigation = h.session.navigateTree(activeLeaf, { summarize: false });
+  await entered.promise;
+  await summarizing.promise;
+  // The active branch's activation fires while the nested navigation owns Pi.
+  t.mock.timers.tick(1);
   await checkpoint();
-  assert.equal(requests.length, 0, "activation must not run while navigation is still owned by Pi");
+  t.mock.timers.tick(50);
+  await checkpoint();
+  assert.equal(requests.length, 0, "activation must not run during a later handler's navigation");
   release.resolve();
   await navigation;
   t.mock.timers.tick(50);
   await checkpoint();
-  await assertSettled(t, h, requests, 1);
-  assert.equal(contexts(h).length, 1);
+  await assertSettled(t, h, requests, 0);
+  assert.equal(h.sessionManager.getLeafId(), pausedLeaf);
+  assert.equal(state(h).status, "paused");
+  assert.equal(contexts(h).length, 0, "no continuation is sent for the abandoned branch");
 });
 
 for (const replacement of ["fork", "new", "switch"]) {
@@ -299,7 +341,8 @@ for (const replacement of ["fork", "new", "switch"]) {
     const originalId = state(h).goalId;
     const originalSessionId = h.sessionManager.getSessionId();
     let current = h;
-    const servicesFor = (fixture) => ({ cwd: fixture.sessionManager.getCwd(), agentDir: fixture.sessionManager.getCwd() });
+    // Pi 1.5.2 runtime disposal settles credential writes through modelRuntime.
+    const servicesFor = (fixture) => ({ cwd: fixture.sessionManager.getCwd(), agentDir: fixture.sessionManager.getCwd(), modelRuntime: fixture.modelRuntime });
     const runtime = new AgentSessionRuntime(h.session, servicesFor(h), async ({ sessionManager, sessionStartEvent }) => {
       current.disposed = true;
       const next = await codexHarness([piGoal], { sessionManager, sessionStartEvent });

@@ -77,6 +77,15 @@ function isolateAgentDir(t, cwd) {
   });
 }
 
+test("tool parameters send plain string-enum JSON schemas to the model", () => {
+  const schema = JSON.parse(JSON.stringify(createTool().parameters));
+  assert.deepEqual(schema.properties.outputFormat, { type: "string", enum: ["png", "jpeg", "webp"] });
+  assert.deepEqual(schema.properties.save, { type: "string", enum: ["none", "project", "global", "custom"] });
+  assert.deepEqual(schema.properties.background.enum, ["auto", "opaque", "transparent"]);
+  assert.deepEqual(Object.keys(schema.properties.transport).sort(), ["description", "enum", "type"]);
+  assert.deepEqual(schema.required, ["prompt"]);
+});
+
 test("strict image decoding accepts matching formats", () => {
   assert.deepEqual(decodeImageData(PNG.toString("base64"), "png"), PNG);
   assert.deepEqual(decodeImageData(JPEG.toString("base64"), "jpeg"), JPEG);
