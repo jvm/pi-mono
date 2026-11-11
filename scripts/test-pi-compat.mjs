@@ -1,8 +1,9 @@
-import { cp, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { listWorkspacePackages } from "./workspace-packages.mjs";
 
 const version = "1.5.2";
 if (process.argv.length > 3 || (process.argv[2] && process.argv[2] !== version)) {
@@ -29,9 +30,8 @@ try {
     "@earendil-works/pi-tui": version,
   };
   await writeFile(join(dir, "package.json"), JSON.stringify(rootManifest, null, 2) + "\n");
-  for (const entry of await readdir(join(dir, "packages"), { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const path = join(dir, "packages", entry.name, "package.json");
+  for (const name of await listWorkspacePackages(join(dir, "packages"))) {
+    const path = join(dir, "packages", name, "package.json");
     const manifest = JSON.parse(await readFile(path, "utf8"));
     for (const name of Object.keys(manifest.devDependencies ?? {})) {
       if (name.startsWith("@earendil-works/pi-")) manifest.devDependencies[name] = version;

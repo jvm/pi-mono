@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { listWorkspacePackages } from "../scripts/workspace-packages.mjs";
 
 const root = new URL("../", import.meta.url);
 const version = "1.5.2";
@@ -16,13 +17,12 @@ const json = async url => JSON.parse(await readFile(url, "utf8"));
 
 test("all workspaces and installed Pi peers use the single current baseline", async () => {
   const lock = await json(new URL("package-lock.json", root));
-  for (const entry of await readdir(new URL("packages/", root), { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const manifest = await json(new URL(`packages/${entry.name}/package.json`, root));
+  for (const name of await listWorkspacePackages(new URL("packages/", root))) {
+    const manifest = await json(new URL(`packages/${name}/package.json`, root));
     for (const peer of peers) {
       if (!manifest.devDependencies?.[peer]) continue;
-      assert.equal(manifest.devDependencies[peer], version, `${entry.name}: ${peer}`);
-      assert.equal(lock.packages[`packages/${entry.name}`].devDependencies[peer], version);
+      assert.equal(manifest.devDependencies[peer], version, `${name}: ${peer}`);
+      assert.equal(lock.packages[`packages/${name}`].devDependencies[peer], version);
       assert.equal(manifest.peerDependencies[peer], "*", "Pi must remain host-supplied");
     }
   }
