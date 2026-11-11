@@ -35,9 +35,9 @@ pi -e ./packages/pi-goal/extensions/index.ts
 - `/goal` or `/goal status` — show current goal and usage.
 - `/goal <objective>` — create or replace the branch goal.
 - `/goal --budget 50000 <objective>` — create a budgeted goal.
-- `/goal edit` — edit the objective in a multiline editor.
-- `/goal pause` — pause automatic continuation.
-- `/goal resume` — resume automatic continuation.
+- `/goal edit` — edit the objective in a multiline editor. Reactivates a complete goal, or a budget-limited goal whose budget is not exhausted.
+- `/goal pause` — pause automatic continuation of an active goal.
+- `/goal resume` — resume a paused, blocked, or usage-limited goal. A complete goal needs `/goal edit`; an exhausted budget needs `/goal budget`.
 - `/goal clear` — clear the current branch goal.
 - `/goal budget 50000` — set/update token budget. A `budget_limited` goal resumes when the new budget is above current usage.
 - `/goal budget clear` — remove token budget. A `budget_limited` goal resumes.
