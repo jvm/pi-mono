@@ -22,6 +22,7 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 - Reject Git remote-helper sources (`<helper>::<address>`, including `ext::` and `fd::`) and unknown URL schemes, which run helper programs and could keep credentials in records; redact credentials inside helper sources stored by earlier versions.
 - Store `file://` sources percent-encoded and read `#` and `?` in them literally, as Git does, so a path such as `demo#one.git` keeps its own clone instead of matching `demo`; re-encode records stored unescaped on load.
 - Also set `core.askPass=true` on Scout Git calls, so Git versions that ignore `credential.interactive` fail on HTTP authentication instead of prompting on the terminal.
+- Keep source and branch separate in the clone reuse key, so a source containing `#` cannot match a different source whose branch contains `#`.
 
 ## [0.3.0] - 2026-10-30
 

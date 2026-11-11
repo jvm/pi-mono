@@ -236,8 +236,9 @@ async function runGit(pi: ExtensionAPI, args: string[], signal: AbortSignal | un
   if (result.code !== 0) throw new Error(`Git ${step} failed (exit code ${result.code}). ${hint}`);
 }
 
+/** Reuse key; JSON keeps source and branch separate even when either contains a delimiter. */
 function repoKey(sourceKey: string, branch: string | undefined): string {
-  return `${sourceKey}#${branch ?? ""}`;
+  return JSON.stringify([sourceKey, branch ?? ""]);
 }
 
 function findByKey(repos: ScoutRepo[], key: string): ScoutRepo | undefined {

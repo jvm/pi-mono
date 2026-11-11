@@ -368,6 +368,21 @@ function loadScoutOnTerminal({ dropArgs = [] } = {}) {
   }
 });
 
+test("a source containing # and a branch containing # never share a reuse key", async () => {
+  const hashed = await makeOrigin("keyed#bar");
+  await mustGit(["push", "--quiet", "origin", "main:baz"], hashed.work);
+  const plain = await makeOrigin("keyed");
+  await mustGit(["push", "--quiet", "origin", "main:bar#baz"], plain.work);
+  // Without `.git`, the path keys are `.../keyed#bar` and `.../keyed`.
+  for (const { bare } of [hashed, plain]) await rename(bare, bare.replace(/\.git$/, ""));
+  const { add } = loadScout();
+  const sourceWithHash = await add({ source: join(sandbox, "keyed#bar"), branch: "baz" });
+  assert.equal(sourceWithHash.structuredContent.status, "cloned");
+  const branchWithHash = await add({ source: join(sandbox, "keyed"), branch: "bar#baz" });
+  assert.equal(branchWithHash.structuredContent.status, "cloned");
+  assert.notEqual(branchWithHash.structuredContent.repo.id, sourceWithHash.structuredContent.repo.id);
+});
+
 test("relative ./ and ../ paths are local paths, not GitHub shorthand", async () => {
   const { add, calls } = loadScout(async (_command, args) => {
     if (args.includes("clone")) await mkdir(args.at(-1), { recursive: true });
