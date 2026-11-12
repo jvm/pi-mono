@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-12
+
 ### Fixed
 
 - Show the configured expand key in long `apply_patch` previews. The hint now uses Pi's render-context `keyHint`, so it no longer renders without the key when the package resolves its own copy of Pi.
