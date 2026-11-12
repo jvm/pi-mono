@@ -6,6 +6,19 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Mark a goal `usage_limited` only on real limit evidence (HTTP 429, quota, billing, balance, or subscription-limit text). Repeated generic provider errors, such as timeouts, now pause the goal as `paused` with the actual last error and a notice that does not claim a usage limit or suggest finalizing the goal; authentication failures pause the same way. Count failed runs only after Pi's auto-retry has finished, so pi-goal no longer pauses while Pi is still retrying, and scope the count to one provider/model: a successful response or a provider/model switch restarts it (#224).
+
+- Detect provider authentication failures from the HTTP status: a 401, or a 403 without rate-limit wording, pauses the goal on the first failed run whatever the error wording. Before, only some wordings matched, so a 401 with OpenAI's "Incorrect API key provided" paused only after three failed runs as a generic error. Auth wording from OpenAI, Anthropic, Google, Bedrock, and OpenRouter remains a fallback for failures without a status. The response status and the error text of an attempt are classified together, so a known status decides: an HTTP 500 whose body says "authentication failed" or "quota exceeded" now takes the automatic retries as a server error, and an HTTP 403 that says "rate limit exceeded" marks the goal `usage_limited` instead of pausing it as an auth failure.
+- Continue an active goal automatically after a run fails with a non-limit error, instead of leaving it active but idle until the user typed something. After Pi's own retries settle, pi-goal retries the run after 30 seconds and then 2 minutes, notifies the real error and the next retry, and pauses the goal on the third consecutive failed run on the same provider/model. This also keeps a single transient failure from pausing the goal when Pi's retries are disabled. A new run, pause, session change, success, or provider/model switch cancels or resets the retries.
+- Preserve elapsed goal time across `/goal edit`. Editing an active goal no longer resets its time to zero, and sessions that contain such edits reconstruct the correct time on reload, also when status changes such as a session shutdown or pause were saved after the edit.
+- Reject `/goal --budget 50000` without an objective, unknown `--` options, and `/goal budget` without a value with a usage error instead of creating a goal whose objective is the flag text. Accept `k`/`m` suffixes and `,`/`_` separators in token budgets (`50k`, `1.5m`, `50,000`) and `--budget=<tokens>`; reject zero, negative, fractional, and non-numeric budgets with a clear message.
+- Resume a `budget_limited` goal and schedule its continuation when `/goal budget` raises the budget above current usage or clears it.
+- Reject `/goal pause` unless the goal is active, and `/goal resume` on a complete goal or one whose token budget is still exhausted, with a message that names the next step. `/goal edit` no longer reactivates a goal whose budget is still exhausted.
+- Reject `update_goal` on a goal that is already `complete` or `blocked` with a model-readable error; the goal state, history, and continuation are unchanged. Commands and `update_goal` now share one transition table.
+- Classify provider limits from the provider's error text and HTTP status only. Response header names and values, URLs, and provider/model IDs that mention "billing" or "limit" no longer mark a goal `usage_limited`, including on successful responses. Billing detection now requires billing-failure wording such as "billing hard limit" or "credit balance is too low".
+
 ## [0.3.1] - 2026-10-30
 
 ### Changed

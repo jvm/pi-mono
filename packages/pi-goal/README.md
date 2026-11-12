@@ -35,12 +35,18 @@ pi -e ./packages/pi-goal/extensions/index.ts
 - `/goal` or `/goal status` — show current goal and usage.
 - `/goal <objective>` — create or replace the branch goal.
 - `/goal --budget 50000 <objective>` — create a budgeted goal.
-- `/goal edit` — edit the objective in a multiline editor.
-- `/goal pause` — pause automatic continuation.
-- `/goal resume` — resume automatic continuation.
+- `/goal edit` — edit the objective in a multiline editor. Reactivates a complete goal, or a budget-limited goal whose budget is not exhausted.
+- `/goal pause` — pause automatic continuation of an active goal.
+- `/goal resume` — resume a paused, blocked, or usage-limited goal. A complete goal needs `/goal edit`; an exhausted budget needs `/goal budget`.
 - `/goal clear` — clear the current branch goal.
-- `/goal budget 50000` — set/update token budget.
-- `/goal budget clear` — remove token budget.
+- `/goal budget 50000` — set/update token budget. A `budget_limited` goal resumes when the new budget is above current usage.
+- `/goal budget clear` — remove token budget. A `budget_limited` goal resumes.
+
+Token budgets are positive whole numbers of tokens. They accept `k` and `m`
+suffixes and `,` or `_` separators, for example `50k`, `1.5m`, or `50,000`.
+`--budget=50k` also works. A budget without an objective, an unknown `--`
+option, or a zero, negative, or non-numeric budget shows a usage error and does
+not create or change a goal.
 
 Replacing a non-complete goal asks for confirmation when UI is available.
 
@@ -48,7 +54,7 @@ Replacing a non-complete goal asks for confirmation when UI is available.
 
 - `get_goal` returns current goal state and remaining budget.
 - `create_goal` creates a goal only when explicitly requested and fails if one already exists.
-- `update_goal` lets the model mark a goal `complete` or `blocked` only. It should mark complete only after requirement-by-requirement verification, and blocked only after the same blocker repeats for at least three goal turns.
+- `update_goal` lets the model mark a goal `complete` or `blocked` only. It should mark complete only after requirement-by-requirement verification, and blocked only after the same blocker repeats for at least three goal turns. It can finalize an active, paused, usage-limited, or budget-limited goal; it rejects any change to a goal that is already `complete` or `blocked`.
 
 `update_goal` is model-only: it remains available directly to the model with
 codemode disabled, `on`, or `only`, but cannot be called from codemode scripts or
@@ -109,8 +115,11 @@ A context filter keeps only the latest message for the current active goal.
 Earlier messages remain in append-only session history.
 
 Cancellation, terminal assistant errors, and failed/cancelled automatic
-compaction suppress goal continuation for that run. Cancellation and ordinary
-errors leave the stored goal active; they do not silently pause or clear it.
+compaction suppress goal continuation inside that run's settlement.
+Cancellation leaves the stored goal active and does not restart it. A run that
+ends in an ordinary error is retried later by a bounded, delayed continuation
+(see the provider failure rules below), so an active goal never waits silently
+for user input.
 The compaction-failure stop survives queued steering/follow-up work and resets
 only when the whole run reaches the notification-only `agent_settled` event.
 Explicit new input can start work again. Use `/goal pause` to keep it paused.
@@ -163,7 +172,14 @@ Configure the terminal to use **Nerd Font 3 or later**, preferably its **Mono**
 variant. There is no text footer option or missing-glyph detection; unsupported
 fonts may display boxes. Goal storage, accounting, and continuation are unchanged.
 
-Provider usage-limit handling pauses active goals when Pi exposes HTTP 429 responses or assistant error messages that indicate subscription, quota, billing, balance, or repeated provider failures. This prevents automatic continuation from retrying indefinitely after provider limits such as 5-hour subscription caps. When the budget is exhausted or a provider limit is detected, a visible `pi-goal-event` notice is saved to model context without requesting a wrap-up turn. The model can act on that notice during a request independently started by Pi, the user, or another extension; the notice itself does not spend more tokens.
+Provider failure handling waits until Pi's own auto-retry has finished, so a failed attempt that Pi retries successfully never stops the goal. When a run still ends in error:
+
+- An HTTP 429 response, or error text that indicates a subscription, quota, billing, or balance limit, marks the goal `usage_limited`. Response headers, URLs, and provider/model names are not evidence.
+- An authentication or permission failure pauses the goal (`paused`) with that reason on the first failed run. HTTP 401, and HTTP 403 without rate-limit wording, are authentication failures whatever the provider's wording. Error text such as "Incorrect API key provided" or "API key not valid" counts only when the failure carries no other status.
+- A known HTTP status decides over the error wording: 401 is an auth failure, 403 is an auth failure unless its text names a limit, 402 and 429 are limits, and 5xx and other statuses are generic errors even if their text mentions authentication, quota, or limits. Wording decides only when the failure has no status, or for HTTP 400, which some providers use for bad keys and low balances.
+- Other errors, such as timeouts, server errors, or dropped streams, continue the goal automatically after 30 seconds, then after 2 minutes. A warning notification shows the real error and the next retry. A third consecutive failed run on the same provider/model pauses the goal (`paused`); the notice states the last error and does not claim a usage limit. A successful response or a provider/model switch restarts the count, and a new run, `/goal pause`, or a session change cancels a pending retry. This also covers `retry.enabled: false` or `retry.maxRetries: 0`, where a single transient failure does not pause the goal. With Pi's default retries, a provider that stays down costs at most three runs of four requests each before the goal pauses.
+
+This prevents automatic continuation from retrying indefinitely after provider limits such as 5-hour subscription caps. When the budget is exhausted or a provider limit is detected, a visible `pi-goal-event` notice is saved to model context without requesting a wrap-up turn. The model can act on that notice during a request independently started by Pi, the user, or another extension; the notice itself does not spend more tokens.
 
 ### Token accounting and attribution
 
@@ -266,7 +282,7 @@ Environment flags:
 ## Troubleshooting
 
 - If continuation does not start, run `/goal status` and confirm the goal is `active`.
-- If a goal stops unexpectedly, check whether the run was cancelled, failed, or hit a token budget/provider limit. Usage-limit pauses may include a provider reset hint. Budget/provider notices do not start another request; the goal remains `budget_limited` or `usage_limited` until explicitly resumed, cleared, or finalized during later work.
+- If a goal stops unexpectedly, check whether the run was cancelled, failed, or hit a token budget/provider limit. Usage-limit pauses may include a provider reset hint. Budget/provider notices do not start another request; the goal remains `budget_limited` or `usage_limited` until explicitly resumed, cleared, or finalized during later work. A goal paused for repeated provider errors or failed authentication says so in its notice; fix the provider or switch model, then `/goal resume`.
 - If context appears stale after tree navigation or reload, run `/goal status`; branch state is reconstructed from the active branch.
 - In print/JSON modes, commands and tools work, but interactive confirmations/editors are unavailable.
 
