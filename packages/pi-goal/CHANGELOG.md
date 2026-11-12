@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-12
+
 ### Fixed
 
 - Mark a goal `usage_limited` only on real limit evidence (HTTP 429, quota, billing, balance, or subscription-limit text). Repeated generic provider errors, such as timeouts, now pause the goal as `paused` with the actual last error and a notice that does not claim a usage limit or suggest finalizing the goal; authentication failures pause the same way. Count failed runs only after Pi's auto-retry has finished, so pi-goal no longer pauses while Pi is still retrying, and scope the count to one provider/model: a successful response or a provider/model switch restarts it (#224).
