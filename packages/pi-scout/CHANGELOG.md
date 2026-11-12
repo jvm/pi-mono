@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-12
+
 ### Added
 
 - Reuse the existing clone when `scout_add` receives an already registered source and branch, including equivalent URL, shorthand and local-path spellings. Results add `status: cloned | reused | refreshed`.
