@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-12
+
 ### Added
 
 - Enable reasoning updates on Codex `gpt-6.1-sol` and `gpt-6.1-terra`, which the upstream Codex catalog marks with `supports_reasoning_effort_updates`. They are not yet verified against the live backend ([#219](https://github.com/jvm/pi-mono/issues/219)).

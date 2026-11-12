@@ -1,6 +1,6 @@
 {
   "name": "pi-openai-reasoning",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Change Codex reasoning effort without rewriting the cached request prefix.",
   "type": "module",
   "license": "MIT",
@@ -10,13 +10,33 @@
     "url": "git+https://github.com/jvm/pi-mono.git",
     "directory": "packages/pi-openai-reasoning"
   },
-  "bugs": { "url": "https://github.com/jvm/pi-mono/issues" },
+  "bugs": {
+    "url": "https://github.com/jvm/pi-mono/issues"
+  },
   "homepage": "https://github.com/jvm/pi-mono/tree/main/packages/pi-openai-reasoning#readme",
-  "keywords": ["pi-package", "pi-extension", "pi", "openai-codex", "reasoning", "prompt-cache"],
-  "pi": { "extensions": ["./index.ts"] },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi",
+    "openai-codex",
+    "reasoning",
+    "prompt-cache"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
   "files": [
-    "index.ts", "extensions", "src", "README.md", "LICENSE", "CHANGELOG.md",
-    "SECURITY.md", "CONTRIBUTING.md", "CODE_OF_CONDUCT.md"
+    "index.ts",
+    "extensions",
+    "src",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md"
   ],
   "scripts": {
     "check": "tsc --noEmit",
@@ -36,7 +56,13 @@
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },
-  "dependencies": { "@mocito/install-telemetry": "0.1.1" },
-  "publishConfig": { "access": "public" },
-  "engines": { "node": ">=22.19.0" }
+  "dependencies": {
+    "@mocito/install-telemetry": "0.1.1"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
 }
