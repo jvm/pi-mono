@@ -489,6 +489,8 @@ test("adversarial provider error text classifies in bounded time with the correc
     { errorMessage: `5${" ".repeat(200_000)}`, kind: "none" },
     { errorMessage: "a.".repeat(200_000), kind: "none" },
     { errorMessage: `${"a.".repeat(1_000)}://x see https://billing-hard-limit.example/x`, kind: "none" },
+    { errorMessage: `{"a":${"[".repeat(8_000)}"insufficient_quota"${"]".repeat(8_000)}}`, kind: "quota_exceeded" },
+    { errorMessage: `{"a":"${"https://x.example/".repeat(900)}","code":"insufficient_quota"}`, kind: "quota_exceeded" },
   ];
   for (const { errorMessage, kind } of cases) {
     const started = performance.now();
@@ -523,13 +525,29 @@ test("a URL strips only itself, never neighbouring fields of compact JSON", asyn
     // A JSON payload nested as a string value.
     { errorMessage: '400 {"error":{"message":"{\\"help\\":\\"https://example.com\\",\\"code\\":\\"insufficient_quota\\"}"}}', kind: "quota_exceeded" },
     { errorMessage: '400 {"error":{"message":"{\\"doc\\":\\"https://billing.example/billing_hard_limit\\",\\"code\\":\\"x\\"}"}}', kind: "none" },
+    // Commas, apostrophes, parentheses, and query strings are part of the URL, never evidence.
+    { errorMessage: "400 Request failed; see https://example.com/errors,billing_required", kind: "none" },
+    { errorMessage: "400 Bad request, see https://example.com/it's(a,b)?billing=hard_limit&insufficient_quota=1&rate_limit=2 for details", kind: "none" },
+    { errorMessage: "400 Bad request (https://example.com/wiki/Err_(x)?insufficient_quota=1) try later", kind: "none" },
+    { errorMessage: '400 {"doc":"https://example.com/a,b\'c(d)?billing_hard_limit=1&insufficient_quota","code":"bad_request"}', kind: "none" },
+    // A URL opened by a quote, "<", or "(" ends at its partner; real wording after it is kept.
+    { errorMessage: '400 docs="https://example.com/help";insufficient_quota', kind: "quota_exceeded" },
+    { errorMessage: "400 see <https://example.com/help>insufficient_quota", kind: "quota_exceeded" },
+    { errorMessage: "400 (https://example.com/help)Quota exceeded", kind: "quota_exceeded" },
+    // Truncated JSON is plain text.
+    { errorMessage: '400 {"help":"https://example.com/x","error":{"message":"Quota exceeded for this project', kind: "quota_exceeded" },
+    { errorMessage: '400 {"help":"https://example.com/x?billing_hard_limit=1","code":"bad', kind: "none" },
   ];
   for (const { errorMessage, kind } of cases) {
     assert.equal(classifyAssistantError({ role: "assistant", stopReason: "error", errorMessage }).kind, kind, errorMessage);
   }
 
-  // The same compact JSON through the extension's failure handling.
+  // The same inputs through the extension's failure handling.
   const f = await fixture();
   await f.failedRun({ status: 400, errorMessage: '400 {"help":"https://example.com","code":"insufficient_quota"}' });
   assert.equal((await f.goal()).status, "usage_limited");
+  const help = await fixture();
+  await help.failedRun({ status: 400, errorMessage: "400 Request failed; see https://example.com/errors,billing_required" });
+  assert.equal((await help.goal()).status, "active", "a help URL is a generic error, not a limit");
+  assert.ok(!help.pi.entries.some(({ data }) => data.status === "usage_limited"));
 });

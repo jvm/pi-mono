@@ -130,39 +130,83 @@ export function classifyAssistantError(message: any, response?: Pick<ProviderLim
 function extractSearchableText(input: ProviderLimitInput): string {
   // Error bodies come from the network: examine a bounded prefix only.
   const raw = (input.errorMessage ?? "").slice(0, MAX_ERROR_TEXT_LENGTH);
-  const parts = [raw];
   // The provider payload spans the first "{" to the last "}". Plain index
   // scanning keeps this linear; a regex here backtracks polynomially.
   const open = raw.indexOf("{");
   const close = raw.lastIndexOf("}");
-  if (open >= 0 && close > open) {
-    try {
-      parts.push(JSON.stringify(JSON.parse(raw.slice(open, close + 1))));
-    } catch {
-      // Keep the raw error text if provider payload is not valid JSON.
-    }
-  }
-  return stripUrls(parts.join("\n"));
+  const payload = open >= 0 && close > open ? parseJson(raw.slice(open, close + 1)) : undefined;
+  // Malformed or truncated JSON is plain text.
+  if (payload === undefined) return stripUrls(raw);
+  const parts = [stripUrls(raw.slice(0, open))];
+  collectJsonText(payload, parts, 0);
+  parts.push(stripUrls(raw.slice(close + 1)));
+  return parts.join("\n");
 }
 
 /** Upper bound on the provider error text that classification examines. */
 export const MAX_ERROR_TEXT_LENGTH = 16_384;
+const MAX_NESTED_JSON_DEPTH = 4;
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Appends each key and value of a parsed payload as its own line, with URLs
+ * stripped per string. A URL then cannot reach a neighbouring field, whatever
+ * characters it contains. Keys count as evidence, as they did when the raw
+ * payload text was searched (some providers use the error code as a key).
+ * A string value that is itself JSON (an escaped upstream body) is walked too.
+ * The walk uses an explicit stack: payloads nest arbitrarily deep.
+ */
+function collectJsonText(payload: unknown, parts: string[], nestedDepth: number): void {
+  // Entries are pushed in reverse so they pop in document order.
+  const stack: { value: unknown; depth: number; key?: string }[] = [{ value: payload, depth: nestedDepth }];
+  for (let next = stack.pop(); next; next = stack.pop()) {
+    const { value, depth, key } = next;
+    if (key !== undefined) {
+      parts.push(stripUrls(key));
+      continue;
+    }
+    if (value == null) continue;
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      const nested = depth < MAX_NESTED_JSON_DEPTH && (trimmed.startsWith("{") || trimmed.startsWith("[")) ? parseJson(trimmed) : undefined;
+      if (nested != null && typeof nested === "object") stack.push({ value: nested, depth: depth + 1 });
+      else parts.push(stripUrls(value));
+    } else if (Array.isArray(value)) {
+      for (let i = value.length - 1; i >= 0; i--) stack.push({ value: value[i], depth });
+    } else if (typeof value === "object") {
+      const entries = Object.entries(value);
+      for (let i = entries.length - 1; i >= 0; i--) {
+        stack.push({ value: entries[i][1], depth });
+        stack.push({ value: undefined, depth, key: entries[i][0] });
+      }
+    } else {
+      parts.push(String(value));
+    }
+  }
+}
 
 const isAsciiLetter = (code: number) => (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
 const isAsciiDigit = (code: number) => code >= 48 && code <= 57;
 const isWordChar = (code: number) => isAsciiLetter(code) || isAsciiDigit(code) || code === 95;
 // RFC 3986 scheme characters after the first letter: letters, digits, "+", ".", "-".
 const isSchemeChar = (code: number) => isAsciiLetter(code) || isAsciiDigit(code) || code === 43 || code === 46 || code === 45;
-// A URL ends at whitespace or at a delimiter of the JSON, HTML, or prose around
-// it, so stripping it never removes a neighbouring field such as `"code":"..."`.
-// A backslash ends it too: in a JSON-escaped payload it starts `\"`.
-const URL_DELIMITERS = new Set(['"', "'", "<", ">", ",", "}", "]", "\\"]);
-const endsUrl = (char: string) => URL_DELIMITERS.has(char) || char.trim() === "";
+const isWhitespace = (char: string) => char.trim() === "";
+// A URL opened by one of these characters right before its scheme ends at its partner.
+const URL_CLOSERS: Record<string, string> = { '"': '"', "'": "'", "<": ">", "(": ")" };
 
 /**
- * Replaces each URL (`scheme://...`) with a space in linear time. Like
- * `/\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>,}\]\\]+/gi`, which backtracks quadratically
- * on long runs of scheme characters without "://".
+ * Replaces each URL (`scheme://...`) with a space in linear time. A URL runs to
+ * the next whitespace or the end of the text: commas, quotes, and brackets are
+ * legal URL characters, so they cannot end it. The one exception is a URL opened
+ * by a quote, "<", or "(" right before its scheme; it also ends at the partner
+ * character (for "(", the one that balances parentheses inside the URL).
  */
 function stripUrls(text: string): string {
   let out = "";
@@ -182,9 +226,16 @@ function stripUrls(text: string): string {
         break;
       }
     }
+    if (start < 0) continue;
+    const closer = start > 0 ? URL_CLOSERS[text[start - 1]] : undefined;
     let end = separator + 3;
-    while (end < text.length && !endsUrl(text[end])) end++;
-    if (start < 0 || end === separator + 3) continue;
+    let depth = 0;
+    for (; end < text.length && !isWhitespace(text[end]); end++) {
+      const char = text[end];
+      if (closer === ")" && char === "(") depth++;
+      else if (char === closer && depth-- === 0) break;
+    }
+    if (end === separator + 3) continue;
     out += text.slice(copied, start) + " ";
     copied = end;
     from = end;
