@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-12
+
 ### Fixed
 
 - Stop rejecting new managed commands in terminal mode after 32 failures that wait for `/processes` acknowledgment. Failed foreground results, already returned to the model, evict like other completed records; unacknowledged background and service failures evict last, oldest first. The record-cap error now appears only when every record is running or in use.
