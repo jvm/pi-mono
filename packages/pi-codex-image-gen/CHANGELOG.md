@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-12
+
 ### Fixed
 
 - Keep image generation working when Pi's `openai-codex` catalog no longer lists the `gpt-6-astra` routing default: fall back to the current `openai-codex` session model, then the first listed `openai-codex` model. Explicit and configured routing models are unchanged.
