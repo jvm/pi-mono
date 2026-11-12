@@ -75,6 +75,20 @@ applyTest("applies a multi-file patch after preflighting all hunks", async () =>
   }
 });
 
+applyTest("applies an update that adds more lines than a call can spread", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
+  try {
+    await writeFile(join(cwd, "big.txt"), "old\n");
+    const added = 200_000;
+    const input = patch(`*** Update File: big.txt\n@@\n-old\n${"+x\n".repeat(added - 1)}+x`);
+    assert.ok(Buffer.byteLength(input) < 1_048_576);
+    await applyPatch(input, { cwd });
+    assert.equal(await readFile(join(cwd, "big.txt"), "utf8"), "x\n".repeat(added));
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 applyTest("applies move hunks by writing the destination and removing the source", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-codex-tools-"));
   try {

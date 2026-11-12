@@ -568,7 +568,8 @@ function applyUpdateContent(original: string, chunks: UpdateChunk[], displayPath
   let position = 0;
   for (const replacement of replacements) {
     for (; position < replacement.start; position++) output.push({ text: lines[position], ending: endings[position] });
-    output.push(...replacementOutput(replacement, endings, effectiveEnding));
+    // Append one at a time: spreading a large replacement into push() exceeds the engine's argument limit.
+    for (const line of replacementOutput(replacement, endings, effectiveEnding)) output.push(line);
     position = replacement.start + replacement.length;
   }
   for (; position < lines.length; position++) output.push({ text: lines[position], ending: endings[position] });
