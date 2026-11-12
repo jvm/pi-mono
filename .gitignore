@@ -30,9 +30,6 @@ coverage/
 .env.*
 !.env.example
 
-# Compound Engineering runtime config (output of upstream CE; regenerable)
-.compound-engineering/
-
 # Project-scoped agent skills (regenerable via npx skills)
 .agents/
 .claude/

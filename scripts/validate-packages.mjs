@@ -1,4 +1,5 @@
 import { readFile, readdir } from "node:fs/promises";
+import { listWorkspacePackages } from "./workspace-packages.mjs";
 
 const packagesDir = new URL("../packages/", import.meta.url);
 const requiredFiles = [
@@ -21,10 +22,7 @@ async function json(url) {
   return JSON.parse(await text(url));
 }
 
-const slugs = (await readdir(packagesDir, { withFileTypes: true }))
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => entry.name)
-  .sort();
+const slugs = await listWorkspacePackages(packagesDir);
 const rootReadme = await text(new URL("../README.md", import.meta.url));
 const canonicalEditorConfig = await text(new URL("../templates/package/.editorconfig", import.meta.url));
 const canonicalGitignoreLines = (await text(new URL("../templates/package/.gitignore", import.meta.url))).trim().split("\n");

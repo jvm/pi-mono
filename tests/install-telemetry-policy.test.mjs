@@ -9,7 +9,6 @@ const packageNames = [
   "pi-codex-compaction",
   "pi-codex-image-gen",
   "pi-codex-tools",
-  "pi-compound-engineering",
   "pi-dcg",
   "pi-fast",
   "pi-goal",
