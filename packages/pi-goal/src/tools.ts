@@ -3,7 +3,7 @@ import { StringEnum } from "./string-enum.js";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { accountUsageFromBranch } from "./accounting.js";
-import { appendGoalMutation, applyGoalMutation, createGoalMutation, statusMutation } from "./state.js";
+import { appendGoalMutation, applyGoalMutation, createGoalMutation, goalTransitionRejection, statusMutation } from "./state.js";
 import { findToolCallContext, transitionMeta } from "./metadata.js";
 import type { BranchEntry, GoalState, GoalStatus } from "./types.js";
 import { goalToSummary, goalUsageSummary, nowIso, realizedTimeUsed, truncateOneLine } from "./utils.js";
@@ -120,6 +120,8 @@ export function registerGoalTools(pi: ExtensionAPI, runtime: ToolRuntime): void 
       const toolContext = assertStandaloneUpdateGoalCall(branch, toolCallId);
       const current = runtime.getGoal();
       if (!current) throw new Error("No goal exists.");
+      const rejected = goalTransitionRejection(current, params.status);
+      if (rejected) throw new Error(rejected);
       let goal = current;
       const accounting = accountUsageFromBranch(goal, branch);
       if (accounting.mutation) appendGoalMutation(pi, accounting.mutation);

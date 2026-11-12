@@ -528,7 +528,8 @@ test("a terminal provider error does not synthesize another failing turn", { tim
   await h.session.prompt("Exercise a terminal error.");
   await assertSettled(t, h, requests, 1);
   assert.equal(contexts(h).length, 0);
-  assert.equal(state(h).status, "active");
+  // Auth wording without an HTTP status is still auth evidence: the goal pauses.
+  assert.equal(state(h).status, "paused");
   assert.equal(h.session.messages.findLast((message) => message.role === "assistant").stopReason, "error");
 });
 

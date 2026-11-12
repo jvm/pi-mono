@@ -16,10 +16,15 @@ export class GoalContinuationScheduler {
 
   constructor(private readonly pi: ExtensionAPI, private readonly runtime: ContinuationRuntime) {}
 
-  /** Only for explicit activation when there is no running settlement boundary. */
-  schedule(ctx: ExtensionContext, reason: GoalContextReason | string = "continue", options: { afterTree?: boolean } = {}): void {
+  /**
+   * Only for explicit activation when there is no running settlement boundary.
+   * `delayMs` defers a retry after a failed run; it may be scheduled from the
+   * settling run and waits until Pi is idle. Any new run or invalidation clears it.
+   */
+  schedule(ctx: ExtensionContext, reason: GoalContextReason | string = "continue", options: { afterTree?: boolean; delayMs?: number } = {}): void {
     const goal = this.runtime.getGoal();
-    if (!goal || goal.status !== "active" || (!options.afterTree && !ctx.isIdle()) || ctx.hasPendingMessages()) return;
+    const waitForIdle = options.afterTree || options.delayMs != null;
+    if (!goal || goal.status !== "active" || (!waitForIdle && !ctx.isIdle()) || ctx.hasPendingMessages()) return;
     // A replacement or a second explicit activation supersedes the old timer.
     this.clear();
     const generation = this.generation;
@@ -35,7 +40,8 @@ export class GoalContinuationScheduler {
           // may start another navigation or run. Wait for it: a nested
           // session_tree, agent_start, or any invalidation clears this
           // activation, and the leaf check below drops an abandoned branch.
-          if (options.afterTree) this.timer = setTimeout(fire, 50);
+          // A delayed retry waits for its settling run the same way.
+          if (waitForIdle) this.timer = setTimeout(fire, 50);
           return;
         }
         if (leafId && !ctx.sessionManager.getBranch().some((entry) => entry.id === leafId)) return;
@@ -51,7 +57,9 @@ export class GoalContinuationScheduler {
         // without session_shutdown. Fail closed rather than restart stale work.
       }
     };
-    this.timer = setTimeout(fire, 0);
+    this.timer = setTimeout(fire, options.delayMs ?? 0);
+    // A pending retry alone must not keep a finished process alive.
+    if (options.delayMs) this.timer.unref?.();
   }
 
   /** The caller accounts finalized usage before making this synchronous proposal. */

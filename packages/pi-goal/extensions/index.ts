@@ -9,16 +9,37 @@ import { registerGoalTools } from "../src/tools.js";
 import type { GoalState } from "../src/types.js";
 import { GOAL_EVENT_TYPE } from "../src/types.js";
 import { PI_GOAL_VERSION, transitionMeta } from "../src/metadata.js";
-import { nowIso, realizedTimeUsed } from "../src/utils.js";
-import { classifyAssistantError, classifyProviderLimit } from "../src/provider-limits.js";
-import type { ProviderLimitClassification } from "../src/provider-limits.js";
+import { nowIso, realizedTimeUsed, truncateOneLine } from "../src/utils.js";
+import { classifyAssistantError } from "../src/provider-limits.js";
+import type { ProviderLimitClassification, ProviderLimitKind } from "../src/provider-limits.js";
 import { clearGoalUi, updateGoalUi } from "../src/ui.js";
+
+/** Only these classifications are evidence that a provider limit stopped the goal. */
+const USAGE_LIMIT_KINDS: ReadonlySet<ProviderLimitKind> = new Set(["rate_limit", "usage_limit", "quota_exceeded", "billing_required"]);
+/**
+ * Consecutive failed runs on one provider/model before a goal without limit
+ * evidence pauses. Each run already includes Pi's own retries, if enabled.
+ * Between failed runs the goal continues automatically after these delays, so
+ * an active goal never waits silently for user input after a failure.
+ */
+const PROVIDER_ERROR_PAUSE_THRESHOLD = 3;
+const FAILED_RUN_RETRY_DELAYS_MS = [30_000, 120_000] as const;
+
+interface AttemptError {
+  scope: string;
+  errorMessage: string;
+  classification: ProviderLimitClassification;
+}
 
 export default function piGoal(pi: ExtensionAPI) {
   reportInstallTelemetry();
 
   let goal: GoalState | null = null;
-  let consecutiveAssistantErrors = 0;
+  // Evidence from the current run's newest failed attempt and HTTP response.
+  let lastAttemptError: AttemptError | undefined;
+  let lastResponse: { status?: number; headers?: Record<string, string | string[] | undefined> } | undefined;
+  // Consecutive failed runs for one provider/model; a success or switch resets it.
+  let errorStreak: { scope?: string; count: number } = { count: 0 };
   let automaticCompactionFailed = false;
   const scheduler = new GoalContinuationScheduler(pi, { getGoal: () => goal, beforeContinue: accountAndEnforceBudget });
   let idleAccountingTimer: ReturnType<typeof setInterval> | undefined;
@@ -51,8 +72,14 @@ export default function piGoal(pi: ExtensionAPI) {
 
   const setGoal = (next: GoalState | null) => { goal = next; };
 
+  function clearProviderErrorState(): void {
+    lastAttemptError = undefined;
+    lastResponse = undefined;
+    errorStreak = { count: 0 };
+  }
+
   function afterGoalChanged(ctx: ExtensionContext, event?: string): void {
-    if (event) consecutiveAssistantErrors = 0;
+    if (event) errorStreak = { count: 0 };
     updateGoalUi(ctx, goal);
     if (event) {
       ctx.ui.notify(event, "info");
@@ -113,6 +140,53 @@ export default function piGoal(pi: ExtensionAPI) {
     );
   }
 
+  // A failure without limit evidence is not a usage limit. Pause it as an
+  // ordinary pause with the real reason, and do not suggest finalizing the goal.
+  function pauseForProviderError(ctx: ExtensionContext, kind: "provider_error" | "auth_required", reason: string): void {
+    if (!goal || goal.status !== "active") return;
+    const snapshot = goal;
+    const time = realizedTimeUsed(goal);
+    const providerLimit = { kind, reason };
+    const paused = statusMutation(goal, "paused", time, undefined, transitionMeta("provider-error", goal, time, nowIso(), { providerLimit }));
+    appendGoalMutation(pi, paused);
+    goal = applyGoalMutation(goal, paused);
+    ctx.ui.notify(`Goal paused: ${reason}.`, "warning");
+    updateGoalUi(ctx, goal);
+    scheduler.clear();
+    notifyAgentOfTerminalTransition(
+      `<provider_error>\nYour persistent Pi goal has been paused because ${reason}. This is not a confirmed usage or rate limit. The goal is in the "paused" state. Do not continue goal work until the user resumes it. The user can fix the provider problem or switch provider/model, then use /goal resume.\n</provider_error>`,
+      { kind: "provider_error", goalId: snapshot.goalId, providerLimit },
+    );
+  }
+
+  /** Returns the delay of the automatic retry to schedule, if any. */
+  function settleFailedRun(ctx: ExtensionContext): number | undefined {
+    const failure = lastAttemptError;
+    if (!failure || !goal || goal.status !== "active") return;
+    const { classification, scope } = failure;
+    const lastError = `last error: ${JSON.stringify(failure.errorMessage)}`;
+    if (classification.pause && USAGE_LIMIT_KINDS.has(classification.kind)) {
+      errorStreak = { count: 0 };
+      pauseForProviderLimit(ctx, classification);
+      return;
+    }
+    if (classification.pause && classification.kind === "auth_required") {
+      errorStreak = { count: 0 };
+      pauseForProviderError(ctx, "auth_required", `${classification.reason} on ${scope} (${lastError})`);
+      return;
+    }
+    if (errorStreak.scope !== scope) errorStreak = { scope, count: 0 };
+    errorStreak.count++;
+    if (errorStreak.count < PROVIDER_ERROR_PAUSE_THRESHOLD) {
+      const delayMs = FAILED_RUN_RETRY_DELAYS_MS[errorStreak.count - 1];
+      ctx.ui.notify(`Goal run failed on ${scope} (${lastError}). Continuing automatically in ${Math.round(delayMs / 1000)}s (failed run ${errorStreak.count} of ${PROVIDER_ERROR_PAUSE_THRESHOLD}).`, "warning");
+      return delayMs;
+    }
+    const count = errorStreak.count;
+    errorStreak = { count: 0 };
+    pauseForProviderError(ctx, "provider_error", `${count} consecutive runs failed on ${scope} (${lastError})`);
+  }
+
   function accountAndEnforceBudget(ctx: ExtensionContext): void {
     if (!goal) return;
     const result = accountUsageFromBranch(goal, ctx.sessionManager.getBranch() as any[]);
@@ -165,7 +239,7 @@ export default function piGoal(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     scheduler.clear();
     automaticCompactionFailed = false;
-    consecutiveAssistantErrors = 0;
+    clearProviderErrorState();
     const diagnostics: string[] = [];
     goal = reconstructGoalState(ctx.sessionManager.getBranch() as any[], diagnostics);
     if (goal?.status === "active" && !goal.activeStartedAt) {
@@ -184,7 +258,7 @@ export default function piGoal(pi: ExtensionAPI) {
   pi.on("session_tree", async (_event, ctx) => {
     scheduler.clear();
     automaticCompactionFailed = false;
-    consecutiveAssistantErrors = 0;
+    clearProviderErrorState();
     goal = reconstructGoalState(ctx.sessionManager.getBranch() as any[]);
     accountAndEnforceBudget(ctx);
     updateGoalUi(ctx, goal);
@@ -209,6 +283,9 @@ export default function piGoal(pi: ExtensionAPI) {
     // A real run supersedes any idle activation. Never leave a timer behind
     // that could restart the session after cancellation or recovery.
     scheduler.clear();
+    // Each attempt, including Pi's retries, reports its own response and result.
+    lastAttemptError = undefined;
+    lastResponse = undefined;
   });
 
   pi.on("agent_settled", () => {
@@ -218,21 +295,23 @@ export default function piGoal(pi: ExtensionAPI) {
   });
 
   pi.on("message_end", async (event: any, ctx) => {
-    if (event.message?.role !== "assistant") return;
-    const classification = classifyAssistantError(event.message);
-    if (classification.pause) {
-      consecutiveAssistantErrors = 0;
-      pauseForProviderLimit(ctx, classification);
+    const message = event.message;
+    if (message?.role !== "assistant") return;
+    if (message.stopReason === "error" || message.errorMessage) {
+      // Pi emits message_end for every failed attempt and decides about its
+      // auto-retry only afterwards. Record the evidence; act at settlement.
+      // Classify the attempt's response status and error text together: a known
+      // status outranks the wording. The response belongs to this attempt only.
+      const classification = classifyAssistantError(message, lastResponse);
+      lastResponse = undefined;
+      lastAttemptError = {
+        scope: `${message.provider ?? "unknown"}/${message.model ?? "unknown"}`,
+        errorMessage: truncateOneLine(String(message.errorMessage || "unknown error"), 200),
+        classification,
+      };
       return;
     }
-    if (event.message?.stopReason === "error" || event.message?.errorMessage) {
-      consecutiveAssistantErrors++;
-      if (consecutiveAssistantErrors >= 3 && goal?.status === "active") {
-        pauseForProviderLimit(ctx, { kind: "provider_error", pause: true, reason: "repeated assistant provider errors" });
-      }
-      return;
-    }
-    consecutiveAssistantErrors = 0;
+    clearProviderErrorState();
     accountAndEnforceBudget(ctx);
   });
 
@@ -247,7 +326,18 @@ export default function piGoal(pi: ExtensionAPI) {
 
   pi.on("agent_before_settle", (event, ctx) => {
     accountAndEnforceBudget(ctx);
-    if (!automaticCompactionFailed) return scheduler.beforeSettle(event, ctx);
+    // Settlement runs only after Pi's own retry loop has given up, so a pause
+    // here never races a retry that could still succeed.
+    const retryDelayMs = event.outcome === "error" ? settleFailedRun(ctx) : undefined;
+    if (event.outcome === "completed") clearProviderErrorState();
+    lastAttemptError = undefined;
+    lastResponse = undefined;
+    if (automaticCompactionFailed) return;
+    const result = scheduler.beforeSettle(event, ctx);
+    // A failed run cannot continue inside settlement. Retry it after a delay,
+    // once Pi is idle; a new run, pause, or session change cancels the retry.
+    if (retryDelayMs != null) scheduler.schedule(ctx, "continue", { delayMs: retryDelayMs });
+    return result;
   });
 
   pi.on("cache_warming_decision", async (_event, ctx) => {
@@ -259,9 +349,10 @@ export default function piGoal(pi: ExtensionAPI) {
     }
   });
 
-  pi.on("after_provider_response", async (event, ctx) => {
-    if (!goal || goal.status !== "active") return;
-    pauseForProviderLimit(ctx, classifyProviderLimit({ status: event.status, headers: event.headers }));
+  pi.on("after_provider_response", async (event) => {
+    // Pi retries HTTP 429 itself. Keep the newest response until the attempt's
+    // message_end classifies it with the error text; settlement acts on it.
+    lastResponse = { status: event.status, headers: event.headers };
   });
 
   pi.on("context", async (event) => {

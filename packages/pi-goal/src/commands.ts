@@ -1,11 +1,11 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { GoalMutation, GoalState, GoalStatus, ParsedGoalCommand } from "./types.js";
 import { GOAL_EVENT_TYPE, GOAL_SCHEMA_VERSION, GOAL_SUMMARY_TYPE } from "./types.js";
-import { accountUsageFromBranch } from "./accounting.js";
-import { appendGoalMutation, applyGoalMutation, createGoalMutation, replaceGoalMutation, statusMutation } from "./state.js";
+import { accountUsageFromBranch, isBudgetExceeded } from "./accounting.js";
+import { appendGoalMutation, applyGoalMutation, createGoalMutation, goalTransitionRejection, replaceGoalMutation, statusMutation } from "./state.js";
 import { PI_GOAL_VERSION, transitionMeta, withPiGoalVersion } from "./metadata.js";
 import { formatElapsed, goalToSummary, goalUsageSummary, nowIso, realizedTimeUsed } from "./utils.js";
-import { validateObjective, validateTokenBudget } from "./validation.js";
+import { parseTokenBudget, validateObjective, validateTokenBudget } from "./validation.js";
 
 export interface CommandRuntime {
   getGoal(): GoalState | null;
@@ -19,15 +19,35 @@ export function parseGoalCommand(args: string): ParsedGoalCommand {
   if (!trimmed || trimmed === "status") return { action: "status" };
   if (["edit", "pause", "resume", "clear"].includes(trimmed)) return { action: trimmed as ParsedGoalCommand["action"] };
   if (trimmed === "budget clear") return { action: "clearBudget" };
+  if (trimmed === "budget") return invalid(BUDGET_USAGE);
   const budget = trimmed.match(/^budget\s+(\S+)$/);
-  if (budget) return { action: "setBudget", tokenBudget: Number(budget[1]) };
-  const withBudget = trimmed.match(/^--budget\s+(\S+)\s+([\s\S]+)$/);
-  if (withBudget) return { action: "createOrReplace", tokenBudget: Number(withBudget[1]), objective: withBudget[2] };
+  if (budget) {
+    const parsed = parseTokenBudget(budget[1]);
+    return parsed.ok ? { action: "setBudget", tokenBudget: parsed.value } : invalid(`${parsed.error} ${BUDGET_USAGE}`);
+  }
+  // A leading option is never an objective: a flag without an objective, an
+  // unknown option, or a malformed budget must not silently create a goal.
+  if (trimmed.startsWith("--")) {
+    const withBudget = trimmed.match(/^--budget(?:=|\s+)(\S+)(?:\s+([\s\S]*))?$/);
+    if (!withBudget) return invalid(/^--budget\b/.test(trimmed) ? CREATE_USAGE : `Unknown option ${JSON.stringify(trimmed.split(/\s/, 1)[0])}. ${CREATE_USAGE}`);
+    const parsed = parseTokenBudget(withBudget[1]);
+    if (!parsed.ok) return invalid(`${parsed.error} ${CREATE_USAGE}`);
+    if (!withBudget[2]?.trim()) return invalid(`Missing objective. ${CREATE_USAGE}`);
+    return { action: "createOrReplace", tokenBudget: parsed.value, objective: withBudget[2] };
+  }
   return { action: "createOrReplace", objective: trimmed };
+}
+
+const CREATE_USAGE = "Usage: /goal --budget <tokens> <objective> (tokens such as 50000, 50k, or 1.5m).";
+const BUDGET_USAGE = "Usage: /goal budget <tokens> or /goal budget clear.";
+
+function invalid(error: string): ParsedGoalCommand {
+  return { action: "invalid", error };
 }
 
 export async function handleGoalCommand(pi: ExtensionAPI, args: string, ctx: ExtensionCommandContext, runtime: CommandRuntime): Promise<void> {
   const parsed = parseGoalCommand(args);
+  if (parsed.action === "invalid") return ctx.ui.notify(parsed.error ?? "Invalid /goal command.", "error");
   if (parsed.action === "status") return showStatus(pi, ctx, runtime.getGoal());
   if (parsed.action === "createOrReplace") return createOrReplace(pi, ctx, runtime, parsed.objective, parsed.tokenBudget);
   if (parsed.action === "edit") return editGoal(pi, ctx, runtime);
@@ -83,7 +103,9 @@ async function editGoal(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime:
   if (next == null) return;
   const objective = validateObjective(next);
   if (!objective.ok) return ctx.ui.notify(objective.error, "error");
-  const reactivate = current.status === "complete" || current.status === "budget_limited";
+  // An exhausted budget still applies to the edited objective; reactivating it
+  // would only re-limit the goal on the next continuation.
+  const reactivate = current.status === "complete" || (current.status === "budget_limited" && !isBudgetExceeded(current));
   const mutation: GoalMutation = { schemaVersion: GOAL_SCHEMA_VERSION, kind: "edit", goalId: current.goalId, objective: objective.value, status: reactivate ? "active" : current.status, at: nowIso(), meta: withPiGoalVersion({ source: "command:/goal edit" }) };
   appendGoalMutation(pi, mutation);
   runtime.setGoal(applyGoalMutation(current, mutation));
@@ -94,6 +116,8 @@ async function editGoal(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime:
 function setGoalStatus(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime: CommandRuntime, status: "paused" | "active"): void {
   const current = accountCurrent(pi, ctx, runtime.getGoal());
   if (!current) return ctx.ui.notify("No goal set.", "error");
+  const rejected = goalTransitionRejection(current, status);
+  if (rejected) return ctx.ui.notify(rejected, "error");
   const transitionedAt = nowIso();
   const time = realizedTimeUsed(current, Date.parse(transitionedAt));
   const activeStartedAt = status === "active" ? transitionedAt : undefined;
@@ -127,8 +151,20 @@ function setBudget(pi: ExtensionAPI, ctx: ExtensionCommandContext, runtime: Comm
     appendGoalMutation(pi, limited);
     next = applyGoalMutation(next, limited)!;
   }
+  // Raising or clearing the budget of a budget-limited goal removes the only
+  // reason it stopped, so resume it as /goal resume would.
+  const resume = next.status === "budget_limited" && (next.tokenBudget == null || next.tokensUsed < next.tokenBudget);
+  if (resume) {
+    const resumedAt = nowIso();
+    const time = realizedTimeUsed(next, Date.parse(resumedAt));
+    const resumed = statusMutation(next, "active", time, resumedAt, transitionMeta("command:/goal budget", next, time, resumedAt));
+    appendGoalMutation(pi, resumed);
+    next = applyGoalMutation(next, resumed)!;
+  }
   runtime.setGoal(next);
-  runtime.afterGoalChanged(ctx, budget.value == null ? "Goal budget cleared." : `Goal budget set to ${budget.value}.`);
+  const event = budget.value == null ? "Goal budget cleared." : `Goal budget set to ${budget.value}.`;
+  runtime.afterGoalChanged(ctx, resume ? `${event} Goal resumed.` : event);
+  if (resume) runtime.scheduleContinuation(ctx, "resumed");
 }
 
 function accountCurrent(pi: ExtensionAPI, ctx: ExtensionCommandContext, goal: GoalState | null): GoalState | null {
