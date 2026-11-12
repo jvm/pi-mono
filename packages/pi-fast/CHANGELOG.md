@@ -6,6 +6,8 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-12
+
 ### Fixed
 
 - Allow Fast mode for GPT-6.1 Terra (`gpt-6.1-terra`) on `openai` and `openai-codex`, as advertised by the upstream Codex catalog and OpenAI's Fast documentation.
