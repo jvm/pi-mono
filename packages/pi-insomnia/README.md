@@ -52,6 +52,8 @@ systemd-inhibit --what=idle:sleep --who=pi-insomnia --why="Pi agent is working" 
   --mode=block --no-ask-password /usr/bin/cat
 ```
 
+systemd added `--no-ask-password` in version 257. When an older `systemd-inhibit` rejects the option, the extension retries once without it; those releases never ask for interactive authorization.
+
 The lock blocks idle handling and suspend/hibernate, not shutdown. `systemd-inhibit` holds it until `cat` exits. `cat` reads a pipe from Pi, so the lock ends when the extension terminates the helper on settle or shutdown, and also when Pi exits unexpectedly and the pipe closes.
 
 If `systemd-inhibit` is not installed, or logind refuses the lock (for example in a remote SSH session where polkit requires interactive authentication, or in a container without logind), the extension shows one warning in the TUI and stays inactive for the rest of the session. It never prompts for a password. Print, JSON, and RPC modes show no notice.

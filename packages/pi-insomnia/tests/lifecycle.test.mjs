@@ -162,6 +162,17 @@ function makeFakeChild() {
   return child;
 }
 
+const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+// Like a real helper that never started `cat`: stderr ends, then the process exits.
+async function exitChild(child, code, signal = null) {
+  child.stderr.end();
+  await tick();
+  child.emit("exit", code, signal);
+}
+
+const LINUX_ARGS = ["--what=idle:sleep", "--who=pi-insomnia", "--why=Pi agent is working", "--mode=block"];
+
 function makeLinux(overrides = {}) {
   const spawns = [];
   const inhibitor = new LinuxSleepInhibitor({
@@ -243,8 +254,7 @@ test("notifies once and stops retrying when systemd-inhibit refuses the lock", a
 
   await emit(pi, "agent_start", context);
   spawns[0].child.stderr.write("Failed to inhibit: Access denied\nmore detail\n");
-  await new Promise((resolve) => setImmediate(resolve));
-  spawns[0].child.emit("exit", 1, null);
+  await exitChild(spawns[0].child, 1);
 
   assert.equal(inhibitor.isInhibiting, false);
   assert.equal(statuses.at(-1).value, undefined);
@@ -296,8 +306,66 @@ test("bounds retained systemd-inhibit stderr", async () => {
   inhibitor.onUnavailable = (message) => messages.push(message);
   inhibitor.acquire();
   spawns[0].child.stderr.write("x".repeat(10_000));
-  await new Promise((resolve) => setImmediate(resolve));
-  spawns[0].child.emit("exit", 1, null);
+  await exitChild(spawns[0].child, 1);
   assert.equal(messages.length, 1);
   assert.ok(messages[0].length < 300);
+});
+
+test("retries once without --no-ask-password on systemd older than 257", async () => {
+  const { inhibitor, spawns } = makeLinux();
+  const pi = makePi();
+  const { context, statuses, notices } = makeTuiContext();
+  piInsomnia(pi, inhibitor);
+
+  await emit(pi, "agent_start", context);
+  assert.deepEqual(spawns[0].args, [...LINUX_ARGS, "--no-ask-password", "/usr/bin/cat"]);
+  // systemd 255 exits during option parsing; exit can arrive before stderr.
+  spawns[0].child.emit("exit", 1, null);
+  assert.equal(spawns.length, 1);
+  spawns[0].child.stderr.end("systemd-inhibit: unrecognized option '--no-ask-password'\n");
+  await tick();
+
+  assert.equal(spawns.length, 2);
+  assert.deepEqual(spawns[1].args, [...LINUX_ARGS, "/usr/bin/cat"]);
+  assert.equal(inhibitor.isInhibiting, true);
+  assert.equal(notices.length, 0);
+  assert.deepEqual(statuses.at(-1), { key: "pi-insomnia", value: "\u{f0176}" });
+
+  // Later locks keep the old-systemd argument set.
+  await emit(pi, "agent_settled", context);
+  await emit(pi, "agent_start", context);
+  assert.equal(spawns.length, 3);
+  assert.deepEqual(spawns[2].args, [...LINUX_ARGS, "/usr/bin/cat"]);
+
+  // A refusal without the option is reported, not retried.
+  spawns[2].child.stderr.write("Failed to inhibit: Access denied\n");
+  await exitChild(spawns[2].child, 1);
+  assert.equal(spawns.length, 3);
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].message, /Access denied/);
+});
+
+test("does not treat a polkit refusal as old systemd", async () => {
+  const { inhibitor, spawns } = makeLinux();
+  const messages = [];
+  inhibitor.onUnavailable = (message) => messages.push(message);
+  inhibitor.acquire();
+  spawns[0].child.stderr.write("Failed to inhibit: Interactive authentication required.\n");
+  await exitChild(spawns[0].child, 1);
+  assert.equal(spawns.length, 1);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /Interactive authentication required/);
+});
+
+test("judges an exit after a bounded wait when a held cat keeps stderr open", async () => {
+  const { inhibitor, spawns } = makeLinux();
+  const messages = [];
+  inhibitor.onUnavailable = (message) => messages.push(message);
+  inhibitor.acquire();
+  spawns[0].child.emit("exit", null, "SIGKILL");
+  assert.equal(messages.length, 0);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  assert.equal(spawns.length, 1);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0], /signal SIGKILL/);
 });

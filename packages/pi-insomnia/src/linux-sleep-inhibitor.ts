@@ -7,6 +7,12 @@ export const DEFAULT_CAT_PATHS = ["/usr/bin/cat", "/bin/cat"] as const;
 // Bound the helper's stderr that is kept for the refusal notice.
 const MAX_STDERR_BYTES = 1024;
 const MAX_REASON_CHARS = 200;
+// How long to wait after exit for stderr to end before judging the exit.
+const STDERR_DRAIN_MS = 250;
+// systemd 257 added `--no-ask-password`; older releases reject it during option
+// parsing (getopt names the option in any locale) and never ask for interactive
+// authorization, so they run safely without it.
+const NO_ASK_PASSWORD = "--no-ask-password";
 
 export type Spawner = (command: string, args: readonly string[]) => ChildProcess;
 
@@ -38,6 +44,7 @@ export class LinuxSleepInhibitor {
   private child: ChildProcess | undefined;
   private active = false;
   private unavailable = false;
+  private noAskPassword = true;
 
   /** Called once when inhibition is unavailable (missing binary or refused lock). */
   onUnavailable: ((message: string) => void) | undefined;
@@ -94,6 +101,7 @@ export class LinuxSleepInhibitor {
       return;
     }
 
+    const noAskPassword = this.noAskPassword;
     let child: ChildProcess;
     try {
       child = this.spawner(inhibit, [
@@ -101,7 +109,7 @@ export class LinuxSleepInhibitor {
         "--who=pi-insomnia",
         "--why=Pi agent is working",
         "--mode=block",
-        "--no-ask-password",
+        ...(noAskPassword ? [NO_ASK_PASSWORD] : []),
         cat,
       ]);
     } catch (error) {
@@ -126,8 +134,16 @@ export class LinuxSleepInhibitor {
       if (this.child !== child) return;
       this.child = undefined;
       // Only Pi closes the pipe, so any exit while held means the lock was refused or lost.
-      const reason = firstLine(stderr) ?? (signal ? `signal ${signal}` : `exit code ${code}`);
-      this.markUnavailable(`pi-insomnia: systemd-inhibit refused the sleep inhibitor (${reason}); sleep prevention is off.`);
+      afterStderrDrains(child, () => {
+        if (noAskPassword && stderr.includes(NO_ASK_PASSWORD)) {
+          // systemd < 257: retry once without the option.
+          this.noAskPassword = false;
+          if (this.active && !this.unavailable) this.start();
+          return;
+        }
+        const reason = firstLine(stderr) ?? (signal ? `signal ${signal}` : `exit code ${code}`);
+        this.markUnavailable(`pi-insomnia: systemd-inhibit refused the sleep inhibitor (${reason}); sleep prevention is off.`);
+      });
     });
     unrefStream(child.stdin);
     unrefStream(child.stderr);
@@ -150,6 +166,27 @@ export class LinuxSleepInhibitor {
     this.active = false;
     this.onUnavailable?.(message);
   }
+}
+
+// A held `cat` inherits stderr, so stderr may stay open after systemd-inhibit
+// exits; wait for it to end, but no longer than STDERR_DRAIN_MS.
+function afterStderrDrains(child: ChildProcess, done: () => void): void {
+  const stderr = child.stderr;
+  if (!stderr || stderr.readableEnded || stderr.destroyed) {
+    done();
+    return;
+  }
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    done();
+  };
+  const timer = setTimeout(finish, STDERR_DRAIN_MS);
+  timer.unref?.();
+  stderr.once("end", finish);
+  stderr.once("close", finish);
 }
 
 function unrefStream(stream: unknown): void {
