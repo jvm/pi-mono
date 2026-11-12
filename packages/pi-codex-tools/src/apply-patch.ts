@@ -29,10 +29,15 @@ eof_line: "*** End of File" LF
 
 %import common.LF`;
 
+/** Origin of one chunk line, in patch order: ` ` context, `-` removed, `+` added. */
+export type UpdateChunkLineKind = "context" | "removed" | "added";
+
 export interface UpdateChunk {
   context?: string;
   oldLines: string[];
   newLines: string[];
+  // One entry per patch line; context lines appear in both oldLines and newLines.
+  lineKinds: UpdateChunkLineKind[];
   endOfFile: boolean;
 }
 
@@ -132,6 +137,7 @@ export function parseApplyPatch(input: string): ApplyPatchHunk[] {
             ...(context === undefined ? {} : { context }),
             oldLines: [],
             newLines: [],
+            lineKinds: [],
             endOfFile: false,
           };
           chunks.push(current);
@@ -144,18 +150,22 @@ export function parseApplyPatch(input: string): ApplyPatchHunk[] {
           continue;
         }
 
-        current ??= { oldLines: [], newLines: [], endOfFile: false };
+        current ??= { oldLines: [], newLines: [], lineKinds: [], endOfFile: false };
         if (raw === "") {
           current.oldLines.push("");
           current.newLines.push("");
+          current.lineKinds.push("context");
         } else if (raw.startsWith(" ")) {
           const text = raw.slice(1);
           current.oldLines.push(text);
           current.newLines.push(text);
+          current.lineKinds.push("context");
         } else if (raw.startsWith("+")) {
           current.newLines.push(raw.slice(1));
+          current.lineKinds.push("added");
         } else if (raw.startsWith("-")) {
           current.oldLines.push(raw.slice(1));
+          current.lineKinds.push("removed");
         } else {
           throw new Error(
             `Unexpected line at patch line ${index + 1}. Every update line must start with ' ', '+' or '-'.`,
@@ -454,14 +464,59 @@ async function writeTargetFile(absolute: string, content: string, signal?: Abort
   throwIfAborted(signal);
 }
 
+type LineEnding = "\r\n" | "\n" | "";
+
+interface OutputLine {
+  text: string;
+  // Original ending to keep byte-for-byte, or undefined for a line the patch added.
+  ending: LineEnding | undefined;
+  // Ending for an added line, chosen from the change group it belongs to.
+  inherit?: LineEnding;
+}
+
+interface Replacement {
+  start: number;
+  length: number;
+  lines: string[];
+  // Patch-order origin of each line; context and removed lines consume `length` original lines.
+  kinds: UpdateChunkLineKind[];
+}
+
+/**
+ * Apply update chunks with Codex line matching while keeping line endings local.
+ *
+ * Line-ending rule:
+ * - A line the patch does not change (outside every chunk, or a chunk context
+ *   line) keeps its original LF or CRLF byte-for-byte.
+ * - Added lines that replace removed lines take the ending of the first removed
+ *   line of that change group; pure insertions take the ending of the line
+ *   before them, else the line after them. A final line without a terminator
+ *   counts as having the ending of the nearest terminated line before it.
+ *   A file with no line breaks uses LF.
+ * - A file without a trailing newline keeps that property while its last line
+ *   is untouched. When the patch replaces the last line or appends after it, the
+ *   result ends with a newline, matching Codex.
+ * Only LF and CRLF count as line breaks; a lone CR stays part of its line.
+ */
 function applyUpdateContent(original: string, chunks: UpdateChunk[], displayPath: string): string {
   const bom = original.startsWith("\uFEFF") ? "\uFEFF" : "";
   const body = bom ? original.slice(1) : original;
-  const lineEnding = body.includes("\r\n") ? "\r\n" : "\n";
-  const lines = body.replace(/\r\n/g, "\n").split("\n");
-  if (lines.at(-1) === "") lines.pop();
+  const lines: string[] = [];
+  const endings: LineEnding[] = [];
+  for (let offset = 0; offset < body.length;) {
+    const lineFeed = body.indexOf("\n", offset);
+    if (lineFeed === -1) {
+      lines.push(body.slice(offset));
+      endings.push("");
+      break;
+    }
+    const crlf = lineFeed > offset && body[lineFeed - 1] === "\r";
+    lines.push(body.slice(offset, crlf ? lineFeed - 1 : lineFeed));
+    endings.push(crlf ? "\r\n" : "\n");
+    offset = lineFeed + 1;
+  }
 
-  const replacements: Array<{ start: number; length: number; lines: string[] }> = [];
+  const replacements: Replacement[] = [];
   let lineIndex = 0;
   for (const chunk of chunks) {
     if (chunk.context !== undefined) {
@@ -471,22 +526,25 @@ function applyUpdateContent(original: string, chunks: UpdateChunk[], displayPath
     }
 
     if (chunk.oldLines.length === 0) {
-      replacements.push({ start: lines.length, length: 0, lines: [...chunk.newLines] });
+      replacements.push({ start: lines.length, length: 0, lines: [...chunk.newLines], kinds: [...chunk.lineKinds] });
       continue;
     }
 
     let pattern = chunk.oldLines;
     let replacementLines = chunk.newLines;
+    let kinds = chunk.lineKinds;
     let found = seekSequence(lines, pattern, lineIndex, chunk.endOfFile);
     if (found === undefined && pattern.at(-1) === "") {
       pattern = pattern.slice(0, -1);
-      if (replacementLines.at(-1) === "") replacementLines = replacementLines.slice(0, -1);
+      const dropNew = replacementLines.at(-1) === "";
+      if (dropNew) replacementLines = replacementLines.slice(0, -1);
+      kinds = withoutTrailingLines(kinds, dropNew);
       found = seekSequence(lines, pattern, lineIndex, chunk.endOfFile);
     }
     if (found === undefined) {
       throw new Error(`Failed to find expected lines in ${displayPath}:\n${chunk.oldLines.join("\n")}`);
     }
-    replacements.push({ start: found, length: pattern.length, lines: [...replacementLines] });
+    replacements.push({ start: found, length: pattern.length, lines: [...replacementLines], kinds });
     lineIndex = found + pattern.length;
   }
 
@@ -499,12 +557,99 @@ function applyUpdateContent(original: string, chunks: UpdateChunk[], displayPath
     }
   }
 
-  const updated = [...lines];
-  for (const replacement of [...replacements].reverse()) {
-    updated.splice(replacement.start, replacement.length, ...replacement.lines);
+  const effectiveEnding = (index: number): LineEnding => {
+    for (let candidate = index; candidate >= 0; candidate--) {
+      if (endings[candidate]) return endings[candidate];
+    }
+    return "\n";
+  };
+
+  const output: OutputLine[] = [];
+  let position = 0;
+  for (const replacement of replacements) {
+    for (; position < replacement.start; position++) output.push({ text: lines[position], ending: endings[position] });
+    // Append one at a time: spreading a large replacement into push() exceeds the engine's argument limit.
+    for (const line of replacementOutput(replacement, endings, effectiveEnding)) output.push(line);
+    position = replacement.start + replacement.length;
   }
-  if (updated.at(-1) !== "") updated.push("");
-  return bom + updated.join(lineEnding);
+  for (; position < lines.length; position++) output.push({ text: lines[position], ending: endings[position] });
+
+  // Pure insertions inherit from the line before them, else the line after them.
+  const settledEnding = (line: OutputLine): LineEnding | undefined =>
+    line.ending === undefined ? line.inherit : line.ending || effectiveEnding(endings.length - 1);
+  let previousEnding: LineEnding | undefined;
+  for (const line of output) {
+    if (line.ending === undefined && line.inherit === undefined && previousEnding !== undefined) line.inherit = previousEnding;
+    previousEnding = settledEnding(line) ?? previousEnding;
+  }
+  let nextEnding: LineEnding = "\n";
+  for (let index = output.length - 1; index >= 0; index--) {
+    const line = output[index];
+    if (line.ending === undefined && line.inherit === undefined) line.inherit = nextEnding;
+    nextEnding = settledEnding(line) ?? nextEnding;
+  }
+
+  let result = bom;
+  output.forEach((line, index) => {
+    const isLast = index === output.length - 1;
+    const ending = line.ending === undefined
+      ? line.inherit!
+      : line.ending === "" && !isLast ? effectiveEnding(endings.length - 1) : line.ending;
+    result += line.text + ending;
+  });
+  return result;
+}
+
+/**
+ * Drop the last old line (and, when `dropNew`, the last new line) from a
+ * chunk's line kinds, mirroring the trailing-blank-line matching fallback.
+ */
+function withoutTrailingLines(kinds: UpdateChunkLineKind[], dropNew: boolean): UpdateChunkLineKind[] {
+  const membership = kinds.map((kind) => ({ old: kind !== "added", new: kind !== "removed" }));
+  const dropLast = (side: "old" | "new") => {
+    for (let index = membership.length - 1; index >= 0; index--) {
+      if (membership[index][side]) {
+        membership[index][side] = false;
+        return;
+      }
+    }
+  };
+  dropLast("old");
+  if (dropNew) dropLast("new");
+  return membership.flatMap((line): UpdateChunkLineKind[] =>
+    line.old && line.new ? ["context"] : line.old ? ["removed"] : line.new ? ["added"] : []);
+}
+
+/**
+ * Walk a replacement in patch order. Context lines keep the ending of the
+ * original line they matched; added lines inherit from the first removed line
+ * of their change group (the run of lines between two context lines).
+ */
+function replacementOutput(
+  replacement: Replacement,
+  endings: LineEnding[],
+  effectiveEnding: (index: number) => LineEnding,
+): OutputLine[] {
+  const { start, lines: added, kinds } = replacement;
+  const output: OutputLine[] = [];
+  let oldIndex = 0;
+  let newIndex = 0;
+  for (let index = 0; index < kinds.length;) {
+    if (kinds[index] === "context") {
+      output.push({ text: added[newIndex++], ending: endings[start + oldIndex++] });
+      index++;
+      continue;
+    }
+    let groupEnd = index;
+    while (groupEnd < kinds.length && kinds[groupEnd] !== "context") groupEnd++;
+    const removed = kinds.slice(index, groupEnd).filter((kind) => kind === "removed").length;
+    const inherit = removed > 0 ? effectiveEnding(start + oldIndex) : undefined;
+    for (; index < groupEnd; index++) {
+      if (kinds[index] === "added") output.push({ text: added[newIndex++], ending: undefined, inherit });
+    }
+    oldIndex += removed;
+  }
+  return output;
 }
 
 function seekSequence(lines: string[], pattern: string[], start: number, endOfFile: boolean): number | undefined {

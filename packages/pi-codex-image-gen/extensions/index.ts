@@ -216,6 +216,38 @@ async function resolveImageAuth(registry: ExtensionContext["modelRegistry"]): Pr
 	throw new Error(`Missing image OAuth credentials. Run /login ${IMAGE_AUTH_PROVIDER}. Pi's openai plan-sharing OAuth does not support images; API keys and Codex app credentials are not used.`);
 }
 
+// --- Routing model default ---
+
+/**
+ * Choose the Responses routing model when neither the call nor trusted config
+ * sets one. The Codex backend rejects unknown routing models, and Pi's
+ * `openai-codex` catalog changes between releases, so a hardcoded default can
+ * stop working. Prefer `DEFAULT_MODEL` while the running Pi still lists it,
+ * then the current session model when it is an `openai-codex` catalog model,
+ * then the first catalog model. Use `DEFAULT_MODEL` when the registry lists no
+ * `openai-codex` models or cannot be read; never fail here.
+ */
+export function resolveDefaultRoutingModel(
+	registry: Pick<ExtensionContext["modelRegistry"], "getAll"> | undefined,
+	sessionModel: { provider?: unknown; id?: unknown } | undefined,
+): string {
+	let ids: string[];
+	try {
+		const models = typeof registry?.getAll === "function" ? registry.getAll() : [];
+		ids = (Array.isArray(models) ? models : [])
+			.filter(model => model?.provider === LEGACY_PROVIDER && typeof model.id === "string"
+				&& model.id.trim() !== "" && model.id.length <= 200 && !model.id.startsWith("gpt-image-"))
+			.map(model => model.id);
+	} catch {
+		return DEFAULT_MODEL;
+	}
+	if (ids.length === 0 || ids.includes(DEFAULT_MODEL)) return DEFAULT_MODEL;
+	if (sessionModel?.provider === LEGACY_PROVIDER && typeof sessionModel.id === "string" && ids.includes(sessionModel.id)) {
+		return sessionModel.id;
+	}
+	return ids[0];
+}
+
 // --- #10: try/catch readConfigFile replaces racy existsSync + readFileSync ---
 
 function readConfigFile(path: string): ExtensionConfig {
@@ -267,7 +299,8 @@ function resolveSaveConfig(params: ToolParams, cwd: string, sessionId: string, c
 	}
 	if (mode === "custom") {
 		const configuredDir = params.saveDir || process.env.PI_CODEX_IMAGE_SAVE_DIR || config.saveDir;
-		if (!configuredDir || !configuredDir.trim()) {
+		// Config files are untrusted JSON; a non-string value must not reach path APIs.
+		if (typeof configuredDir !== "string" || !configuredDir.trim()) {
 			throw new Error("save=custom requires saveDir or PI_CODEX_IMAGE_SAVE_DIR.");
 		}
 		return { mode, outputDir: join(resolveUnderCwd(cwd, configuredDir), safeSessionId) };
@@ -598,7 +631,8 @@ export default function codexImageGen(pi: ExtensionAPI) {
 			if (transport === "images" && (outputFormat !== "png" || params.model !== undefined)) {
 				throw new Error("The images transport supports PNG only and does not accept a routing model. Use responses for JPEG/WebP or model overrides. No generation request was made.");
 			}
-			const requestedModel = transport === "responses" ? params.model || config.model || DEFAULT_MODEL : DEFAULT_MODEL;
+			const requestedModel = transport === "responses"
+				? params.model || config.model || resolveDefaultRoutingModel(ctx.modelRegistry, ctx.model) : DEFAULT_MODEL;
 			if (typeof requestedModel !== "string" || !requestedModel.trim() || requestedModel.length > 200) {
 				throw new Error("Codex routing model must contain 1 to 200 characters.");
 			}

@@ -106,11 +106,11 @@ Like native Pi tools, normal path-based I/O does not protect against another pro
 `apply_patch` is line-oriented rather than byte-oriented:
 
 - `*** Add File` requires at least one `+` line and writes a trailing newline. A `+`-only hunk creates a one-newline file, not a zero-byte file.
-- Updates produce a trailing newline for non-empty output, so updating a file that lacks one may add it.
-- Existing CRLF line endings are preserved when detected.
+- Line endings stay local. Lines the patch does not change, including unchanged context lines, keep their LF or CRLF byte-for-byte, so mixed-ending files are not rewritten outside the patched hunks. Added lines that replace removed lines take the ending of the first removed line; pure insertions take the ending of the line before them (or after them at the start of a file). A file with no line breaks uses LF. Only LF and CRLF count as line breaks.
+- A file without a trailing newline keeps that property while its last line is untouched. When an update replaces the last line or appends after it, the result ends with a newline, as in Codex.
 - Use `bash` when exact byte-level output or a truly empty file is required.
 
-These behaviors intentionally match Codex `apply_patch`.
+Matching and add/delete semantics intentionally match Codex `apply_patch`; line-ending preservation is stricter than Codex.
 
 The provider contract is runtime-specific. Model-only exposure, the loadout hook,
 metadata, and development/integration tests target Pi 1.5.2.

@@ -1,6 +1,6 @@
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export type SkillfulScope = "global" | "project";
 export type SkillToggleSlot = "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9";
@@ -43,11 +43,12 @@ export const DEFAULT_TOGGLE_MODIFIER: SkillToggleModifier = "alt";
 const SUPPORTED_TOGGLE_MODIFIERS_SET: ReadonlySet<string> = new Set(SUPPORTED_TOGGLE_MODIFIERS);
 
 export function globalSettingsPath(): string {
-  return join(homedir(), ".pi", "agent", "settings.json");
+  // Honor PI_CODING_AGENT_DIR and Pi's config directory name like Pi itself.
+  return join(getAgentDir(), "settings.json");
 }
 
 export function projectSettingsPath(cwd: string): string {
-  return join(cwd, ".pi", "settings.json");
+  return join(cwd, CONFIG_DIR_NAME, "settings.json");
 }
 
 export function settingsPath(scope: SkillfulScope, cwd: string): string {

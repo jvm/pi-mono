@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Prevent idle sleep on Linux with `systemd-inhibit` (`idle:sleep` lock) for the same active-work lifetime as `caffeinate` on macOS. A missing binary or a refused lock shows one TUI warning and leaves the extension inactive. systemd releases before 257, which lack `--no-ask-password`, are supported.
+
 ## [0.3.1] - 2026-10-30
 
 ### Changed

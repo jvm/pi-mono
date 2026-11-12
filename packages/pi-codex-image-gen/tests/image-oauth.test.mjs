@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { createModels, InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import test from "node:test";
 import extension from "../.test-dist/extensions/index.js";
-import { extractImageAccountId, IMAGE_AUTH_PROVIDER, imageAuthProvider, imageOAuth, parseImageOAuthCallback } from "../.test-dist/src/image-oauth.js";
+import { createImageOAuth, extractImageAccountId, IMAGE_AUTH_PROVIDER, imageAuthProvider, imageOAuth, parseImageOAuthCallback } from "../.test-dist/src/image-oauth.js";
 
 const REDIRECT = "http://localhost:1455/auth/callback";
 const CODE = "test-only-authorization-code";
@@ -20,6 +20,24 @@ function callback(authorize, code = CODE) {
   url.searchParams.set("state", authorize.searchParams.get("state"));
   url.searchParams.set("code", code);
   return url.href;
+}
+
+// Bind login listeners to a free port so parallel runs and a real Pi login on
+// port 1455 cannot interfere. The redirect URI still names port 1455.
+function isolatedOAuth(callbackPort = 0) {
+  let port;
+  const oauth = createImageOAuth({ callbackPort, onCallbackListening: value => { port = value; } });
+  return {
+    oauth,
+    local(url = REDIRECT) {
+      assert.ok(port, "callback listener is bound");
+      const local = new URL(url);
+      local.hostname = "127.0.0.1";
+      local.port = String(port);
+      return local;
+    },
+    get port() { return port; },
+  };
 }
 
 function mockTokenFetch(t, responder = () => Response.json({ access_token: jwt(), refresh_token: REFRESH, expires_in: 3600 })) {
@@ -64,12 +82,15 @@ test("extension registers an auth-only provider and Pi owns credential persisten
   const credentials = new InMemoryCredentialStore();
   await credentials.modify("openai", async () => ({ type: "oauth", access: "test-only-chat-token", refresh: "chat-refresh", expires: Date.now() + 3600000 }));
   const models = createModels({ credentials });
+  const o = isolatedOAuth();
   extension({
     registerProvider(provider) {
       assert.equal(provider.id, IMAGE_AUTH_PROVIDER);
       assert.equal(provider.auth.oauth.isSubscription, true);
       assert.deepEqual(provider.getModels(), []);
-      models.setProvider(provider);
+      assert.equal(provider.auth.oauth, imageOAuth);
+      // Keep the registered provider but log in through a free-port listener.
+      models.setProvider({ ...provider, auth: { ...provider.auth, oauth: { ...provider.auth.oauth, login: o.oauth.login } } });
     },
     registerTool() {},
     registerCommand() {},
@@ -101,41 +122,42 @@ test("extension registers an auth-only provider and Pi owns credential persisten
 
 test("loopback callback rejects wrong state, accepts a valid callback, and closes the port", async t => {
   const h = mockTokenFetch(t);
+  const o = isolatedOAuth();
   const ui = interaction(async (authorize, params) => {
-    const invalid = new URL(callback(authorize));
-    invalid.hostname = "127.0.0.1";
+    const invalid = o.local(callback(authorize));
     invalid.searchParams.set("state", "wrong-state");
     const rejected = await h.original(invalid);
     assert.equal(rejected.status, 400);
     const text = await rejected.text();
     assert.ok(!text.includes(CODE) && !text.includes("wrong-state"));
-    const valid = new URL(callback(authorize));
-    valid.hostname = "127.0.0.1";
+    const valid = o.local(callback(authorize));
     const accepted = await h.original(valid);
     assert.equal(accepted.status, 200);
     await accepted.text();
     return pendingPrompt(authorize, params);
   });
-  const saved = await imageOAuth.login(ui.value);
+  const saved = await o.oauth.login(ui.value);
   assert.equal(saved.access, jwt());
   assert.equal(h.requests.length, 1);
-  await assert.rejects(h.original("http://127.0.0.1:1455/auth/callback"));
+  await assert.rejects(h.original(o.local()));
 });
 
 test("occupied callback port falls back to a state-checked full redirect URL", async t => {
   const server = createServer((_request, response) => response.end("test-only-listener"));
   await new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(1455, "127.0.0.1", resolve);
+    server.listen(0, "127.0.0.1", resolve);
   });
   t.after(() => new Promise(resolve => server.close(resolve)));
+  const o = isolatedOAuth(server.address().port);
   mockTokenFetch(t);
   const ui = interaction(async (authorize, params) => {
     assert.match(params.message, /local callback port is unavailable/);
     assert.match(params.message, /full redirect URL/);
     return callback(authorize);
   });
-  await imageOAuth.login(ui.value);
+  await o.oauth.login(ui.value);
+  assert.equal(o.port, undefined);
   assert.ok(ui.events.some(event => event.type === "info" && /port/.test(event.message)));
   const auth = ui.events.find(event => event.type === "auth_url");
   assert.match(auth.instructions, /local callback port is unavailable/);
@@ -156,9 +178,9 @@ test("callback validation rejects stale, duplicate, denied, oversized, and untru
 
 test("denied loopback authorization ends login without exposing backend error details", async t => {
   const h = mockTokenFetch(t);
+  const o = isolatedOAuth();
   const ui = interaction(async (authorize, params) => {
-    const url = new URL(callback(authorize));
-    url.hostname = "127.0.0.1";
+    const url = o.local(callback(authorize));
     url.searchParams.delete("code");
     url.searchParams.set("error", "test-only-private-error");
     url.searchParams.set("error_description", REFRESH);
@@ -168,27 +190,29 @@ test("denied loopback authorization ends login without exposing backend error de
     assert.ok(!text.includes(REFRESH));
     return pendingPrompt(authorize, params);
   });
-  await assert.rejects(imageOAuth.login(ui.value), error =>
+  await assert.rejects(o.oauth.login(ui.value), error =>
     /authorization was denied/.test(error.message) && !error.message.includes(REFRESH));
   assert.equal(h.requests.length, 0);
 });
 
 test("manual callback errors never reach token exchange", async t => {
   const h = mockTokenFetch(t);
+  const o = isolatedOAuth();
   const ui = interaction(async () => `${REDIRECT}?state=stale&code=${CODE}`);
-  await assert.rejects(imageOAuth.login(ui.value), /Invalid image OAuth callback/);
+  await assert.rejects(o.oauth.login(ui.value), /Invalid image OAuth callback/);
   assert.equal(h.requests.length, 0);
 });
 
 test("login cancellation stops promptly and closes its callback listener", async t => {
   const h = mockTokenFetch(t);
+  const o = isolatedOAuth();
   const ui = interaction(async (authorize, params, controller) => {
     controller.abort();
     return pendingPrompt(authorize, params);
   });
-  await assert.rejects(imageOAuth.login(ui.value), /cancelled/);
+  await assert.rejects(o.oauth.login(ui.value), /cancelled/);
   assert.equal(h.requests.length, 0);
-  await assert.rejects(h.original("http://127.0.0.1:1455/auth/callback"));
+  await assert.rejects(h.original(o.local()));
 });
 
 test("Pi serializes refresh and persists the rotated image credential once", async t => {
@@ -268,14 +292,15 @@ test("login deadline closes the callback and never exchanges a code", async t =>
     return deadline.signal;
   };
   const h = mockTokenFetch(t);
+  const o = isolatedOAuth();
   const ui = interaction(async (authorize, params) => {
     deadline.abort();
     return pendingPrompt(authorize, params);
   });
-  await assert.rejects(imageOAuth.login(ui.value), /timed out/);
+  await assert.rejects(o.oauth.login(ui.value), /timed out/);
   assert.equal(h.requests.length, 0);
   assert.equal(ui.controller.signal.aborted, false);
-  await assert.rejects(h.original("http://127.0.0.1:1455/auth/callback"));
+  await assert.rejects(h.original(o.local()));
 });
 
 test("account routing claim cannot inject headers and does not authenticate a JWT locally", () => {
