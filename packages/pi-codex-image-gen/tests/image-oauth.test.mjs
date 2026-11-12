@@ -82,12 +82,15 @@ test("extension registers an auth-only provider and Pi owns credential persisten
   const credentials = new InMemoryCredentialStore();
   await credentials.modify("openai", async () => ({ type: "oauth", access: "test-only-chat-token", refresh: "chat-refresh", expires: Date.now() + 3600000 }));
   const models = createModels({ credentials });
+  const o = isolatedOAuth();
   extension({
     registerProvider(provider) {
       assert.equal(provider.id, IMAGE_AUTH_PROVIDER);
       assert.equal(provider.auth.oauth.isSubscription, true);
       assert.deepEqual(provider.getModels(), []);
-      models.setProvider(provider);
+      assert.equal(provider.auth.oauth, imageOAuth);
+      // Keep the registered provider but log in through a free-port listener.
+      models.setProvider({ ...provider, auth: { ...provider.auth, oauth: { ...provider.auth.oauth, login: o.oauth.login } } });
     },
     registerTool() {},
     registerCommand() {},
@@ -194,8 +197,9 @@ test("denied loopback authorization ends login without exposing backend error de
 
 test("manual callback errors never reach token exchange", async t => {
   const h = mockTokenFetch(t);
+  const o = isolatedOAuth();
   const ui = interaction(async () => `${REDIRECT}?state=stale&code=${CODE}`);
-  await assert.rejects(imageOAuth.login(ui.value), /Invalid image OAuth callback/);
+  await assert.rejects(o.oauth.login(ui.value), /Invalid image OAuth callback/);
   assert.equal(h.requests.length, 0);
 });
 
