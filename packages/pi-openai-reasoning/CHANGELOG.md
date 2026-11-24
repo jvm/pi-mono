@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-24
+
 ### Changed
 
 - On Pi 1.6 and later, use native Codex effort updates. No request hook is registered and no new reasoning state is written. Stable older hosts retain the legacy adapter.
