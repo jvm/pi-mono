@@ -88,6 +88,7 @@ test("recognizes only allowlisted models on supported OpenAI provider/API pairs"
 // catalog service_tiers, OpenAI Fast documentation). A new catalog model must be
 // classified here or in OPENAI_FAST_MODELS when the development Pi is upgraded.
 const KNOWN_NON_FAST = new Set([
+  "gpt-6-cyber",
   "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.4-pro", "gpt-5.5-pro", "gpt-5.6-cyber",
   "gpt-daybreak-blue-latest", "gpt-daybreak-red-latest",
 ]);
@@ -313,7 +314,7 @@ test("does not enable Fast for unsupported models", async () => {
   assert.equal(await pi.handlers.get("before_provider_request")[0]({ payload: {} }, context), undefined);
 });
 
-for (const id of ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
+for (const id of ["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]) {
   test(`${id} sends the Fast tier through the real Pi provider pipeline`, async (t) => {
     const requests = [];
     t.mock.method(globalThis, "fetch", async (_url, init) => {
@@ -376,7 +377,7 @@ for (const id of ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "g
   });
 }
 
-for (const id of ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.4"]) {
+for (const id of ["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.4"]) {
   test(`${id} sends Fast through OpenAI Responses with OAuth and API-key auth`, async (t) => {
     const requests = [];
     t.mock.method(globalThis, "fetch", async (_url, init) => {

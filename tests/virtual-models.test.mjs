@@ -53,7 +53,18 @@ for (const identity of [{ provider: "fixture-router", modelId: "auto" }, { provi
       h.session.setThinkingLevel("high");
       await h.session.prompt("Second routed request.");
       assert.equal(h.requests.length, 2);
-      for (const body of h.requests) {
+      // The physical Codex serializer can add effort updates even though no
+      // extension is allowed to act on the virtual selection.
+      const control = target === "codex" ? await virtualHarness(t, [], identity) : undefined;
+      if (control) {
+        control.target = target;
+        await control.selectVirtual();
+        await control.session.prompt("First routed request.");
+        control.session.setThinkingLevel("high");
+        await control.session.prompt("Second routed request.");
+        assert.equal(control.requests.length, h.requests.length);
+      }
+      for (const [index, body] of h.requests.entries()) {
         assert.equal(body.model, h.physical(target).id);
         assert.equal(body.service_tier, undefined);
         assert.equal(patch(body), undefined, "no grammar capability inferred from a virtual display name");
@@ -61,9 +72,11 @@ for (const identity of [{ provider: "fixture-router", modelId: "auto" }, { provi
           assert.ok(declarations(body).some((tool) => (tool.name ?? tool.function?.name) === name), "native declarations remain");
         }
         assert.equal(body.context_management, undefined);
-        assert.equal(hasUpdate(body), false);
+        const updates = request => request?.input?.filter(item => item.type === "configuration_update") ?? [];
+        assert.deepEqual(updates(body), updates(control?.requests[index]));
       }
       assert.deepEqual(selectedId(h), [identity.provider, identity.modelId]);
+      assert.ok(!h.sessionManager.getBranch().some(entry => entry.customType === "pi-openai-reasoning:v1"));
       assert.ok(h.hooks.every((model) => model.api === "pi-virtual" && model.id === identity.modelId));
       assert.equal(lastAssistant(h).provider, h.physical(target).provider);
       assert.equal(lastAssistant(h).api, h.physical(target).api);

@@ -1,9 +1,22 @@
 import { createHash } from "node:crypto";
 import type { Model } from "@earendil-works/pi-ai";
-import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { boundedStringify } from "./bounded-json.js";
 
 export const STATE_TYPE = "pi-openai-reasoning:v1";
+
+export function registerLegacyReasoning(pi: ExtensionAPI, hostVersion: string): void {
+  // Native since 1.6. A native request need not contain an update (e.g.
+  // first turn or model opt-out). Never infer ownership from its shape.
+  if (!/^(?:0\.\d+|1\.[0-5])\.\d+$/.test(hostVersion)) return;
+  pi.on("before_provider_request", (event, ctx) => {
+    if (!ctx.model || !supportsReasoningUpdates(ctx.model) || !ctx.modelRegistry.isUsingOAuth(ctx.model)) return;
+    const result = rewriteReasoning(event.payload, ctx.model, ctx.sessionManager.getBranch());
+    if (!result) return;
+    if (result.state) pi.appendEntry(STATE_TYPE, result.state);
+    return result.payload;
+  });
+}
 const MAX_ITEMS = 20_000;
 const MAX_BYTES = 16 * 1024 * 1024;
 const MAX_UPDATES = 128;
@@ -37,7 +50,7 @@ export function supportsReasoningUpdates(model: Model<any> | undefined): boolean
       !["/backend-api", "/backend-api/codex", "/backend-api/codex/responses"]
         .includes(url.pathname.replace(/\/+$/, ""))) return false;
   } catch { return false; }
-  // Pi's Codex transport ignores this documented compat flag, so it serves as
+  // Pre-1.6 Pi's Codex transport ignores this compat flag, so it serves as
   // the user's explicit models.json override: true opts in, false opts out.
   const override = (model.compat as { supportsMidConvoEffort?: unknown } | undefined)?.supportsMidConvoEffort;
   return typeof override === "boolean" ? override : REASONING_UPDATE_MODELS.has(model.id);

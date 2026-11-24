@@ -36,6 +36,8 @@ warnings remain in text.
 Fast requests are enabled for these models on `openai` (`openai-responses`)
 and legacy `openai-codex`:
 
+- `gpt-6.2-sol`
+- `gpt-6.2-astra`
 - `gpt-6.1-sol`
 - `gpt-6.1-terra`
 - `gpt-6-astra`
@@ -50,13 +52,14 @@ and legacy `openai-codex`:
 The support list follows the upstream Codex catalog and OpenAI's API Fast documentation. It may need an update when model support changes. Other models are left untouched. Account, region, and plan restrictions still apply.
 
 Checked against the [OpenAI Codex model catalog](https://github.com/openai/codex/blob/ca466061d64f0b44f416135c7fd06aa7af850bbc/codex-rs/models-manager/models.json).
+Both GPT-6.2 models advertise Fast in the [updated catalog](https://github.com/openai/codex/blob/7ce4437488c69950fe87f1d8ab4b00bdb4bbd193/codex-rs/models-manager/models.json) and the API Fast guide linked below. `gpt-6-cyber` stays disabled: Fast support has not been established.
 GPT-6.1 Sol, GPT-6.1 Terra and all three GPT-6 models advertise `priority` (Fast) processing.
 GPT-6.1 Terra was checked against the Codex catalog at
 [`32234dd`](https://github.com/openai/codex/blob/32234ddac478f362ef12f3bf3c26d1861ea54b4a/codex-rs/models-manager/models.json)
 and the API Fast documentation.
 The upstream Codex client defaults Sol and Luna to that tier; `pi-fast`
 still requires the session toggle or global opt-in.
-Use `/login openai` and select **Sign in with ChatGPT** on Pi 1.5.2.
+Use `/login openai` and select **Sign in with ChatGPT** on Pi 1.6.0.
 Pi 0.99.0 introduced this login on the OpenAI provider; 0.99.1 fixed its
 bundled login and added GPT-6.1 Sol. Both OpenAI API-key and ChatGPT OAuth
 requests use `openai-responses` at `https://api.openai.com/v1/responses`
@@ -75,8 +78,7 @@ remains `https://chatgpt.com/backend-api/codex/responses`.
 | Legacy `openai-codex` | Existing Codex OAuth; same allowlist | `priority`; subscription usage |
 | Other providers/APIs or non-allowlisted models | Any | Payload unchanged; footer shows the crossed-out bolt |
 
-This allowlist covers Fast only. `pi-openai-reasoning` keeps its own model
-list for reasoning updates.
+This allowlist covers Fast only. Pi 1.6 handles Codex reasoning updates independently.
 
 OpenAI's [API Fast documentation](https://developers.openai.com/api/docs/guides/fast-mode)
 uses `fast` as the current spelling and accepts `priority` as an equivalent alias.
@@ -104,7 +106,7 @@ inference. No API key was available for live API-key checks; automated tests
 cover its Pi transport, and the API `fast` parameter follows the official docs.
 
 Virtual-model selections are not eligible for this extension's Fast tier, even
-if their current physical dispatch is an allowlisted OpenAI model. On Pi 1.5.2,
+if their current physical dispatch is an allowlisted OpenAI model. On Pi 1.6.0,
 request hooks still see the virtual selection, not an authenticated physical
 request identity. The extension leaves the tier unchanged rather than guessing
 from the payload or the previous response. Select a supported physical model
@@ -203,9 +205,9 @@ This command uses only synthetic in-memory credentials and mocked HTTP. It
 checks subscription/API-key tier selection, toggles, and authentication switches
 without changing the monorepo's pinned dependencies or making live requests.
 It is separate from `test` for the explicit native-auth smoke test.
-Development and contract tests target Pi 1.5.2, including native OpenAI OAuth.
+Development and contract tests target Pi 1.6.0, including native OpenAI OAuth.
 
-Smoke test (Pi 1.5.2): sign in with ChatGPT on `openai`, then
+Smoke test (Pi 1.6.0): sign in with ChatGPT on `openai`, then
 select `openai/gpt-6.1-sol`, enable `/fast on`, and send a short prompt.
 Check the filled bolt. Repeat with a legacy `openai-codex/gpt-6.1-sol` login,
 and with GPT-6 Astra, Sol, and Luna on both providers.

@@ -587,7 +587,7 @@ for (const field of ["configuration_update", "previous_response_id", "truncation
 for (const mode of ["off", "on", "only"]) {
   test(`automatic requests preserve Pi's effective ${mode} codemode loadout and Fast`, async (t) => {
     const requests = mockResponses(t, [[checkpoint(), text("msg_1", "answer")], [text("msg_2", "next")]]);
-    const h = await harness({ settings: {
+    const h = await harness({ modelId: "gpt-6.2-sol", settings: {
       defaultTools: ["read", "bash", "edit", "write", ...(mode === "off" ? [] : ["codemode"])],
     }, factories: [fast, ...(mode === "off" ? [] : [createCodemodeExtension({ mode })]), codexTools] });
     try {
@@ -596,7 +596,7 @@ for (const mode of ["off", "on", "only"]) {
       await h.session.prompt("new");
       assert.deepEqual(requests[1].tools, requests[0].tools);
       assert.equal(requests[1].service_tier, requests[0].service_tier);
-      assert.ok(requests[1].service_tier);
+      assert.equal(requests[1].service_tier, "fast");
       const wire = JSON.stringify(requests[0].tools);
       if (mode !== "off") assert.match(wire, /codemode/);
       if (mode === "only") assert.equal(requests[0].tools.some((tool) => tool.name === "read"), false);

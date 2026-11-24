@@ -213,7 +213,7 @@ class SkillToggleEditor extends CustomEditor {
   }
 
   render(width: number): string[] {
-    const lines = super.render(width);
+    const lines = [...super.render(width)];
     if (lines.length === 0) return lines;
     lines[0] = renderToggleBorder(width, (text) => this.borderColor(text));
     return lines;
@@ -311,7 +311,7 @@ class SkillToggleEditorWrapper implements EditorComponent, Focusable {
   }
 
   render(width: number): string[] {
-    const lines = this.inner.render(width);
+    const lines = [...this.inner.render(width)];
     if (lines.length === 0) return lines;
     lines[0] = renderToggleBorder(width, this.borderColor ?? ((text) => text));
     return lines;

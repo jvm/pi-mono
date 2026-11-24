@@ -21,7 +21,8 @@ const observe = (pi) => pi.on("before_provider_request", (event) => {
     updates: body.input.filter((i) => i.type === "configuration_update").map((i) => i.reasoning.effort),
     checkpoint: body.input.some((i) => i.type === "compaction"),
     fast: body.service_tier === "priority",
-    grammar: body.tools?.find((t) => t.name === "apply_patch")?.type === "custom",
+    grammar: [...(body.tools ?? []), ...body.input.filter(i => i.type === "additional_tools").flatMap(i => i.tools)]
+      .flatMap(t => t.type === "namespace" ? t.tools : [t]).some(t => t.name === "apply_patch" && t.type === "custom"),
   });
 });
 const h = await codexHarness([reasoning, fast, tools, observe], { modelRuntime });
@@ -59,9 +60,9 @@ try {
   await prompt("This is a short protocol test. Remember the word ORBIT. Reply only OK. Do not use tools.");
   h.session.setThinkingLevel("medium");
   await prompt("Reply only OK. Do not use tools.");
-  assert.equal(requests[0].effort, "low");
-  assert.equal(requests[1].effort, "low");
-  assert.deepEqual(requests[1].updates, ["medium"]);
+  assert.equal(requests[0].updates.at(-1) ?? requests[0].effort, "low");
+  assert.equal(requests[1].effort, requests[0].effort);
+  assert.equal(requests[1].updates.at(-1), "medium");
   await h.session.prompt("/fast on");
   await prompt("Reply only OK. Do not use tools.");
   assert.equal(requests.at(-1).fast, true);
@@ -72,8 +73,8 @@ try {
   await prompt("What word did I ask you to remember? Reply with that word only. Do not use tools.");
   assert.ok(h.session.messages.at(-1).content.some((c) => c.type === "text" && c.text.includes("ORBIT")));
   assert.equal(requests.at(-1).checkpoint, false);
-  assert.deepEqual(requests.at(-1).updates, ["medium"]);
-  assert.equal(requests.at(-1).effort, "medium");
+  assert.equal(requests.at(-1).updates.at(-1) ?? requests.at(-1).effort, "medium");
+  assert.ok(!h.sessionManager.getBranch().some(e => e.customType === "pi-openai-reasoning:v1"));
   assert.deepEqual(h.errors, []);
   console.log(JSON.stringify({
     passed: true, model: h.session.model.id, requests,
