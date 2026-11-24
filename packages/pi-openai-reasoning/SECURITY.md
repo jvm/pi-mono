@@ -7,7 +7,10 @@ Report suspected vulnerabilities privately through
 ## Security model
 
 Pi extensions run with the user's permissions. Install only trusted packages.
-This extension transforms in-memory Codex request bodies through documented Pi
+On Pi 1.6 and later the extension registers no request hook, inspects no
+provider payload and writes no session entries. Old entries are not migrated.
+
+On older stable Pi hosts the extension transforms in-memory Codex request bodies through documented Pi
 hooks. It never reads credentials, adds auth headers, registers a provider or
 sends its own inference requests. Pi owns OAuth storage, refresh and transport.
 Only the official Codex HTTPS origin and known endpoint paths are supported.

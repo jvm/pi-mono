@@ -8,7 +8,7 @@ import test from "node:test";
 import { listWorkspacePackages } from "../scripts/workspace-packages.mjs";
 
 const root = new URL("../", import.meta.url);
-const version = "1.5.2";
+const version = "1.6.0";
 const peers = [
   "@earendil-works/pi-coding-agent",
   "@earendil-works/pi-ai",
@@ -62,12 +62,12 @@ test("the baseline check skips a leftover package directory without package.json
 });
 
 test("isolated host runner rejects old and floating targets before installation", () => {
-  for (const unsupported of ["1.1.0", "1.4.0", "latest"]) {
+  for (const unsupported of ["1.1.0", "1.4.0", "1.5.2", "latest"]) {
     const result = spawnSync(process.execPath, [
       fileURLToPath(new URL("scripts/test-pi-compat.mjs", root)), unsupported,
     ], { encoding: "utf8", timeout: 10_000 });
     assert.ifError(result.error);
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /Expected Pi 1\.5\.2/);
+    assert.ok(result.stderr.includes(`Expected Pi ${version}`));
   }
 });

@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Fixed
+
+- Render skill-toggle borders on Pi 1.6 without modifying the previous editor's cached lines.
+
 ## [0.5.2] - 2026-11-12
 
 ### Fixed

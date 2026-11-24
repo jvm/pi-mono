@@ -307,7 +307,8 @@ test("wrapper preserves indicator lines, paste, padding, invalidation and dispos
   await writeGlobal({ toggleSlots: { 1: "one" } });
   const inner = createEditor({ focusable: true, customHooks: true });
   const calls = [];
-  inner.render = width => ["─".repeat(width), "⠋ working", "compacting", "retrying", CURSOR_MARKER];
+  const frame = Object.freeze(["─".repeat(40), "⠋ working", "compacting", "retrying", CURSOR_MARKER]);
+  inner.render = () => frame;
   for (const name of ["insertTextAtCursor", "setPaddingX", "invalidate", "dispose"]) {
     inner[name] = (...args) => calls.push([name, ...args]);
   }
@@ -315,7 +316,11 @@ test("wrapper preserves indicator lines, paste, padding, invalidation and dispos
   const ctx = await start(harness, home, false);
   const editor = harness.createInstalledEditor();
   try {
-    assert.deepEqual(editor.render(40).slice(1), inner.render(40).slice(1));
+    for (let i = 0; i < 2; i++) {
+      const lines = editor.render(40);
+      assert.notEqual(lines[0], frame[0]);
+      assert.deepEqual(lines.slice(1), frame.slice(1));
+    }
     const paste = () => {};
     editor.onPasteImage = paste;
     assert.equal(inner.onPasteImage, paste);

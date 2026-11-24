@@ -14,7 +14,7 @@ and continue inference without Pi stopping for a separate summary request.
 
 ### Codemode and current-host compatibility
 
-Compatibility tests target Pi 1.5.2 only in an isolated installation,
+Compatibility tests target Pi 1.6.0 only in an isolated installation,
 including zero-inline-budget discovery, deferred activation, reload and
 checkpoint replay. Consumed structured intermediates do not enter conversation
 history unless the script prints them. Hidden/model-only tools stay outside
@@ -57,7 +57,7 @@ updates retain their original positions and preserve cached prefixes. Each
 compaction starts a fresh base from Pi's current tool state. There is no
 tool-strategy setting or opt-in.
 
-Targets **Pi 1.5.2**. The package name is unchanged, but the legacy
+Targets **Pi 1.6.0**. The package name is unchanged, but the legacy
 `openai-codex` provider is no longer supported.
 
 ## Installation
@@ -180,7 +180,7 @@ RemoteCompactionV2 protocol.
 | Legacy `openai-codex`, custom endpoints, other providers, routed model mismatch | Left unchanged; no compaction or auth hooks for those routes |
 
 Virtual-model selections are also ineligible, including when their physical
-dispatch returns to the same public OpenAI model. Pi 1.5.2 request hooks expose
+dispatch returns to the same public OpenAI model. Pi 1.6.0 request hooks expose
 the selected virtual model, not a complete physical request/auth identity.
 Existing checkpoints use their bounded readable fallback rather than opaque
 replay. Pi's ordinary routed context-limit checks and standard compaction remain
@@ -256,8 +256,8 @@ fallback remains available. Use compatible package versions together.
 `pi-fast` and `pi-codex-tools` still support their own legacy-provider use cases;
 this change removes only their obsolete direct-compaction adapters.
 
-`pi-openai-reasoning` remains a legacy-provider-only extension. This package
-does not migrate it or enable its reasoning-update feature on the public route.
+Pi 1.6 owns native Codex reasoning updates. `pi-openai-reasoning` only rewrites
+requests on older hosts and never on the public route.
 See **Reasoning effort with compaction** above for Pi's own effort updates
 together with automatic compaction.
 
@@ -304,7 +304,7 @@ namespaced calls, calls before and after checkpoints, tool removal/redefinition,
 mode-off, reload, branches, codemode-hidden tools, multiple compaction epochs,
 cache-prefix stability, user-fact recall and Pi's threshold safety net.
 Host suites are skipped by ordinary `npm test` unless the host entry is supplied.
-The pinned development baseline and isolated host checks both use Pi 1.5.2.
+The pinned development baseline and isolated host checks both use Pi 1.6.0.
 Run `npm run test:host` from the repository root to include these additional
 host suites and the native inline serializer contracts.
 

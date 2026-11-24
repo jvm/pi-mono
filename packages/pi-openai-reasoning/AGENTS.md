@@ -4,6 +4,9 @@ Root `AGENTS.md` applies.
 
 ## Invariants
 
+- Pi 1.6+ owns effort updates; never register the legacy request hook there,
+  even when the current payload has no update items. The rules below apply to
+  the older-host adapter.
 - Enable only Codex OAuth model/mode pairs verified against the live backend or
   marked `supports_reasoning_effort_updates` in the upstream Codex catalog. An
   explicit model `compat.supportsMidConvoEffort` boolean overrides this list.

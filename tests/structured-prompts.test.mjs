@@ -281,7 +281,7 @@ for (const placement of ["before", "after"]) {
       for (let turn = 0; turn < 2; turn++) {
         const request = await h.prompt();
         assert.equal(requestText(request), "Exact fixture policy.");
-        assert.equal(requestSystems(request).length, 0);
+        assert.deepEqual(requestSystems(request).map(item => item.role), ["developer"]);
       }
     });
   }

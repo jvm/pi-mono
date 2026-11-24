@@ -4,7 +4,7 @@ Investigation: [#170](https://github.com/jvm/pi-mono/issues/170), against Pi 1.1
 and the package implementations at `dd81418`.
 
 > **Historical record:** the investigation and measurements below used Pi 1.1.0.
-> The active development and contract-test target is now Pi 1.5.2 only.
+> The active development and contract-test target is now Pi 1.6.0 only.
 > On that host, the integration suite verifies that same-model continuations
 > retain signed thinking, while a cross-provider request omits the entire prior
 > thinking block, including readable text. The local session history retains
@@ -40,7 +40,7 @@ not a supported user-facing example or a production implementation.
 | `pi-fast` | Existing allowlist and per-request auth choose `fast` for public API keys or `priority` for subscription access | No extension-added tier | No extension-added tier, even after enabling Fast on a supported physical selection |
 | `pi-codex-tools` | Responses API **and** advertised grammar capability activate model-only `apply_patch`; selected native file declarations are hidden, not replaced | `apply_patch` unavailable; native tools remain | Same conservative unavailability; supported physical dispatch does not activate the extension |
 | `pi-codex-compaction` | Official public OpenAI Responses requests may opt into automatic compaction; checkpoint identity binds model/endpoint/auth mode/credential/relevant headers | No automatic opt-in or opaque replay | No automatic opt-in or opaque replay, even back to the same public model; an existing checkpoint supplies only its bounded readable fallback |
-| `pi-openai-reasoning` | Verified legacy Codex Astra protocol only | Ordinary Pi thinking behavior | No extension-added `configuration_update`; the router's physical thinking level remains Pi-owned |
+| `pi-openai-reasoning` | No hook on Pi 1.6 | Ordinary Pi thinking behavior | The underlying Codex serializer may emit native updates; these match an extension-free route |
 | `pi-goal` | Counts persisted assistant/tool/summary/usage entries | Same accounting | Physical assistant usage and persisted parent-tool classifier usage count once; unrecorded raw router classifier results cannot be counted |
 
 This matrix concerns these extensions, not an arbitrary trusted extension's

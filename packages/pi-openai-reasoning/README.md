@@ -1,15 +1,18 @@
 # pi-openai-reasoning
 
-Change reasoning effort in long Codex conversations without changing the original
-request effort and needlessly invalidating its cached prefix.
+**Pi 1.6 and later do not need this extension.** Use Pi's thinking selector or
+SDK `setThinkingLevel`; Pi's Codex provider now owns effort updates. Leaving this
+package installed registers no request hook, changes no payload and writes no new
+effort entries. Existing `pi-openai-reasoning:v1` entries are left untouched.
+You do not need to migrate sessions or change providers.
 
-- Uses Pi's existing thinking controls. No new command or provider.
-- Keeps effort updates at stable positions across retries, resume, forks and trees.
-- Works alone, or with `pi-fast` and `pi-codex-tools`.
+Pi's model catalog and `compat.supportsMidConvoEffort` determine native support.
+The old adapter's allowlist and wire format described below do not apply.
 
-## Installation
+## Legacy adapter (stable Pi before 1.6)
 
-Requires Pi 1.5.2 and an existing Pi `openai-codex` OAuth login.
+If you still use Pi 1.5.2 with an existing `openai-codex` OAuth login, the
+package retains its previous behavior. Development and host tests target 1.6.0.
 
 ```bash
 pi install npm:pi-openai-reasoning
@@ -25,7 +28,7 @@ Installing the package enables this behavior for supported requests. It does not
 change your selected effort. Use Pi's thinking selector or SDK `setThinkingLevel`.
 There is no public OpenAI API support in this first version and no API-key fallback.
 
-## Support and limits
+### Legacy support and limits
 
 | Provider / API | Authentication and model | Behavior / fallback |
 | --- | --- | --- |
@@ -119,8 +122,7 @@ Uninstalling the package leaves normal Pi messages and thinking settings intact.
 
 ### Provider migration assessment
 
-The following decisions describe the current source and checked provider
-documentation, not new transport support:
+The following assessment describes the legacy adapter, not Pi 1.6's native transport:
 
 | Capability | Decision and evidence |
 | --- | --- |
@@ -172,7 +174,7 @@ upstream catalog but not yet live-verified.
 
 In the TUI, use the existing thinking selector for low/high, send a short prompt
 after each change, then `/compact` and continue. The selector should still show
-the effective effort. Print, JSON and RPC requests use the same hooks without UI.
+the effective effort. Pi 1.6 uses its native transport in all modes.
 
 Telemetry is best-effort, once per version, with a five-second timeout.
 Disable it with `PI_OFFLINE=1`, `PI_TELEMETRY=0`, or `enableInstallTelemetry: false`.

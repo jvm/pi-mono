@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { prepareHostWorkspace } from "./workspace-packages.mjs";
 
-const version = "1.5.2";
+const version = "1.6.0";
 if (process.argv.length > 3 || (process.argv[2] && process.argv[2] !== version)) {
   throw new Error(`Expected Pi ${version}; older hosts and floating versions are not test targets.`);
 }

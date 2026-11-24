@@ -23,7 +23,7 @@ Each package installs independently. Pick the capability you need, then follow i
 | Watch the active subscription's limits | [pi-subs-usage](./packages/pi-subs-usage) | Provider-aware quota bars, reset times, and credit usage using Pi's credentials. |
 | Give grammar-capable Codex models their native patch tool | [pi-codex-tools](./packages/pi-codex-tools) | Raw `apply_patch` grammar tooling with Pi-style filesystem access and model-aware activation. |
 | Keep long OpenAI sessions flowing | [pi-codex-compaction](./packages/pi-codex-compaction) | Default-on server compaction with cache-preserving inline tool updates on public OpenAI Responses. |
-| Change legacy Codex Astra thinking effort without rewriting the prefix | [pi-openai-reasoning](./packages/pi-openai-reasoning) | Branch-aware reasoning updates for verified legacy Astra requests; inactive on public OpenAI. |
+| Keep Codex effort updates on older hosts | [pi-openai-reasoning](./packages/pi-openai-reasoning) | Compatibility adapter. Pi 1.6 and later handle effort updates natively; no extension is needed. |
 
 ### Research and create
 
@@ -49,7 +49,7 @@ Each package installs independently. Pick the capability you need, then follow i
 
 This repo uses npm workspaces. Run commands from the repository root unless package-specific docs say otherwise.
 
-Use Node.js >=22.19.0. Pi 1.5.2 is the only development and contract-test target
+Use Node.js >=22.19.0. Pi 1.6.0 is the only development and contract-test target
 across all workspaces; Pi remains a host-supplied peer dependency. Older hosts
 are no longer in the test matrix. CI validates the minimum Node version and
 Node 24.
@@ -64,7 +64,7 @@ npm run test:host
 ```
 
 Package-specific validation and Pi smoke-test instructions live in each package's README and AGENTS.md.
-`test:host` verifies the pinned Pi 1.5.2 host in a disposable installation.
+`test:host` verifies the pinned Pi 1.6.0 host in a disposable installation.
 Run it after root validation, not concurrently: image OAuth fixtures share a
 loopback callback port.
 

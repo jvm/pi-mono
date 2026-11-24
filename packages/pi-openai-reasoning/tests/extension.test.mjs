@@ -10,7 +10,7 @@ import { codexHarness, requestBody, testToken, textResponse } from "../../../tes
 process.env.CI = "1";
 process.env.PI_OFFLINE = "1";
 const { default: reasoning } = await import("../extensions/index.ts");
-const { STATE_TYPE, rewriteReasoning, supportsReasoningUpdates } = await import("../src/reasoning.ts");
+const { STATE_TYPE, registerLegacyReasoning, rewriteReasoning, supportsReasoningUpdates } = await import("../src/reasoning.ts");
 const { default: compaction } = await import("../../pi-codex-compaction/extensions/index.ts");
 const { default: fast } = await import("../../pi-fast/extensions/index.ts");
 const { default: tools } = await import("../../pi-codex-tools/extensions/index.ts");
@@ -26,6 +26,15 @@ const body = (input, effort = "low") => ({
 });
 const stateEntry = (state) => ({ type: "custom", customType: STATE_TYPE, data: state });
 const updates = (payload) => payload.input.filter((item) => item.type === "configuration_update");
+const effectiveEffort = payload => updates(payload).at(-1)?.reasoning.effort ?? payload.reasoning.effort;
+
+test("native hosts do not register a request hook, even for a first request without updates", () => {
+  const pi = { on() { assert.fail("native host must own all effort updates"); } };
+  reasoning(pi); // Check the actual entry point and installed host VERSION.
+  for (const version of ["1.6.0", "1.6.1", "1.10.0", "2.0.0", "unknown"]) {
+    registerLegacyReasoning(pi, version);
+  }
+});
 
 test("real Pi thinking controls pin effort and replay changes in a standalone install", async (t) => {
   const requests = [];
@@ -39,8 +48,8 @@ test("real Pi thinking controls pin effort and replay changes in a standalone in
       h.session.setThinkingLevel(level);
       await h.session.prompt(`Reply OK at ${level}.`);
       assert.equal(h.session.messages.at(-1).stopReason, "stop");
-      assert.equal(requests.at(-1).reasoning.effort, "low");
-      assert.equal(updates(requests.at(-1)).at(-1)?.reasoning.effort ?? "low", level);
+      assert.equal(requests.at(-1).reasoning.effort, requests[0].reasoning.effort);
+      assert.equal(effectiveEffort(requests.at(-1)), level);
       assert.equal(h.session.thinkingLevel, level);
     }
     for (let n = 1; n < requests.length; n++) {
@@ -49,11 +58,9 @@ test("real Pi thinking controls pin effort and replay changes in a standalone in
         requests[n - 1].input,
         "a later request must not move existing updates or history",
       );
-      assert.equal(requests[n].input.at(-2).type, "configuration_update");
     }
     const state = h.sessionManager.getBranch().filter((entry) => entry.customType === STATE_TYPE);
-    assert.equal(state.length, 6);
-    assert.equal(JSON.stringify(state).includes("Reply OK"), false);
+    assert.equal(state.length, 0);
     assert.deepEqual(h.errors, []);
   } finally { await h.close(); }
 });
@@ -92,8 +99,8 @@ test("actual provider retries resend the same update without another state entry
     assert.equal(h.session.messages.at(-1).stopReason, "stop");
     assert.equal(requests.length, 3);
     assert.deepEqual(requests[1], requests[2]);
-    assert.deepEqual(updates(requests[2]).map((u) => u.reasoning.effort), ["high"]);
-    assert.equal(h.sessionManager.getBranch().filter((e) => e.customType === STATE_TYPE).length, 2);
+    assert.equal(effectiveEffort(requests[2]), "high");
+    assert.equal(h.sessionManager.getBranch().filter((e) => e.customType === STATE_TYPE).length, 0);
   } finally { await h.close(); }
 });
 
@@ -120,9 +127,9 @@ test("real Pi request hooks reject an oversized user item before full traversal"
     if (!oversized) return;
     checked++;
     assert.equal(event.payload, injected, "unsupported history must retain ordinary Pi effort handling");
-    assert.equal(event.payload.reasoning.effort, "high");
+    assert.equal(event.payload.reasoning.effort, original.reasoning.effort);
     assert.equal(laterReads, 0);
-    assert.equal(ctx.sessionManager.getBranch().filter((entry) => entry.customType === STATE_TYPE).length, 1);
+    assert.equal(ctx.sessionManager.getBranch().filter((entry) => entry.customType === STATE_TYPE).length, 0);
     // Do not serialize or send the oversized fixture through the mock transport.
     return original;
   });
@@ -173,8 +180,8 @@ test("resume, fork and branch traversal use only surviving Pi entries", async (t
     h.session.agent.state.messages = h.sessionManager.buildSessionContext().messages;
     h.session.setThinkingLevel("medium");
     await h.session.prompt("branch");
-    assert.deepEqual(updates(requests.at(-1)).map((u) => u.reasoning.effort), ["medium"]);
-    assert.equal(requests.at(-1).reasoning.effort, "low");
+    assert.equal(effectiveEffort(requests.at(-1)), "medium");
+    assert.ok(!updates(requests.at(-1)).some(u => u.reasoning.effort === "high"));
   } finally { await h.close(); }
   // Same Pi session format used by resume/import/fork. No runtime state is shared.
   const restored = SessionManager.inMemory("/tmp", { id: "restored-fixture" }, entries);
@@ -182,8 +189,8 @@ test("resume, fork and branch traversal use only surviving Pi entries", async (t
   try {
     resumed.session.setThinkingLevel("max");
     await resumed.session.prompt("resumed");
-    assert.equal(requests.at(-1).reasoning.effort, "low");
-    assert.deepEqual(updates(requests.at(-1)).map((u) => u.reasoning.effort), ["high", "max"]);
+    assert.equal(effectiveEffort(requests.at(-1)), "max");
+    assert.ok(updates(requests.at(-1)).some(u => u.reasoning.effort === "high"));
     assert.deepEqual(resumed.errors, []);
   } finally { await resumed.close(); }
 });
@@ -210,16 +217,16 @@ for (const factories of [[reasoning, compaction, fast, tools], [tools, fast, com
       assert.equal(requests.some((r) => r.context_management || r.input.some((i) => i.type === "compaction_trigger")), false);
       assert.deepEqual(h.sessionManager.getBranch().filter((e) => e.customType === STATE_TYPE), before);
       await h.session.prompt("after checkpoint");
-      assert.equal(requests.at(-1).reasoning.effort, "max");
+      assert.equal(effectiveEffort(requests.at(-1)), "max");
       assert.notEqual(requests.at(-1).input[0].type, "compaction");
       const input = requests.at(-1).input;
       const summaryIndex = input.findIndex(item => item.role === "user" && item.content?.some(block =>
         block.type === "input_text" && block.text.startsWith("The conversation history before this point was compacted")));
       assert.ok(summaryIndex >= 0, "Pi's summary must be retained after its inline declarations");
-      assert.deepEqual(input[summaryIndex + 1], { type: "configuration_update", reasoning: { effort: "max" } });
       h.session.setThinkingLevel("low");
       await h.session.prompt("after checkpoint change");
-      assert.deepEqual(updates(requests.at(-1)).map((u) => u.reasoning.effort), ["max", "low"]);
+      assert.equal(effectiveEffort(requests.at(-1)), "low");
+      assert.deepEqual(h.sessionManager.getBranch().filter(e => e.customType === STATE_TYPE), []);
       assert.deepEqual(h.errors, []);
     } finally { await h.close(); }
   });
@@ -251,10 +258,10 @@ test("unsupported models, endpoints, modes and malformed payloads remain untouch
   ]) assert.equal(rewriteReasoning(payload, model, []), undefined);
 
   const handlers = new Map();
-  reasoning({
+  registerLegacyReasoning({
     on: (name, handler) => handlers.set(name, handler), events: { on() {} },
     appendEntry() { assert.fail("must not persist with API-key authentication"); },
-  });
+  }, "1.5.2");
   assert.equal(handlers.get("before_provider_request")({ payload: body([user("test")]) }, {
     model, modelRegistry: { isUsingOAuth: () => false },
   }), undefined);
@@ -355,24 +362,29 @@ test("real compaction failure and cancellation leave saved effort metadata intac
 const codexModel = (h, id, overrides = {}) =>
   ({ ...(h.modelRuntime.getModel("openai-codex", id) ?? { ...h.model, id }), ...overrides });
 
-for (const id of ["gpt-6.1-sol", "gpt-6.1-terra"]) {
-  test(`real Pi pins effort and sends updates on ${id}`, async (t) => {
+for (const id of ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6.2-sol", "gpt-6.2-astra"]) {
+  test(`installed extension preserves stock Codex effort history on ${id}`, async (t) => {
     const requests = [];
     t.mock.method(globalThis, "fetch", async (_url, init) => {
       requests.push(requestBody(init)); return textResponse();
     });
-    const h = await codexHarness([reasoning]);
-    try {
-      await h.session.setModel(codexModel(h, id));
-      for (const level of ["low", "high", "max"]) {
-        h.session.setThinkingLevel(level);
-        await h.session.prompt(`Reply OK at ${level}.`);
-        assert.equal(requests.at(-1).model, id);
-        assert.equal(requests.at(-1).reasoning.effort, "low");
-      }
-      assert.deepEqual(updates(requests.at(-1)).map((u) => u.reasoning.effort), ["high", "max"]);
-      assert.deepEqual(h.errors, []);
-    } finally { await h.close(); }
+    async function probe(factories) {
+      requests.length = 0;
+      const h = await codexHarness(factories);
+      try {
+        await h.session.setModel(codexModel(h, id));
+        for (const level of ["low", "high", "max"]) {
+          h.session.setThinkingLevel(level);
+          await h.session.prompt(`Reply OK at ${level}.`);
+          assert.equal(requests.at(-1).model, id);
+          assert.equal(effectiveEffort(requests.at(-1)), level);
+        }
+        assert.deepEqual(h.sessionManager.getBranch().filter(e => e.customType === STATE_TYPE), []);
+        assert.deepEqual(h.errors, []);
+        return requests.map(r => ({ reasoning: r.reasoning, updates: updates(r) }));
+      } finally { await h.close(); }
+    }
+    assert.deepEqual(await probe([reasoning]), await probe([]));
   });
 }
 
@@ -402,14 +414,14 @@ test("models.json compat.supportsMidConvoEffort opts Codex models in or out", as
       h.session.setThinkingLevel("high");
       await h.session.prompt(`second ${id}`);
       assert.equal(requests.at(-1).model, id);
-      assert.equal(requests.at(-1).reasoning.effort, expected.length ? "low" : "high");
-      assert.deepEqual(updates(requests.at(-1)).map((u) => u.reasoning.effort), expected);
+      assert.equal(effectiveEffort(requests.at(-1)), "high");
+      assert.equal(updates(requests.at(-1)).length > 0, expected.length > 0);
     }
     assert.deepEqual(h.errors, []);
   } finally { await h.close(); }
 });
 
-test("thinking off sends Pi's request-level none, then updates resume", async (t) => {
+test("thinking off uses Pi's effective none where supported, then updates resume", async (t) => {
   const requests = [];
   t.mock.method(globalThis, "fetch", async (_url, init) => {
     requests.push(requestBody(init)); return textResponse();
@@ -421,12 +433,10 @@ test("thinking off sends Pi's request-level none, then updates resume", async (t
     await h.session.prompt("first");
     h.session.setThinkingLevel("off");
     await h.session.prompt("off");
-    assert.equal(requests.at(-1).reasoning.effort, "none");
-    assert.deepEqual(updates(requests.at(-1)), []);
+    assert.equal(effectiveEffort(requests.at(-1)), "none");
     h.session.setThinkingLevel("high");
     await h.session.prompt("back");
-    assert.equal(requests.at(-1).reasoning.effort, "low");
-    assert.deepEqual(updates(requests.at(-1)).map((u) => u.reasoning.effort), ["high"]);
+    assert.equal(effectiveEffort(requests.at(-1)), "high");
     assert.equal(JSON.stringify(h.sessionManager.getBranch().filter((e) => e.customType === STATE_TYPE))
       .includes('"none"'), false);
     assert.deepEqual(h.errors, []);
@@ -438,10 +448,13 @@ test("an existing configuration update from Pi or another extension is never dup
   t.mock.method(globalThis, "fetch", async (_url, init) => {
     requests.push(requestBody(init)); return textResponse();
   });
+  let injectedInput;
   let inject = false;
   const native = (pi) => pi.on("before_provider_request", (event) => {
-    if (inject) return { ...event.payload, input: [...event.payload.input,
-      { type: "configuration_update", reasoning: { effort: event.payload.reasoning.effort } }] };
+    if (inject) {
+      injectedInput = [...event.payload.input, { type: "configuration_update", reasoning: { effort: "max" } }];
+      return { ...event.payload, input: injectedInput };
+    }
   });
   const h = await codexHarness([native, reasoning]);
   try {
@@ -449,8 +462,7 @@ test("an existing configuration update from Pi or another extension is never dup
     inject = true;
     h.session.setThinkingLevel("high");
     await h.session.prompt("second");
-    assert.deepEqual(updates(requests.at(-1)).map((u) => u.reasoning.effort), ["high"]);
-    assert.equal(requests.at(-1).reasoning.effort, "high");
+    assert.deepEqual(updates(requests.at(-1)), injectedInput.filter(item => item.type === "configuration_update"));
   } finally { await h.close(); }
 });
 
@@ -466,7 +478,7 @@ test("model switches do not apply Astra updates to unsupported models", async (t
     await h.session.prompt("second");
     const otherModel = h.modelRuntime.getModel("openai-codex", "gpt-6-sol");
     assert.ok(otherModel, "The pinned Pi catalog must include the unsupported reasoning-update control");
-    await h.session.setModel(otherModel);
+    await h.session.setModel({ ...otherModel, compat: { ...otherModel.compat, supportsMidConvoEffort: false } });
     await h.session.prompt("other model");
     assert.equal(requests.at(-1).reasoning.effort, "high");
     assert.deepEqual(updates(requests.at(-1)), []);

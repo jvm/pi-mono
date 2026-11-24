@@ -6,6 +6,10 @@ This project follows the spirit of [Keep a Changelog](https://keepachangelog.com
 
 ## [Unreleased]
 
+### Added
+
+- Support opt-in Fast on GPT-6.2 Sol and Astra for OpenAI API keys and ChatGPT subscriptions.
+
 ## [0.4.2] - 2026-11-12
 
 ### Fixed
